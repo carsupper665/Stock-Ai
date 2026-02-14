@@ -8,8 +8,7 @@ import (
 
 var (
 	LogPath       = flag.String("log-dir", "./logs", "specify the log directory")
-	SQLitePath    = "DB.db?_busy_timeout=5000" // Sql Lite File Path
-	DCWebHookUrl  string                       // Web Hook Url, Send Message to Discord Chat
+	DCWebHookUrl  string // Web Hook Url, Send Message to Discord Chat
 	SessionSecret string
 	FrontEndUrl   string
 )

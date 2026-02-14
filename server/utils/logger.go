@@ -31,7 +31,6 @@ func NewSysLogger(logName string, max int) (logger *SysLogger, err error) {
 		}
 
 		sysLogInitWorking.Store(true)
-
 		defer func() {
 			sysLogLock.Unlock()
 			sysLogInitWorking.Store(false)
@@ -41,6 +40,7 @@ func NewSysLogger(logName string, max int) (logger *SysLogger, err error) {
 		}
 		path := filepath.Join(*LogPath, fmt.Sprintf("%s-log-%s.log", logName, time.Now().Format("20060102150405")))
 		fd, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
 		if err != nil {
 			log.Fatal("failed to open log file")
 			return nil, err
@@ -66,8 +66,8 @@ func NewGinServerLogger(logName string, max int) {
 			log.Print("setup log is already working")
 			return
 		}
-		isGinLogInitWorking.Store(true)
 
+		isGinLogInitWorking.Store(true)
 		defer func() {
 			ginLogLock.Unlock()
 			isGinLogInitWorking.Store(false)
@@ -77,6 +77,7 @@ func NewGinServerLogger(logName string, max int) {
 		}
 		path := filepath.Join(*LogPath, fmt.Sprintf("%s-log-%s.log", logName, time.Now().Format("20060102150405")))
 		fd, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
 		if err != nil {
 			log.Fatal("failed to open log file")
 		}

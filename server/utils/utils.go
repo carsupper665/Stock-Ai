@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func SendErrorToDc(msg string) error {
@@ -144,4 +146,10 @@ func copyFile(src, dst string) error {
 		err = os.Chmod(dst, info.Mode())
 	}
 	return err
+}
+
+func P2H(password string) (string, error) {
+	passwordBytes := []byte(password)
+	hashedPassword, err := bcrypt.GenerateFromPassword(passwordBytes, bcrypt.DefaultCost)
+	return string(hashedPassword), err
 }

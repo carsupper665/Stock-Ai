@@ -13,6 +13,18 @@ func InitLogger(logName string, maxLog int) error {
 	return nil
 }
 
+var (
+	DebugMode     bool
+	RootUser      string
+	RootUserEmail string
+	RootPassword  string
+)
+
+var (
+	PostgreDSN string
+	SQLitePath = "DB.db?_busy_timeout=5000" // Sql Lite File Path
+)
+
 func LoadEnv() error {
 	if err := godotenv.Load(".env"); err != nil {
 		return err
@@ -26,6 +38,9 @@ func LoadEnv() error {
 		SessionSecret = "123456789"
 	}
 	FrontEndUrl = GetEnvString("FRONTEND_BASE_URL", "http://localhost:3000")
+	PostgreDSN = GetEnvString("POSTGRES_DSN", "")
+	RootUser = GetEnvString("ROOT_USER", "")
+	RootPassword = GetEnvString("ROOT_PASSWORD", "123")
 
 	return nil
 }

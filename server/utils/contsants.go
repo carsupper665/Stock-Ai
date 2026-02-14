@@ -9,9 +9,7 @@ const (
 	RequestIdKey = "X-Req-Id"
 )
 
-var (
-	DebugMode bool
-)
+const RoleRootUser = 6
 
 // 嘿嘿 我喜歡色彩斑斕的終端:D
 const (
