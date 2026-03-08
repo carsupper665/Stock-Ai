@@ -40,6 +40,7 @@ func LoadEnv() error {
 	FrontEndUrl = GetEnvString("FRONTEND_BASE_URL", "http://localhost:3000")
 	PostgreDSN = GetEnvString("POSTGRES_DSN", "")
 	RootUser = GetEnvString("ROOT_USER", "")
+	RootUserEmail = GetEnvString("ROOT_USER_EMAIL", "")
 	RootPassword = GetEnvString("ROOT_PASSWORD", "123")
 
 	return nil

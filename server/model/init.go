@@ -5,8 +5,8 @@ import (
 	"server/utils"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormLogger "gorm.io/gorm/logger"
 )
@@ -29,7 +29,7 @@ func InitDb() error {
 	}
 
 	if utils.RootUser == "" || utils.RootUserEmail == "" {
-		logger.Info("Root user data not set\n if you want create root user please set ROOT_USER_NAME and ROOT_EMAIL_NAME in .env")
+		logger.Info("Root user data not set\nif you want create root user please set ROOT_USER and ROOT_USER_EMAIL in .env")
 	} else if RootUserExists() {
 		logger.Info("Root User Exists, skip create root user")
 	} else {
@@ -55,9 +55,10 @@ func Factory() (*gorm.DB, error) {
 
 	return db, nil
 }
+
 func initSqliteDB() (*gorm.DB, error) {
 	return gorm.Open(sqlite.Open(utils.SQLitePath), &gorm.Config{
-		PrepareStmt: true, // precompile SQL
+		PrepareStmt: true,
 	})
 }
 
@@ -82,14 +83,30 @@ func initPostgreSQLDB(dsn string, isLog bool) (*gorm.DB, error) {
 	return db, nil
 }
 
-func migrateDB() error {
-	err := DB.AutoMigrate(
+func managedModels() []any {
+	return []any{
 		&store.Account{},
 		&store.User{},
 		&store.LLMUser{},
-	)
-	return err
+		&store.RunSession{},
+		&store.MarketScenario{},
+		&store.SymbolConfig{},
+		&store.Bar{},
+		&store.Wallet{},
+		&store.LedgerEntry{},
+		&store.Order{},
+		&store.Fill{},
+	}
 }
+
+func Migrate(db *gorm.DB) error {
+	return db.AutoMigrate(managedModels()...)
+}
+
+func migrateDB() error {
+	return Migrate(DB)
+}
+
 func createRoot() error {
 	username := utils.RootUser
 	email := utils.RootUserEmail
@@ -102,7 +119,6 @@ func createRoot() error {
 		return err
 	}
 
-	// create user
 	rootUser := store.User{
 		Username:    username,
 		DisplayName: "Root User",

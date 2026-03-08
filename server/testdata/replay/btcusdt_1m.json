@@ -1,0 +1,31 @@
+{
+  "scenario_id": "btc-usdt-1m-sample",
+  "symbol": "btcusdt",
+  "interval": "1m",
+  "bars": [
+    {
+      "time": "2025-01-01T00:00:00Z",
+      "open": 100.0,
+      "high": 102.0,
+      "low": 99.5,
+      "close": 101.5,
+      "volume": 12.25
+    },
+    {
+      "time": "2025-01-01T00:01:00Z",
+      "open": 101.5,
+      "high": 103.0,
+      "low": 101.0,
+      "close": 102.25,
+      "volume": 8.75
+    },
+    {
+      "time": "2025-01-01T00:02:00Z",
+      "open": 102.25,
+      "high": 104.5,
+      "low": 102.0,
+      "close": 104.0,
+      "volume": 15.5
+    }
+  ]
+}

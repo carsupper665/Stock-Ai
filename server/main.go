@@ -6,6 +6,7 @@ import (
 
 	"server/middleware"
 	"server/model"
+	"server/router"
 	"server/utils"
 
 	"github.com/gin-contrib/sessions"
@@ -31,26 +32,46 @@ func main() {
 
 	if !utils.DebugMode {
 		logger.Infof("%sRunning in Release Mode%s", utils.ColorBrightGreen, utils.ColorReset)
-		gin.SetMode(gin.ReleaseMode)
 	} else {
 		logger.Warnf("Your Server is running in %sDebugMode%s", utils.ColorCyan, utils.ColorReset)
-		gin.SetMode(gin.DebugMode)
 	}
 
 	if err := model.InitDb(); err != nil {
 		logger.Fatal("DataBase Init Error: %s", err)
 	}
 
+	server := newHTTPServer()
+
+	port := utils.GetEnvString("PORT", "7794")
+	logger.Infof("Server running on: %s", port)
+
+	if err := server.Run(":" + port); err != nil {
+		logger.Fatal("failed to start HTTP server: " + err.Error())
+	}
+
+}
+
+func newHTTPServer() *gin.Engine {
+	if utils.DebugMode {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	server := gin.New()
-	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
-		logger.Errorf("panic detected: %v", err)
-		err = utils.SendErrorToDc(fmt.Sprintf("Panic detected: %v", err))
-		if err != nil {
+	server.Use(gin.CustomRecovery(func(c *gin.Context, recovered any) {
+		if logger != nil {
+			logger.Errorf("panic detected: %v", recovered)
+		}
+
+		panicMsg := fmt.Sprintf("Panic detected: %v", recovered)
+		if err := utils.SendErrorToDc(panicMsg); err != nil && logger != nil {
 			logger.Errorf("Failed to send error to Discord: %v", err)
 		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
-				"message": fmt.Sprintf("Unknow Error: %v", err),
+				"message": fmt.Sprintf("Unknow Error: %v", recovered),
 				"type":    "unknow_panic",
 			},
 		})
@@ -59,8 +80,12 @@ func main() {
 	server.Use(middleware.RequestId())
 	middleware.SetUpLogger(server)
 
-	// init session store
-	store := cookie.NewStore([]byte(utils.SessionSecret))
+	sessionSecret := utils.SessionSecret
+	if sessionSecret == "" {
+		sessionSecret = "123456789"
+	}
+
+	store := cookie.NewStore([]byte(sessionSecret))
 	store.Options(sessions.Options{
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
@@ -70,14 +95,8 @@ func main() {
 	})
 	server.Use(sessions.Sessions("session", store))
 
-	// set router
-	// router.SetRouter(server)
+	router.SetRouter(server)
+	router.ApiRouter(server)
 
-	port := utils.GetEnvString("PORT", "7794")
-	logger.Infof("Server running on: %s", port)
-
-	if err := server.Run(":" + port); err != nil {
-		logger.Fatal("failed to start HTTP server: " + err.Error())
-	}
-
+	return server
 }

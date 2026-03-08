@@ -14,6 +14,9 @@ func SetRouter(router *gin.Engine) {
 	router.Use(middleware.CORS())
 
 	frontendBaseUrl := utils.FrontEndUrl
+	if frontendBaseUrl == "" {
+		frontendBaseUrl = "http://localhost:3000"
+	}
 
 	frontendBaseUrl = strings.TrimSuffix(frontendBaseUrl, "/")
 	router.NoRoute(func(c *gin.Context) {
