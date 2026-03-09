@@ -1,126 +1,123 @@
 package model
 
 import (
-	"server/model/store"
-	"server/utils"
-	"time"
+    "errors"
+    "server/model/store"
+    "server/utils"
+    "time"
 
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	gormLogger "gorm.io/gorm/logger"
+    "gorm.io/driver/postgres"
+    sqlite "github.com/glebarez/sqlite"
+    "gorm.io/gorm"
+    gormLogger "gorm.io/gorm/logger"
 )
 
 var DB *gorm.DB
 var logger *utils.SysLogger
 
 func InitDb() error {
-	logger = utils.SysLog
+    logger = utils.SysLog
 
-	db, err := Factory()
-	if err != nil {
-		logger.Errorf("Failed to connect to database: %v", err)
-		return err
-	}
-	DB = db
-	if err := migrateDB(); err != nil {
-		logger.Errorf("Failed to migrate database: %v", err)
-		return err
-	}
+    db, err := Factory()
+    if err != nil {
+        logger.Errorf("Failed to connect to database: %v", err)
+        return err
+    }
+    if err := Migrate(db); err != nil {
+        logger.Errorf("Failed to migrate database: %v", err)
+        return err
+    }
+    DB = db
 
-	if utils.RootUser == "" || utils.RootUserEmail == "" {
-		logger.Info("Root user data not set\n if you want create root user please set ROOT_USER_NAME and ROOT_EMAIL_NAME in .env")
-	} else if RootUserExists() {
-		logger.Info("Root User Exists, skip create root user")
-	} else {
-		if err := createRoot(); err != nil {
-			logger.Errorf("Failed to create root user: %v", err)
-		}
-	}
+    if err := ensureRootUser(db); err != nil {
+        logger.Errorf("Failed to bootstrap root user: %v", err)
+        return err
+    }
 
-	logger.Info("Database migrated")
-	return nil
+    logger.Info("Database migrated")
+    return nil
+}
+
+func Migrate(db *gorm.DB) error {
+    return db.AutoMigrate(
+        &store.User{},
+        &store.Sandbox{},
+        &store.Account{},
+        &store.AccountToken{},
+        &store.Order{},
+        &store.Trade{},
+        &store.Position{},
+        &store.ReplayDataset{},
+        &store.ReplayKline{},
+        &store.EventLog{},
+    )
 }
 
 func Factory() (*gorm.DB, error) {
-	var err error
-	var db *gorm.DB
-
-	dsn := utils.PostgreDSN
-	if dsn == "" {
-		db, err = initSqliteDB()
-		return db, err
-	}
-	db, err = initPostgreSQLDB(dsn, true)
-
-	return db, nil
+    dsn := utils.PostgreDSN
+    if dsn == "" {
+        return initSqliteDB()
+    }
+    return initPostgreSQLDB(dsn, true)
 }
+
 func initSqliteDB() (*gorm.DB, error) {
-	return gorm.Open(sqlite.Open(utils.SQLitePath), &gorm.Config{
-		PrepareStmt: true, // precompile SQL
-	})
+    return gorm.Open(sqlite.Open(utils.SQLitePath), &gorm.Config{PrepareStmt: true})
 }
 
 func initPostgreSQLDB(dsn string, isLog bool) (*gorm.DB, error) {
-	cfg := &gorm.Config{}
-	if isLog {
-		cfg.Logger = gormLogger.Default.LogMode(gormLogger.Info)
-	}
+    cfg := &gorm.Config{}
+    if isLog {
+        cfg.Logger = gormLogger.Default.LogMode(gormLogger.Info)
+    }
 
-	db, err := gorm.Open(postgres.Open(dsn), cfg)
-	if err != nil {
-		return nil, err
-	}
+    db, err := gorm.Open(postgres.Open(dsn), cfg)
+    if err != nil {
+        return nil, err
+    }
 
-	sqlDB, err := db.DB()
-	if err == nil {
-		sqlDB.SetMaxIdleConns(10)
-		sqlDB.SetMaxOpenConns(100)
-		sqlDB.SetConnMaxLifetime(time.Hour)
-	}
-
-	return db, nil
+    sqlDB, err := db.DB()
+    if err == nil {
+        sqlDB.SetMaxIdleConns(10)
+        sqlDB.SetMaxOpenConns(100)
+        sqlDB.SetConnMaxLifetime(time.Hour)
+    }
+    return db, nil
 }
 
-func migrateDB() error {
-	err := DB.AutoMigrate(
-		&store.Account{},
-		&store.User{},
-		&store.LLMUser{},
-	)
-	return err
+func ensureRootUser(db *gorm.DB) error {
+    if utils.RootUser == "" || utils.RootUserEmail == "" || utils.RootPassword == "" {
+        return nil
+    }
+
+    var count int64
+    if err := db.Model(&store.User{}).Where("role = ?", store.RoleRootUser).Count(&count).Error; err != nil {
+        return err
+    }
+    if count > 0 {
+        return nil
+    }
+
+    salt := utils.GetRandomString(16)
+    hashPassword, err := utils.P2H(utils.RootPassword + salt)
+    if err != nil {
+        return err
+    }
+
+    rootUser := store.User{
+        Username:    utils.RootUser,
+        DisplayName: "Root User",
+        Role:        store.RoleRootUser,
+        Email:       utils.RootUserEmail,
+        Password:    hashPassword,
+        Salt:        salt,
+    }
+    if err := db.Create(&rootUser).Error; err != nil {
+        if errors.Is(err, gorm.ErrDuplicatedKey) {
+            return nil
+        }
+        return err
+    }
+    return nil
 }
-func createRoot() error {
-	username := utils.RootUser
-	email := utils.RootUserEmail
-	password := utils.RootPassword
-	salt := utils.GetRandomString(16)
 
-	sp := password + salt
-	hashPassword, err := utils.P2H(sp)
-	if err != nil {
-		return err
-	}
-
-	// create user
-	rootUser := store.User{
-		Username:    username,
-		DisplayName: "Root User",
-		Role:        utils.RoleRootUser,
-		Email:       email,
-		Password:    hashPassword,
-		Salt:        salt,
-	}
-
-	err = DB.Create(&rootUser).Error
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func RootUserExists() bool {
-	var user store.User
-	err := DB.Where("role = ?", utils.RoleRootUser).First(&user).Error
-	return err == nil
-}
