@@ -2,3 +2,9 @@
 .codex/*
 .idea/*
 .worktrees/*
+web/node_modules/*
+web/dist/*
+web/vite-*.log
+server/DB.db
+tmp/*
+
