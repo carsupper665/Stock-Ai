@@ -1,12 +1,13 @@
 package model
 
 import (
+	"errors"
 	"server/model/store"
 	"server/utils"
 	"time"
 
+	sqlite "github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormLogger "gorm.io/gorm/logger"
 )
@@ -22,43 +23,47 @@ func InitDb() error {
 		logger.Errorf("Failed to connect to database: %v", err)
 		return err
 	}
-	DB = db
-	if err := migrateDB(); err != nil {
+	if err := Migrate(db); err != nil {
 		logger.Errorf("Failed to migrate database: %v", err)
 		return err
 	}
+	DB = db
 
-	if utils.RootUser == "" || utils.RootUserEmail == "" {
-		logger.Info("Root user data not set\n if you want create root user please set ROOT_USER_NAME and ROOT_EMAIL_NAME in .env")
-	} else if RootUserExists() {
-		logger.Info("Root User Exists, skip create root user")
-	} else {
-		if err := createRoot(); err != nil {
-			logger.Errorf("Failed to create root user: %v", err)
-		}
+	if err := ensureRootUser(db); err != nil {
+		logger.Errorf("Failed to bootstrap root user: %v", err)
+		return err
 	}
 
 	logger.Info("Database migrated")
 	return nil
 }
 
-func Factory() (*gorm.DB, error) {
-	var err error
-	var db *gorm.DB
+func Migrate(db *gorm.DB) error {
+	return db.AutoMigrate(
+		&store.User{},
+		&store.Sandbox{},
+		&store.Account{},
+		&store.AccountToken{},
+		&store.Order{},
+		&store.Trade{},
+		&store.Position{},
+		&store.ReplayDataset{},
+		&store.ReplayKline{},
+		&store.DatasetImportJob{},
+		&store.EventLog{},
+	)
+}
 
+func Factory() (*gorm.DB, error) {
 	dsn := utils.PostgreDSN
 	if dsn == "" {
-		db, err = initSqliteDB()
-		return db, err
+		return initSqliteDB()
 	}
-	db, err = initPostgreSQLDB(dsn, true)
-
-	return db, nil
+	return initPostgreSQLDB(dsn, true)
 }
+
 func initSqliteDB() (*gorm.DB, error) {
-	return gorm.Open(sqlite.Open(utils.SQLitePath), &gorm.Config{
-		PrepareStmt: true, // precompile SQL
-	})
+	return gorm.Open(sqlite.Open(utils.SQLitePath), &gorm.Config{PrepareStmt: true})
 }
 
 func initPostgreSQLDB(dsn string, isLog bool) (*gorm.DB, error) {
@@ -78,49 +83,41 @@ func initPostgreSQLDB(dsn string, isLog bool) (*gorm.DB, error) {
 		sqlDB.SetMaxOpenConns(100)
 		sqlDB.SetConnMaxLifetime(time.Hour)
 	}
-
 	return db, nil
 }
 
-func migrateDB() error {
-	err := DB.AutoMigrate(
-		&store.Account{},
-		&store.User{},
-		&store.LLMUser{},
-	)
-	return err
-}
-func createRoot() error {
-	username := utils.RootUser
-	email := utils.RootUserEmail
-	password := utils.RootPassword
-	salt := utils.GetRandomString(16)
+func ensureRootUser(db *gorm.DB) error {
+	if utils.RootUser == "" || utils.RootUserEmail == "" || utils.RootPassword == "" {
+		return nil
+	}
 
-	sp := password + salt
-	hashPassword, err := utils.P2H(sp)
+	var count int64
+	if err := db.Model(&store.User{}).Where("role = ?", store.RoleRootUser).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	salt := utils.GetRandomString(16)
+	hashPassword, err := utils.P2H(utils.RootPassword + salt)
 	if err != nil {
 		return err
 	}
 
-	// create user
 	rootUser := store.User{
-		Username:    username,
+		Username:    utils.RootUser,
 		DisplayName: "Root User",
-		Role:        utils.RoleRootUser,
-		Email:       email,
+		Role:        store.RoleRootUser,
+		Email:       utils.RootUserEmail,
 		Password:    hashPassword,
 		Salt:        salt,
 	}
-
-	err = DB.Create(&rootUser).Error
-	if err != nil {
+	if err := db.Create(&rootUser).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil
+		}
 		return err
 	}
 	return nil
-}
-
-func RootUserExists() bool {
-	var user store.User
-	err := DB.Where("role = ?", utils.RoleRootUser).First(&user).Error
-	return err == nil
 }

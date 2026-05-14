@@ -1,0 +1,19 @@
+:root {
+  --bg: #0d1117;
+  --bg-elevated: #131a24;
+  --bg-panel: #182230;
+  --bg-panel-alt: #202c3d;
+  --border: rgba(149, 164, 187, 0.16);
+  --text: #edf3ff;
+  --muted: #98a7c2;
+  --accent: #4ea1ff;
+  --accent-soft: rgba(78, 161, 255, 0.18);
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --radius: 18px;
+  --radius-sm: 12px;
+  --shadow: 0 24px 48px rgba(3, 8, 20, 0.25);
+  --font-body: "Segoe UI", "Noto Sans TC", sans-serif;
+  --font-display: "Bahnschrift", "Segoe UI", sans-serif;
+}

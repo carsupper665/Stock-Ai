@@ -53,7 +53,10 @@ func (p *Price) StartWs(symbol string) error {
 	p.stop = make(chan struct{})
 	p.connecting = true
 	go func() {
-		defer func() { _ = conn.Close() }()
+		defer func() {
+			p.connecting = false
+			_ = conn.Close()
+		}()
 
 		type miniTicker struct {
 			Close string `json:"c"` // last price
@@ -89,7 +92,6 @@ func (p *Price) StartWs(symbol string) error {
 			p.valueBits.Store(math.Float64bits(usd))
 			//p.onUpdate()
 		}
-		p.connecting = false
 	}()
 
 	return nil
