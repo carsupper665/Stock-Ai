@@ -125,28 +125,30 @@ type Sandbox struct {
 }
 
 type Account struct {
-	ID                string         `gorm:"primaryKey;size:64" json:"id"`
-	SandboxID         *string        `gorm:"size:64;index" json:"sandbox_id,omitempty"`
-	Name              string         `gorm:"size:255;not null" json:"name"`
-	Type              string         `gorm:"size:32;not null;default:virtual" json:"type"`
-	Provider          string         `gorm:"size:64" json:"provider,omitempty"`
-	Environment       string         `gorm:"size:32" json:"environment,omitempty"`
-	PriceMode         string         `gorm:"size:32" json:"price_mode,omitempty"`
-	CredentialsStatus string         `gorm:"size:32" json:"credentials_status,omitempty"`
-	SupportedSymbols  StringList     `gorm:"type:text" json:"supported_symbols,omitempty"`
-	LastHealthCheckAt *time.Time     `json:"last_health_check_at,omitempty"`
-	BaseCurrency      string         `gorm:"size:16;not null;default:USD" json:"base_currency"`
-	InitialBalance    float64        `gorm:"not null" json:"initial_balance"`
-	WalletBalance     float64        `gorm:"not null" json:"wallet_balance"`
-	AvailableBalance  float64        `gorm:"not null" json:"available_balance"`
-	LockedMargin      float64        `gorm:"not null" json:"locked_margin"`
-	RealizedPnL       float64        `gorm:"not null" json:"realized_pnl"`
-	UnrealizedPnL     float64        `gorm:"not null" json:"unrealized_pnl"`
-	Equity            float64        `gorm:"not null" json:"equity"`
-	Status            string         `gorm:"size:32;not null;default:active;index" json:"status"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
-	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
+	ID                 string         `gorm:"primaryKey;size:64" json:"id"`
+	SandboxID          *string        `gorm:"size:64;index" json:"sandbox_id,omitempty"`
+	Name               string         `gorm:"size:255;not null" json:"name"`
+	Type               string         `gorm:"size:32;not null;default:virtual" json:"type"`
+	Provider           string         `gorm:"size:64" json:"provider,omitempty"`
+	Environment        string         `gorm:"size:32" json:"environment,omitempty"`
+	PriceMode          string         `gorm:"size:32" json:"price_mode,omitempty"`
+	CredentialsStatus  string         `gorm:"size:32" json:"credentials_status,omitempty"`
+	SupportedSymbols   StringList     `gorm:"type:text" json:"supported_symbols,omitempty"`
+	LiveTradingEnabled bool           `gorm:"not null;default:false" json:"live_trading_enabled"`
+	RiskProfileJSON    string         `gorm:"type:text" json:"risk_profile_json,omitempty"`
+	LastHealthCheckAt  *time.Time     `json:"last_health_check_at,omitempty"`
+	BaseCurrency       string         `gorm:"size:16;not null;default:USD" json:"base_currency"`
+	InitialBalance     float64        `gorm:"not null" json:"initial_balance"`
+	WalletBalance      float64        `gorm:"not null" json:"wallet_balance"`
+	AvailableBalance   float64        `gorm:"not null" json:"available_balance"`
+	LockedMargin       float64        `gorm:"not null" json:"locked_margin"`
+	RealizedPnL        float64        `gorm:"not null" json:"realized_pnl"`
+	UnrealizedPnL      float64        `gorm:"not null" json:"unrealized_pnl"`
+	Equity             float64        `gorm:"not null" json:"equity"`
+	Status             string         `gorm:"size:32;not null;default:active;index" json:"status"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type AccountToken struct {
@@ -178,25 +180,28 @@ func (t AccountToken) Scopes() []string {
 }
 
 type Order struct {
-	ID           string     `gorm:"primaryKey;size:64" json:"id"`
-	SandboxID    string     `gorm:"size:64;not null;index" json:"sandbox_id"`
-	AccountID    string     `gorm:"size:64;not null;index" json:"account_id"`
-	Symbol       string     `gorm:"size:32;not null;index" json:"symbol"`
-	Side         string     `gorm:"size:16;not null" json:"side"`
-	PositionSide string     `gorm:"size:16;not null" json:"position_side"`
-	OrderType    string     `gorm:"size:16;not null" json:"order_type"`
-	Quantity     float64    `gorm:"not null" json:"qty"`
-	Price        float64    `json:"price,omitempty"`
-	StopPrice    float64    `json:"stop_price,omitempty"`
-	Leverage     float64    `gorm:"not null;default:1" json:"leverage"`
-	Status       string     `gorm:"size:32;not null;index" json:"status"`
-	FilledQty    float64    `gorm:"not null" json:"filled_qty"`
-	AvgFillPrice float64    `gorm:"not null" json:"avg_fill_price"`
-	ReduceOnly   bool       `gorm:"not null;default:false" json:"reduce_only"`
-	TriggeredAt  *time.Time `json:"triggered_at,omitempty"`
-	Rejection    string     `gorm:"size:255" json:"rejection,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID              string     `gorm:"primaryKey;size:64" json:"id"`
+	SandboxID       string     `gorm:"size:64;not null;index" json:"sandbox_id"`
+	AccountID       string     `gorm:"size:64;not null;index;index:idx_account_client_order,priority:1" json:"account_id"`
+	Symbol          string     `gorm:"size:32;not null;index" json:"symbol"`
+	Side            string     `gorm:"size:16;not null" json:"side"`
+	PositionSide    string     `gorm:"size:16;not null" json:"position_side"`
+	OrderType       string     `gorm:"size:16;not null" json:"order_type"`
+	Quantity        float64    `gorm:"not null" json:"qty"`
+	Price           float64    `json:"price,omitempty"`
+	StopPrice       float64    `json:"stop_price,omitempty"`
+	Leverage        float64    `gorm:"not null;default:1" json:"leverage"`
+	Status          string     `gorm:"size:32;not null;index" json:"status"`
+	FilledQty       float64    `gorm:"not null" json:"filled_qty"`
+	AvgFillPrice    float64    `gorm:"not null" json:"avg_fill_price"`
+	ReduceOnly      bool       `gorm:"not null;default:false" json:"reduce_only"`
+	ClientOrderID   string     `gorm:"size:128;index:idx_account_client_order,priority:2" json:"client_order_id,omitempty"`
+	ExchangeOrderID string     `gorm:"size:128;index" json:"exchange_order_id,omitempty"`
+	ExchangeStatus  string     `gorm:"size:64" json:"exchange_status,omitempty"`
+	TriggeredAt     *time.Time `json:"triggered_at,omitempty"`
+	Rejection       string     `gorm:"size:255" json:"rejection,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type Trade struct {

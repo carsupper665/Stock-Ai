@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"server/domain"
@@ -17,22 +18,35 @@ type TradingService struct {
 	repo       *repo.Repository
 	clock      domain.Clock
 	market     domain.MarketDataProvider
+	liveMarket *LiveMarketProvider
 	events     domain.EventPublisher
 	risk       domain.RiskEngine
 	fillPolicy domain.FillPolicy
 	ledger     domain.AccountLedger
+	config     AppConfig
 }
 
 type PlaceOrderInput struct {
-	Symbol       string  `json:"symbol"`
-	Side         string  `json:"side"`
-	PositionSide string  `json:"position_side"`
-	OrderType    string  `json:"order_type"`
-	Quantity     float64 `json:"qty"`
-	Price        float64 `json:"price,omitempty"`
-	StopPrice    float64 `json:"stop_price,omitempty"`
-	Leverage     float64 `json:"leverage,omitempty"`
+	Symbol        string  `json:"symbol"`
+	Side          string  `json:"side"`
+	PositionSide  string  `json:"position_side"`
+	OrderType     string  `json:"order_type"`
+	Quantity      float64 `json:"qty"`
+	Price         float64 `json:"price,omitempty"`
+	StopPrice     float64 `json:"stop_price,omitempty"`
+	Leverage      float64 `json:"leverage,omitempty"`
+	ReduceOnly    bool    `json:"reduce_only,omitempty"`
+	ClientOrderID string  `json:"client_order_id,omitempty"`
 }
+
+type TradingMode string
+
+const (
+	TradingModeReplay  TradingMode = "replay"
+	TradingModePaper   TradingMode = "paper"
+	TradingModeTestnet TradingMode = "testnet"
+	TradingModeMainnet TradingMode = "mainnet"
+)
 
 type AccountPerformance struct {
 	AccountID      string  `json:"account_id"`
@@ -44,8 +58,8 @@ type AccountPerformance struct {
 	AvailableFunds float64 `json:"available_balance"`
 }
 
-func NewTradingService(repo *repo.Repository, clock domain.Clock, market domain.MarketDataProvider, events domain.EventPublisher, risk domain.RiskEngine, fillPolicy domain.FillPolicy, ledger domain.AccountLedger) *TradingService {
-	return &TradingService{repo: repo, clock: clock, market: market, events: events, risk: risk, fillPolicy: fillPolicy, ledger: ledger}
+func NewTradingService(repo *repo.Repository, clock domain.Clock, market domain.MarketDataProvider, liveMarket *LiveMarketProvider, events domain.EventPublisher, risk domain.RiskEngine, fillPolicy domain.FillPolicy, ledger domain.AccountLedger, cfg AppConfig) *TradingService {
+	return &TradingService{repo: repo, clock: clock, market: market, liveMarket: liveMarket, events: events, risk: risk, fillPolicy: fillPolicy, ledger: ledger, config: cfg}
 }
 
 func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input PlaceOrderInput) (*store.Order, error) {
@@ -53,22 +67,60 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 	if err != nil {
 		return nil, domain.NotFoundError("ACCOUNT_NOT_FOUND", "account not found")
 	}
-	if account.Type == store.AccountTypeLive {
-		return nil, domain.ConflictError("LIVE_ACCOUNT_TRADING_UNSUPPORTED", "live account trading is not enabled")
-	}
-	if account.SandboxID == nil || *account.SandboxID == "" {
-		return nil, domain.ValidationError("ACCOUNT_SANDBOX_REQUIRED", "account is not bound to a sandbox")
-	}
-	sandbox, err := s.repo.FindSandbox(ctx, *account.SandboxID)
+	input.Symbol = normalizeOrderSymbol(input.Symbol)
+	mode, err := s.resolveTradingMode(*account)
 	if err != nil {
-		return nil, domain.NotFoundError("SANDBOX_NOT_FOUND", "sandbox not found")
+		return nil, err
 	}
-	marketPrice, _, err := s.market.GetLastPrice(ctx, sandbox.ID, input.Symbol)
-	tradable := err == nil
-	if !tradable {
-		marketPrice = input.Price
+	if err := validateSupportedSymbol(*account, input.Symbol); err != nil {
+		return nil, err
 	}
-	position, err := s.repo.FindPosition(ctx, accountID, sandbox.ID, input.Symbol, input.PositionSide)
+	if input.ClientOrderID != "" {
+		existing, err := s.findOrderByClientID(ctx, accountID, input.ClientOrderID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			if sameClientOrderPayload(*existing, input) {
+				return existing, nil
+			}
+			return nil, domain.ConflictError("CLIENT_ORDER_ID_CONFLICT", "client_order_id already exists with different order payload")
+		}
+	}
+	if input.ReduceOnly && isOpeningAction(input.Side, input.PositionSide) {
+		return nil, domain.ValidationError("REDUCE_ONLY_WOULD_OPEN", "reduce_only order would open or increase exposure")
+	}
+	sandboxID := ""
+	sandboxStatus := store.SandboxStatusRunning
+	marketPrice := input.Price
+	tradable := false
+	if mode == TradingModeReplay {
+		sandboxID = *account.SandboxID
+		sandbox, err := s.repo.FindSandbox(ctx, sandboxID)
+		if err != nil {
+			return nil, domain.NotFoundError("SANDBOX_NOT_FOUND", "sandbox not found")
+		}
+		sandboxStatus = sandbox.Status
+		marketPrice, _, err = s.market.GetLastPrice(ctx, sandbox.ID, input.Symbol)
+		tradable = err == nil
+		if !tradable {
+			marketPrice = input.Price
+		}
+	} else {
+		if mode != TradingModePaper {
+			return nil, s.liveExecutionGate(*account, mode)
+		}
+		if s.liveMarket == nil {
+			return nil, domain.ValidationError("LIVE_MARKET_UNAVAILABLE", "live market provider is unavailable")
+		}
+		snapshot, err := s.liveMarket.GetSnapshot(ctx, input.Symbol)
+		if err != nil {
+			return nil, err
+		}
+		marketPrice = snapshot.LastPrice
+		tradable = snapshot.State == domain.MarketStateActive
+	}
+	position, err := s.repo.FindPosition(ctx, accountID, sandboxID, input.Symbol, input.PositionSide)
 	if err != nil {
 		return nil, err
 	}
@@ -92,30 +144,32 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 		LimitPrice:       input.Price,
 		StopPrice:        input.StopPrice,
 		Leverage:         leverage,
-		SandboxStatus:    sandbox.Status,
+		SandboxStatus:    sandboxStatus,
 		Tradable:         tradable,
 	}); err != nil {
 		return nil, err
 	}
 
 	order := &store.Order{
-		ID:           newID("ord"),
-		SandboxID:    sandbox.ID,
-		AccountID:    accountID,
-		Symbol:       input.Symbol,
-		Side:         input.Side,
-		PositionSide: input.PositionSide,
-		OrderType:    input.OrderType,
-		Quantity:     input.Quantity,
-		Price:        input.Price,
-		StopPrice:    input.StopPrice,
-		Leverage:     leverage,
-		Status:       store.OrderStatusNew,
+		ID:            newID("ord"),
+		SandboxID:     sandboxID,
+		AccountID:     accountID,
+		Symbol:        input.Symbol,
+		Side:          input.Side,
+		PositionSide:  input.PositionSide,
+		OrderType:     input.OrderType,
+		Quantity:      input.Quantity,
+		Price:         input.Price,
+		StopPrice:     input.StopPrice,
+		Leverage:      leverage,
+		Status:        store.OrderStatusNew,
+		ReduceOnly:    input.ReduceOnly,
+		ClientOrderID: input.ClientOrderID,
 	}
 	if err := s.repo.Create(ctx, order); err != nil {
 		return nil, err
 	}
-	_ = s.events.Publish(ctx, domain.DomainEvent{Topic: "order.created", SandboxID: sandbox.ID, AccountID: accountID, AggregateID: order.ID, Payload: map[string]any{"symbol": order.Symbol, "status": order.Status}})
+	_ = s.events.Publish(ctx, domain.DomainEvent{Topic: "order.created", SandboxID: sandboxID, AccountID: accountID, AggregateID: order.ID, Payload: map[string]any{"symbol": order.Symbol, "status": order.Status}})
 
 	switch order.OrderType {
 	case store.OrderTypeMarket:
@@ -138,6 +192,93 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 		return nil, domain.ValidationError("INVALID_ORDER_TYPE", "unsupported order type")
 	}
 	return s.GetOrder(ctx, order.ID)
+}
+
+func (s *TradingService) resolveTradingMode(account store.Account) (TradingMode, error) {
+	switch account.Type {
+	case store.AccountTypeVirtual:
+		if account.PriceMode == "live" {
+			return "", domain.ValidationError("INVALID_TRADING_MODE", "virtual accounts cannot use live price mode")
+		}
+		if account.SandboxID == nil || *account.SandboxID == "" {
+			return "", domain.ValidationError("ACCOUNT_SANDBOX_REQUIRED", "virtual account is not bound to a sandbox")
+		}
+		return TradingModeReplay, nil
+	case store.AccountTypeLive:
+		if account.PriceMode != "live" {
+			return "", domain.ValidationError("INVALID_TRADING_MODE", "live accounts require price_mode=live")
+		}
+		switch account.Environment {
+		case "paper":
+			return TradingModePaper, nil
+		case "testnet":
+			if account.CredentialsStatus != "healthy" {
+				return "", domain.ValidationError("LIVE_CREDENTIALS_REQUIRED", "healthy exchange credentials are required")
+			}
+			return TradingModeTestnet, nil
+		case "mainnet":
+			if account.CredentialsStatus != "healthy" {
+				return "", domain.ValidationError("LIVE_CREDENTIALS_REQUIRED", "healthy exchange credentials are required")
+			}
+			return TradingModeMainnet, nil
+		default:
+			return "", domain.ValidationError("INVALID_TRADING_MODE", "live account environment must be paper, testnet, or mainnet")
+		}
+	default:
+		return "", domain.ValidationError("INVALID_ACCOUNT_TYPE", "unsupported account type")
+	}
+}
+
+func (s *TradingService) liveExecutionGate(account store.Account, mode TradingMode) error {
+	if !s.config.AllowLiveExecution {
+		return domain.ConflictError("LIVE_EXECUTION_DISABLED", "live exchange execution is disabled")
+	}
+	if mode == TradingModeMainnet && !s.config.AllowMainnetExecution {
+		return domain.ConflictError("MAINNET_EXECUTION_DISABLED", "mainnet execution is disabled")
+	}
+	if !account.LiveTradingEnabled {
+		return domain.ConflictError("ACCOUNT_LIVE_TRADING_DISABLED", "account live trading is disabled")
+	}
+	return domain.ConflictError("LIVE_EXCHANGE_EXECUTION_UNSUPPORTED", "exchange execution adapter is not configured")
+}
+
+func validateSupportedSymbol(account store.Account, symbol string) error {
+	if len(account.SupportedSymbols) == 0 {
+		return nil
+	}
+	for _, supported := range account.SupportedSymbols {
+		if normalizeOrderSymbol(supported) == symbol {
+			return nil
+		}
+	}
+	return domain.ValidationError("UNSUPPORTED_SYMBOL", "symbol is not supported by account")
+}
+
+func normalizeOrderSymbol(symbol string) string {
+	return strings.ToUpper(strings.TrimSpace(symbol))
+}
+
+func (s *TradingService) findOrderByClientID(ctx context.Context, accountID, clientOrderID string) (*store.Order, error) {
+	var order store.Order
+	err := s.repo.WithContext(ctx).Where("account_id = ? AND client_order_id = ?", accountID, clientOrderID).First(&order).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
+func sameClientOrderPayload(order store.Order, input PlaceOrderInput) bool {
+	return order.Symbol == input.Symbol &&
+		order.Side == input.Side &&
+		order.PositionSide == input.PositionSide &&
+		order.OrderType == input.OrderType &&
+		order.Quantity == input.Quantity &&
+		order.Price == input.Price &&
+		order.StopPrice == input.StopPrice &&
+		order.ReduceOnly == input.ReduceOnly
 }
 
 func (s *TradingService) fillOrder(ctx context.Context, orderID string, fillPrice float64, triggered bool) error {
@@ -297,7 +438,15 @@ func (s *TradingService) RefreshAccount(ctx context.Context, accountID string) e
 	}
 	totalUnrealized := 0.0
 	for i := range positions {
-		price, _, err := s.market.GetLastPrice(ctx, positions[i].SandboxID, positions[i].Symbol)
+		var price float64
+		var err error
+		if account.Type == store.AccountTypeLive && s.liveMarket != nil {
+			var snapshot domain.MarketSnapshot
+			snapshot, err = s.liveMarket.GetSnapshot(ctx, positions[i].Symbol)
+			price = snapshot.LastPrice
+		} else {
+			price, _, err = s.market.GetLastPrice(ctx, positions[i].SandboxID, positions[i].Symbol)
+		}
 		if err != nil {
 			price = positions[i].MarkPrice
 		}

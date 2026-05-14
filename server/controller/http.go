@@ -470,12 +470,12 @@ func (h *Handler) MarketPrice(c *gin.Context) {
 		return
 	}
 	if account.Type == "live" {
-		ticker, err := h.App.LiveMarket.GetTicker(c.Request.Context(), "", c.Query("symbol"))
+		snapshot, err := h.App.LiveMarket.GetSnapshot(c.Request.Context(), c.Query("symbol"))
 		if err != nil {
 			writeError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, ticker)
+		c.JSON(http.StatusOK, snapshot)
 		return
 	}
 	if account.SandboxID == nil {
@@ -720,10 +720,10 @@ func (h *Handler) AccountWS(c *gin.Context) {
 	})
 	defer unsubscribe()
 
-	if account, err := h.App.Trading.GetAccountSummary(c.Request.Context(), accountID); err == nil {
-		_ = conn.WriteJSON(gin.H{"type": "snapshot", "payload": account})
+	if snapshot, err := h.accountSocketSnapshot(c.Request.Context(), accountID); err == nil {
+		_ = conn.WriteJSON(snapshot)
 	}
-	h.streamEvents(c.Request.Context(), conn, ch)
+	h.streamAccountEvents(c.Request.Context(), conn, ch)
 }
 
 func (h *Handler) streamEvents(ctx context.Context, conn *websocket.Conn, ch <-chan domain.DomainEvent) {
@@ -740,6 +740,85 @@ func (h *Handler) streamEvents(ctx context.Context, conn *websocket.Conn, ch <-c
 			return
 		}
 	}
+}
+
+func (h *Handler) streamAccountEvents(ctx context.Context, conn *websocket.Conn, ch <-chan domain.DomainEvent) {
+	for {
+		select {
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteJSON(gin.H{
+				"type":         "event",
+				"account_id":   evt.AccountID,
+				"topic":        evt.Topic,
+				"aggregate_id": evt.AggregateID,
+				"created_at":   evt.CreatedAt,
+				"payload":      evt.Payload,
+			}); err != nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (h *Handler) accountSocketSnapshot(ctx context.Context, accountID string) (gin.H, error) {
+	account, err := h.App.Trading.GetAccountSummary(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	positions, err := h.App.Trading.ListPositions(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	orders, err := h.App.Trading.ListOrders(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	trades, err := h.App.Trading.ListTrades(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	openOrders := make([]store.Order, 0, len(orders))
+	for _, order := range orders {
+		if order.Status == store.OrderStatusNew || order.Status == store.OrderStatusPartiallyFilled || order.Status == store.OrderStatusTriggered {
+			openOrders = append(openOrders, order)
+		}
+	}
+	market := gin.H{"symbols": []domain.MarketSnapshot{}, "state": string(domain.MarketStateActive), "freshness_ms": int64(0)}
+	if account.Type == store.AccountTypeLive {
+		symbols := make([]domain.MarketSnapshot, 0, len(account.SupportedSymbols))
+		state := domain.MarketStateActive
+		maxFreshness := int64(0)
+		for _, symbol := range account.SupportedSymbols {
+			snapshot, err := h.App.LiveMarket.GetSnapshot(ctx, symbol)
+			if err != nil && snapshot.Symbol == "" {
+				continue
+			}
+			symbols = append(symbols, snapshot)
+			if snapshot.State != domain.MarketStateActive {
+				state = snapshot.State
+			}
+			if snapshot.FreshnessMs > maxFreshness {
+				maxFreshness = snapshot.FreshnessMs
+			}
+		}
+		market = gin.H{"symbols": symbols, "state": string(state), "freshness_ms": maxFreshness}
+	}
+	return gin.H{
+		"type":       "snapshot",
+		"account_id": accountID,
+		"payload": gin.H{
+			"account":       account,
+			"positions":     positions,
+			"open_orders":   openOrders,
+			"recent_trades": trades,
+			"market":        market,
+		},
+	}, nil
 }
 
 func writeError(c *gin.Context, err error) {
