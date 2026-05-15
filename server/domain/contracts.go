@@ -74,6 +74,15 @@ type MarketSnapshot struct {
 	ErrorCode   string      `json:"error_code,omitempty"`
 }
 
+type SymbolRule struct {
+	Symbol      string  `json:"symbol"`
+	TickSize    float64 `json:"tick_size"`
+	StepSize    float64 `json:"step_size"`
+	MinQty      float64 `json:"min_qty"`
+	MinNotional float64 `json:"min_notional"`
+	MaxLeverage float64 `json:"max_leverage"`
+}
+
 type Kline struct {
 	Symbol string    `json:"symbol"`
 	At     time.Time `json:"at"`

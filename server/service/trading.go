@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +21,7 @@ type TradingService struct {
 	clock      domain.Clock
 	market     domain.MarketDataProvider
 	liveMarket *LiveMarketProvider
+	exchange   ExchangeAdapter
 	events     domain.EventPublisher
 	risk       domain.RiskEngine
 	fillPolicy domain.FillPolicy
@@ -58,8 +61,8 @@ type AccountPerformance struct {
 	AvailableFunds float64 `json:"available_balance"`
 }
 
-func NewTradingService(repo *repo.Repository, clock domain.Clock, market domain.MarketDataProvider, liveMarket *LiveMarketProvider, events domain.EventPublisher, risk domain.RiskEngine, fillPolicy domain.FillPolicy, ledger domain.AccountLedger, cfg AppConfig) *TradingService {
-	return &TradingService{repo: repo, clock: clock, market: market, liveMarket: liveMarket, events: events, risk: risk, fillPolicy: fillPolicy, ledger: ledger, config: cfg}
+func NewTradingService(repo *repo.Repository, clock domain.Clock, market domain.MarketDataProvider, liveMarket *LiveMarketProvider, exchange ExchangeAdapter, events domain.EventPublisher, risk domain.RiskEngine, fillPolicy domain.FillPolicy, ledger domain.AccountLedger, cfg AppConfig) *TradingService {
+	return &TradingService{repo: repo, clock: clock, market: market, liveMarket: liveMarket, exchange: exchange, events: events, risk: risk, fillPolicy: fillPolicy, ledger: ledger, config: cfg}
 }
 
 func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input PlaceOrderInput) (*store.Order, error) {
@@ -75,20 +78,14 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 	if err := validateSupportedSymbol(*account, input.Symbol); err != nil {
 		return nil, err
 	}
-	if input.ClientOrderID != "" {
-		existing, err := s.findOrderByClientID(ctx, accountID, input.ClientOrderID)
-		if err != nil {
-			return nil, err
-		}
-		if existing != nil {
-			if sameClientOrderPayload(*existing, input) {
-				return existing, nil
-			}
-			return nil, domain.ConflictError("CLIENT_ORDER_ID_CONFLICT", "client_order_id already exists with different order payload")
-		}
-	}
 	if input.ReduceOnly && isOpeningAction(input.Side, input.PositionSide) {
 		return nil, domain.ValidationError("REDUCE_ONLY_WOULD_OPEN", "reduce_only order would open or increase exposure")
+	}
+	if mode == TradingModeTestnet || mode == TradingModeMainnet {
+		if err := s.liveExecutionGate(*account, mode); err != nil {
+			s.publishAuditEvent(ctx, "live.order.rejected", "", accountID, "", map[string]any{"symbol": input.Symbol, "code": errorCode(err, "LIVE_ORDER_REJECTED"), "mode": mode})
+			return nil, err
+		}
 	}
 	sandboxID := ""
 	sandboxStatus := store.SandboxStatusRunning
@@ -107,14 +104,12 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 			marketPrice = input.Price
 		}
 	} else {
-		if mode != TradingModePaper {
-			return nil, s.liveExecutionGate(*account, mode)
-		}
 		if s.liveMarket == nil {
 			return nil, domain.ValidationError("LIVE_MARKET_UNAVAILABLE", "live market provider is unavailable")
 		}
 		snapshot, err := s.liveMarket.GetSnapshot(ctx, input.Symbol)
 		if err != nil {
+			s.publishAuditEvent(ctx, "live.order.rejected", "", accountID, "", map[string]any{"symbol": input.Symbol, "code": errorCode(err, "LIVE_MARKET_UNAVAILABLE"), "mode": mode})
 			return nil, err
 		}
 		marketPrice = snapshot.LastPrice
@@ -132,6 +127,24 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 	if leverage <= 0 {
 		leverage = 1
 	}
+	input, err = normalizeOrderInput(*account, input, marketPrice, leverage)
+	if err != nil {
+		s.publishAuditEvent(ctx, "risk.order.rejected", sandboxID, accountID, "", map[string]any{"symbol": input.Symbol, "code": errorCode(err, "ORDER_NORMALIZATION_FAILED"), "mode": mode})
+		return nil, err
+	}
+	leverage = input.Leverage
+	if input.ClientOrderID != "" {
+		existing, err := s.findOrderByClientID(ctx, accountID, input.ClientOrderID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			if sameClientOrderPayload(*existing, input) {
+				return existing, nil
+			}
+			return nil, domain.ConflictError("CLIENT_ORDER_ID_CONFLICT", "client_order_id already exists with different order payload")
+		}
+	}
 	if err := s.risk.ValidateNewOrder(ctx, domain.RiskOrderRequest{
 		WalletBalance:    account.WalletBalance,
 		AvailableBalance: account.AvailableBalance,
@@ -147,6 +160,7 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 		SandboxStatus:    sandboxStatus,
 		Tradable:         tradable,
 	}); err != nil {
+		s.publishAuditEvent(ctx, "risk.order.rejected", sandboxID, accountID, "", map[string]any{"symbol": input.Symbol, "code": errorCode(err, "RISK_ORDER_REJECTED"), "mode": mode})
 		return nil, err
 	}
 
@@ -170,6 +184,13 @@ func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input
 		return nil, err
 	}
 	_ = s.events.Publish(ctx, domain.DomainEvent{Topic: "order.created", SandboxID: sandboxID, AccountID: accountID, AggregateID: order.ID, Payload: map[string]any{"symbol": order.Symbol, "status": order.Status}})
+	if mode == TradingModeTestnet || mode == TradingModeMainnet {
+		if err := s.submitExchangeOrder(ctx, *account, order, marketPrice, mode); err != nil {
+			s.publishAuditEvent(ctx, "live.order.rejected", sandboxID, accountID, order.ID, map[string]any{"symbol": order.Symbol, "code": errorCode(err, "LIVE_ORDER_REJECTED"), "mode": mode})
+			return nil, err
+		}
+		return s.GetOrder(ctx, order.ID)
+	}
 
 	switch order.OrderType {
 	case store.OrderTypeMarket:
@@ -239,7 +260,109 @@ func (s *TradingService) liveExecutionGate(account store.Account, mode TradingMo
 	if !account.LiveTradingEnabled {
 		return domain.ConflictError("ACCOUNT_LIVE_TRADING_DISABLED", "account live trading is disabled")
 	}
-	return domain.ConflictError("LIVE_EXCHANGE_EXECUTION_UNSUPPORTED", "exchange execution adapter is not configured")
+	if s.exchange == nil {
+		return domain.ConflictError("LIVE_EXCHANGE_EXECUTION_UNSUPPORTED", "exchange execution adapter is not configured")
+	}
+	return nil
+}
+
+type accountRiskProfile struct {
+	SymbolRules       []domain.SymbolRule `json:"symbol_rules"`
+	AllowedOrderTypes []string            `json:"allowed_order_types"`
+}
+
+func normalizeOrderInput(account store.Account, input PlaceOrderInput, marketPrice, leverage float64) (PlaceOrderInput, error) {
+	input.Symbol = normalizeOrderSymbol(input.Symbol)
+	if input.Leverage <= 0 {
+		input.Leverage = leverage
+	}
+	profile, err := parseAccountRiskProfile(account)
+	if err != nil {
+		return input, err
+	}
+	if len(profile.AllowedOrderTypes) > 0 && !stringInFoldedList(input.OrderType, profile.AllowedOrderTypes) {
+		return input, domain.ValidationError("ORDER_TYPE_NOT_ALLOWED", "order type is not allowed by account risk profile")
+	}
+	rule, ok := findSymbolRule(profile, input.Symbol)
+	if !ok {
+		return input, nil
+	}
+	if rule.MaxLeverage > 0 && input.Leverage > rule.MaxLeverage {
+		return input, domain.ValidationError("LEVERAGE_TOO_HIGH", "leverage exceeds symbol rule")
+	}
+	if rule.StepSize > 0 {
+		input.Quantity = floorToStep(input.Quantity, rule.StepSize)
+	}
+	if rule.MinQty > 0 && input.Quantity+1e-12 < rule.MinQty {
+		return input, domain.ValidationError("MIN_QTY_NOT_MET", "quantity is below symbol minimum")
+	}
+	priceForNotional := marketPrice
+	if input.OrderType == store.OrderTypeLimit {
+		if rule.TickSize > 0 {
+			input.Price = normalizeLimitPrice(input.Side, input.Price, rule.TickSize)
+		}
+		priceForNotional = input.Price
+	}
+	if input.OrderType == store.OrderTypeStop && rule.TickSize > 0 {
+		input.StopPrice = normalizeLimitPrice(input.Side, input.StopPrice, rule.TickSize)
+	}
+	notional := input.Quantity * priceForNotional
+	if rule.MinNotional > 0 && notional+1e-9 < rule.MinNotional {
+		return input, domain.ValidationError("MIN_NOTIONAL_NOT_MET", "order notional is below symbol minimum")
+	}
+	return input, nil
+}
+
+func parseAccountRiskProfile(account store.Account) (accountRiskProfile, error) {
+	var profile accountRiskProfile
+	if strings.TrimSpace(account.RiskProfileJSON) == "" {
+		return profile, nil
+	}
+	if err := json.Unmarshal([]byte(account.RiskProfileJSON), &profile); err != nil {
+		return profile, domain.ValidationError("INVALID_RISK_PROFILE", "account risk profile is invalid")
+	}
+	for i := range profile.SymbolRules {
+		profile.SymbolRules[i].Symbol = normalizeOrderSymbol(profile.SymbolRules[i].Symbol)
+	}
+	return profile, nil
+}
+
+func findSymbolRule(profile accountRiskProfile, symbol string) (domain.SymbolRule, bool) {
+	for _, rule := range profile.SymbolRules {
+		if rule.Symbol == symbol {
+			return rule, true
+		}
+	}
+	return domain.SymbolRule{}, false
+}
+
+func stringInFoldedList(value string, allowed []string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, item := range allowed {
+		if strings.ToLower(strings.TrimSpace(item)) == value {
+			return true
+		}
+	}
+	return false
+}
+
+func floorToStep(value, step float64) float64 {
+	if step <= 0 {
+		return value
+	}
+	return math.Floor((value+1e-12)/step) * step
+}
+
+func normalizeLimitPrice(side string, price, tick float64) float64 {
+	if tick <= 0 || price <= 0 {
+		return price
+	}
+	switch side {
+	case store.OrderSideSell:
+		return math.Ceil((price-1e-12)/tick) * tick
+	default:
+		return math.Floor((price+1e-12)/tick) * tick
+	}
 }
 
 func validateSupportedSymbol(account store.Account, symbol string) error {
@@ -425,6 +548,127 @@ func (s *TradingService) fillOrder(ctx context.Context, orderID string, fillPric
 	_ = s.events.Publish(ctx, domain.DomainEvent{Topic: "order.updated", SandboxID: sandboxID, AccountID: accountID, AggregateID: orderID, Payload: map[string]any{"status": store.OrderStatusFilled}})
 	_ = s.events.Publish(ctx, domain.DomainEvent{Topic: "trade.executed", SandboxID: sandboxID, AccountID: accountID, AggregateID: orderID, Payload: map[string]any{"order_id": orderID}})
 	return nil
+}
+
+func (s *TradingService) submitExchangeOrder(ctx context.Context, account store.Account, order *store.Order, marketPrice float64, mode TradingMode) error {
+	price := order.Price
+	if price <= 0 {
+		price = marketPrice
+	}
+	s.publishAuditEvent(ctx, "live.order.submitted", order.SandboxID, account.ID, order.ID, map[string]any{"symbol": order.Symbol, "mode": mode, "client_order_id": order.ClientOrderID})
+	result, err := s.exchange.PlaceOrder(ctx, ExchangeOrderRequest{
+		AccountID:     account.ID,
+		OrderID:       order.ID,
+		Symbol:        order.Symbol,
+		Side:          order.Side,
+		PositionSide:  order.PositionSide,
+		OrderType:     order.OrderType,
+		Quantity:      order.Quantity,
+		Price:         price,
+		StopPrice:     order.StopPrice,
+		Leverage:      order.Leverage,
+		ReduceOnly:    order.ReduceOnly,
+		ClientOrderID: order.ClientOrderID,
+		Mode:          mode,
+	})
+	if err != nil {
+		order.Status = store.OrderStatusRejected
+		order.Rejection = errorCode(err, "LIVE_EXCHANGE_ORDER_REJECTED")
+		_ = s.repo.Save(ctx, order)
+		return err
+	}
+	return s.ApplyExchangeOrderResult(ctx, account, order.ID, result)
+}
+
+func (s *TradingService) ReconcileExchangeOrder(ctx context.Context, accountID, orderID string) error {
+	if s.exchange == nil {
+		return domain.ConflictError("LIVE_EXCHANGE_EXECUTION_UNSUPPORTED", "exchange execution adapter is not configured")
+	}
+	account, err := s.repo.FindAccount(ctx, accountID)
+	if err != nil {
+		return domain.NotFoundError("ACCOUNT_NOT_FOUND", "account not found")
+	}
+	order, err := s.GetOrder(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	if order.AccountID != accountID {
+		return domain.ForbiddenError("order does not belong to account")
+	}
+	result, err := s.exchange.GetOrder(ctx, *account, *order)
+	if err != nil {
+		return err
+	}
+	return s.ApplyExchangeOrderResult(ctx, *account, orderID, result)
+}
+
+func (s *TradingService) ApplyExchangeOrderResult(ctx context.Context, account store.Account, orderID string, result *ExchangeOrderResult) error {
+	if result == nil {
+		return domain.ValidationError("INVALID_EXCHANGE_RESULT", "exchange order result is required")
+	}
+	order, err := s.GetOrder(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	order.ExchangeOrderID = result.ExchangeOrderID
+	order.ExchangeStatus = result.Status
+	if result.RejectionCode != "" || result.Status == store.OrderStatusRejected {
+		order.Status = store.OrderStatusRejected
+		order.Rejection = result.RejectionCode
+		if err := s.repo.Save(ctx, order); err != nil {
+			return err
+		}
+		s.publishAuditEvent(ctx, "live.order.rejected", order.SandboxID, account.ID, order.ID, map[string]any{"symbol": order.Symbol, "code": result.RejectionCode})
+		return nil
+	}
+	switch result.Status {
+	case store.OrderStatusFilled:
+		fillPrice := result.AvgFillPrice
+		if fillPrice <= 0 {
+			fillPrice = order.Price
+		}
+		if fillPrice <= 0 {
+			return domain.ValidationError("INVALID_EXCHANGE_FILL_PRICE", "filled exchange order requires a positive fill price")
+		}
+		if order.Status != store.OrderStatusFilled {
+			if err := s.fillOrder(ctx, order.ID, fillPrice, false); err != nil {
+				return err
+			}
+		}
+		updated, err := s.GetOrder(ctx, order.ID)
+		if err != nil {
+			return err
+		}
+		updated.ExchangeOrderID = result.ExchangeOrderID
+		updated.ExchangeStatus = result.Status
+		if err := s.repo.Save(ctx, updated); err != nil {
+			return err
+		}
+		s.publishAuditEvent(ctx, "live.order.filled", updated.SandboxID, account.ID, updated.ID, map[string]any{"symbol": updated.Symbol, "exchange_order_id": updated.ExchangeOrderID})
+	case store.OrderStatusPartiallyFilled:
+		order.Status = store.OrderStatusPartiallyFilled
+		order.FilledQty = result.FilledQty
+		order.AvgFillPrice = result.AvgFillPrice
+		if err := s.repo.Save(ctx, order); err != nil {
+			return err
+		}
+	default:
+		if result.Status != "" {
+			order.Status = result.Status
+		}
+		if err := s.repo.Save(ctx, order); err != nil {
+			return err
+		}
+	}
+	s.publishAuditEvent(ctx, "live.order.reconciled", order.SandboxID, account.ID, order.ID, map[string]any{"symbol": order.Symbol, "exchange_order_id": result.ExchangeOrderID, "status": result.Status})
+	return nil
+}
+
+func (s *TradingService) publishAuditEvent(ctx context.Context, topic, sandboxID, accountID, aggregateID string, payload map[string]any) {
+	if s.events == nil {
+		return
+	}
+	_ = s.events.Publish(ctx, domain.DomainEvent{Topic: topic, SandboxID: sandboxID, AccountID: accountID, AggregateID: aggregateID, Payload: payload})
 }
 
 func (s *TradingService) RefreshAccount(ctx context.Context, accountID string) error {

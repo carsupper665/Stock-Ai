@@ -11,19 +11,19 @@ import (
 )
 
 type singleSnapshotFetcher struct {
-	ticker domain.MarketTicker
-	err    error
+	snapshot domain.MarketSnapshot
+	err      error
 }
 
 func (f singleSnapshotFetcher) Name() string {
 	return "contract"
 }
 
-func (f singleSnapshotFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketTicker, error) {
+func (f singleSnapshotFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketSnapshot, error) {
 	if f.err != nil {
-		return domain.MarketTicker{}, f.err
+		return domain.MarketSnapshot{}, f.err
 	}
-	return f.ticker, nil
+	return f.snapshot, nil
 }
 
 func TestLiveContractModeMatrixAndSafetyDefaults(t *testing.T) {
@@ -86,7 +86,7 @@ func TestLiveContractMarketSnapshotAndPaperOrderIdempotency(t *testing.T) {
 	app := newTestApp(t)
 	ctx := context.Background()
 	now := app.Clock.Now()
-	liveMarket := NewLiveMarketProvider(singleSnapshotFetcher{ticker: domain.MarketTicker{Symbol: "BTCUSDT", Price: 100, At: now}}, app.Clock)
+	liveMarket := NewLiveMarketProvider(singleSnapshotFetcher{snapshot: domain.MarketSnapshot{Symbol: "BTCUSDT", Price: 100, LastPrice: 100, At: now, ReceivedAt: now, Provider: "contract", State: domain.MarketStateActive}}, app.Clock)
 	app.LiveMarket = liveMarket
 	app.Trading.liveMarket = liveMarket
 
@@ -138,10 +138,14 @@ func TestLiveContractRejectsStaleAndDegradedMarketData(t *testing.T) {
 	ctx := context.Background()
 
 	staleApp := newTestApp(t)
-	staleMarket := NewLiveMarketProvider(singleSnapshotFetcher{ticker: domain.MarketTicker{
-		Symbol: "BTCUSDT",
-		Price:  100,
-		At:     staleApp.Clock.Now().Add(-time.Minute),
+	staleMarket := NewLiveMarketProvider(singleSnapshotFetcher{snapshot: domain.MarketSnapshot{
+		Symbol:     "BTCUSDT",
+		Price:      100,
+		LastPrice:  100,
+		At:         staleApp.Clock.Now().Add(-time.Minute),
+		ReceivedAt: staleApp.Clock.Now().Add(-time.Minute),
+		Provider:   "contract",
+		State:      domain.MarketStateActive,
 	}}, staleApp.Clock)
 	staleApp.LiveMarket = staleMarket
 	staleApp.Trading.liveMarket = staleMarket
