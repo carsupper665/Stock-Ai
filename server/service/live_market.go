@@ -2,6 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,11 +25,21 @@ type LivePriceSnapshot struct {
 	Symbol          string      `json:"symbol"`
 	State           SymbolState `json:"state"`
 	Price           float64     `json:"price"`
+	LastPrice       float64     `json:"last_price"`
+	MarkPrice       *float64    `json:"mark_price,omitempty"`
+	BidPrice        *float64    `json:"bid_price,omitempty"`
+	BidQty          *float64    `json:"bid_qty,omitempty"`
+	AskPrice        *float64    `json:"ask_price,omitempty"`
+	AskQty          *float64    `json:"ask_qty,omitempty"`
+	Spread          *float64    `json:"spread,omitempty"`
 	LastUpdated     time.Time   `json:"last_updated,omitempty"`
+	ReceivedAt      time.Time   `json:"received_at,omitempty"`
+	FreshnessMs     int64       `json:"freshness_ms"`
 	LastAccessed    time.Time   `json:"last_accessed,omitempty"`
 	SubscriberCount int         `json:"subscriber_count"`
 	Provider        string      `json:"provider"`
 	Error           string      `json:"error,omitempty"`
+	ErrorCode       string      `json:"error_code,omitempty"`
 }
 
 type SubscriptionState struct {
@@ -43,7 +57,11 @@ type LiveSymbolsSummary struct {
 
 type LivePriceFetcher interface {
 	Name() string
-	Fetch(ctx context.Context, symbol string) (domain.MarketTicker, error)
+	Fetch(ctx context.Context, symbol string) (domain.MarketSnapshot, error)
+}
+
+type LiveKlineFetcher interface {
+	FetchKlines(ctx context.Context, symbol, interval string, from, to time.Time) ([]domain.Kline, error)
 }
 
 type LiveMarketProvider struct {
@@ -61,16 +79,29 @@ type LiveMarketProvider struct {
 type liveSymbolEntry struct {
 	Symbol          string
 	Price           float64
+	MarkPrice       *float64
+	BidPrice        *float64
+	BidQty          *float64
+	AskPrice        *float64
+	AskQty          *float64
+	Spread          *float64
 	LastUpdated     time.Time
+	ReceivedAt      time.Time
 	LastAccessed    time.Time
 	SubscriberCount int
 	Provider        string
 	Error           string
+	ErrorCode       string
 	State           SymbolState
 }
 
 type StaticLivePriceFetcher struct {
 	prices map[string]float64
+}
+
+type BinanceRESTFetcher struct {
+	baseURL string
+	client  *http.Client
 }
 
 func NewLiveMarketProvider(fetcher LivePriceFetcher, clock domain.Clock) *LiveMarketProvider {
@@ -102,12 +133,99 @@ func (f *StaticLivePriceFetcher) Name() string {
 	return "static"
 }
 
-func (f *StaticLivePriceFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketTicker, error) {
-	price, ok := f.prices[strings.ToUpper(strings.TrimSpace(symbol))]
+func (f *StaticLivePriceFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketSnapshot, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(symbol))
+	price, ok := f.prices[normalized]
 	if !ok {
-		return domain.MarketTicker{}, domain.NotFoundError("LIVE_PRICE_NOT_FOUND", "live price not found")
+		return domain.MarketSnapshot{}, domain.NotFoundError("LIVE_PRICE_NOT_FOUND", "live price not found")
 	}
-	return domain.MarketTicker{Symbol: strings.ToUpper(symbol), Price: price, At: time.Now().UTC()}, nil
+	at := time.Now().UTC()
+	return domain.MarketSnapshot{Symbol: normalized, Price: price, LastPrice: price, At: at, ReceivedAt: at, Provider: f.Name(), State: domain.MarketStateActive}, nil
+}
+
+func (f *StaticLivePriceFetcher) FetchKlines(ctx context.Context, symbol, interval string, from, to time.Time) ([]domain.Kline, error) {
+	if err := validateLiveInterval(interval); err != nil {
+		return nil, err
+	}
+	snapshot, err := f.Fetch(ctx, symbol)
+	if err != nil {
+		return nil, err
+	}
+	if to.Before(from) {
+		to = from
+	}
+	return []domain.Kline{
+		{Symbol: snapshot.Symbol, At: from.UTC(), Open: snapshot.LastPrice, High: snapshot.LastPrice, Low: snapshot.LastPrice, Close: snapshot.LastPrice, Volume: 0},
+		{Symbol: snapshot.Symbol, At: to.UTC(), Open: snapshot.LastPrice, High: snapshot.LastPrice, Low: snapshot.LastPrice, Close: snapshot.LastPrice, Volume: 0},
+	}, nil
+}
+
+func NewBinanceRESTFetcher(baseURL string) *BinanceRESTFetcher {
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = "https://api.binance.com"
+	}
+	return &BinanceRESTFetcher{baseURL: strings.TrimRight(baseURL, "/"), client: &http.Client{Timeout: 5 * time.Second}}
+}
+
+func (f *BinanceRESTFetcher) Name() string {
+	return "binance"
+}
+
+func (f *BinanceRESTFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketSnapshot, error) {
+	normalized := normalizeSymbol(symbol)
+	if normalized == "" {
+		return domain.MarketSnapshot{}, domain.ValidationError("INVALID_SYMBOL", "symbol is required")
+	}
+	endpoint := f.baseURL + "/api/v3/ticker/bookTicker?symbol=" + url.QueryEscape(normalized)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return domain.MarketSnapshot{}, err
+	}
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return domain.MarketSnapshot{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+		return domain.MarketSnapshot{}, domain.NotFoundError("LIVE_PRICE_NOT_FOUND", "live price not found")
+	}
+	if resp.StatusCode >= 400 {
+		return domain.MarketSnapshot{}, domain.NewError(http.StatusBadGateway, "LIVE_PROVIDER_ERROR", "live market provider returned an error", map[string]any{"status": resp.StatusCode})
+	}
+	var payload struct {
+		Symbol   string `json:"symbol"`
+		BidPrice string `json:"bidPrice"`
+		BidQty   string `json:"bidQty"`
+		AskPrice string `json:"askPrice"`
+		AskQty   string `json:"askQty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return domain.MarketSnapshot{}, err
+	}
+	bid, err := strconv.ParseFloat(payload.BidPrice, 64)
+	if err != nil {
+		return domain.MarketSnapshot{}, domain.NewError(http.StatusBadGateway, "LIVE_PROVIDER_ERROR", "invalid bid price from provider", nil)
+	}
+	bidQty, err := strconv.ParseFloat(payload.BidQty, 64)
+	if err != nil {
+		return domain.MarketSnapshot{}, domain.NewError(http.StatusBadGateway, "LIVE_PROVIDER_ERROR", "invalid bid quantity from provider", nil)
+	}
+	ask, err := strconv.ParseFloat(payload.AskPrice, 64)
+	if err != nil {
+		return domain.MarketSnapshot{}, domain.NewError(http.StatusBadGateway, "LIVE_PROVIDER_ERROR", "invalid ask price from provider", nil)
+	}
+	askQty, err := strconv.ParseFloat(payload.AskQty, 64)
+	if err != nil {
+		return domain.MarketSnapshot{}, domain.NewError(http.StatusBadGateway, "LIVE_PROVIDER_ERROR", "invalid ask quantity from provider", nil)
+	}
+	last := (bid + ask) / 2
+	spread := ask - bid
+	now := time.Now().UTC()
+	return domain.MarketSnapshot{
+		Symbol: normalized, Price: last, LastPrice: last,
+		BidPrice: &bid, BidQty: &bidQty, AskPrice: &ask, AskQty: &askQty, Spread: &spread,
+		At: now, ReceivedAt: now, FreshnessMs: 0, Provider: f.Name(), State: domain.MarketStateActive,
+	}, nil
 }
 
 func (p *LiveMarketProvider) TouchSymbol(symbol string) {
@@ -136,20 +254,41 @@ func (p *LiveMarketProvider) TouchSymbol(symbol string) {
 }
 
 func (p *LiveMarketProvider) GetTicker(ctx context.Context, sandboxID, symbol string) (domain.MarketTicker, error) {
+	snapshot, err := p.GetSnapshot(ctx, symbol)
+	if err != nil {
+		return domain.MarketTicker{}, err
+	}
+	return domain.MarketTicker{Symbol: snapshot.Symbol, Price: snapshot.LastPrice, At: snapshot.At}, nil
+}
+
+func (p *LiveMarketProvider) GetSnapshot(ctx context.Context, symbol string) (domain.MarketSnapshot, error) {
 	normalized := normalizeSymbol(symbol)
 	if normalized == "" {
-		return domain.MarketTicker{}, domain.ValidationError("INVALID_SYMBOL", "symbol is required")
+		return domain.MarketSnapshot{}, domain.ValidationError("INVALID_SYMBOL", "symbol is required")
 	}
 	p.TouchSymbol(normalized)
 	if err := p.refreshSymbol(ctx, normalized); err != nil {
-		return domain.MarketTicker{}, err
+		p.mu.RLock()
+		entry := p.entries[normalized]
+		snapshot := marketSnapshotFromEntry(*entry, p.clock.Now(), p.staleAfter)
+		p.mu.RUnlock()
+		if snapshot.ErrorCode != "" {
+			return snapshot, domain.ValidationError(snapshot.ErrorCode, "live market provider is degraded")
+		}
+		return snapshot, err
 	}
 
 	p.mu.RLock()
 	entry := p.entries[normalized]
-	ticker := domain.MarketTicker{Symbol: normalized, Price: entry.Price, At: entry.LastUpdated}
+	snapshot := marketSnapshotFromEntry(*entry, p.clock.Now(), p.staleAfter)
 	p.mu.RUnlock()
-	return ticker, nil
+	if snapshot.State == domain.MarketStateStale {
+		return snapshot, domain.ValidationError("MARKET_DATA_STALE", "market data is stale")
+	}
+	if snapshot.State == domain.MarketStateDegraded {
+		return snapshot, domain.ValidationError("MARKET_DATA_DEGRADED", "market data provider is degraded")
+	}
+	return snapshot, nil
 }
 
 func (p *LiveMarketProvider) GetLastPrice(ctx context.Context, sandboxID, symbol string) (float64, time.Time, error) {
@@ -161,17 +300,34 @@ func (p *LiveMarketProvider) GetLastPrice(ctx context.Context, sandboxID, symbol
 }
 
 func (p *LiveMarketProvider) GetKlines(ctx context.Context, sandboxID, symbol, interval string, from, to time.Time) ([]domain.Kline, error) {
-	ticker, err := p.GetTicker(ctx, sandboxID, symbol)
+	if err := validateLiveInterval(interval); err != nil {
+		return nil, err
+	}
+	normalized := normalizeSymbol(symbol)
+	if normalized == "" {
+		return nil, domain.ValidationError("INVALID_SYMBOL", "symbol is required")
+	}
+	now := p.clock.Now()
+	if to.IsZero() || to.After(now) {
+		to = now
+	}
+	if from.IsZero() || from.After(to) {
+		from = to.Add(-time.Hour)
+	}
+	if klineFetcher, ok := p.fetcher.(LiveKlineFetcher); ok {
+		return klineFetcher.FetchKlines(ctx, normalized, interval, from, to)
+	}
+	snapshot, err := p.GetSnapshot(ctx, normalized)
 	if err != nil {
 		return nil, err
 	}
 	return []domain.Kline{{
-		Symbol: ticker.Symbol,
-		At:     ticker.At,
-		Open:   ticker.Price,
-		High:   ticker.Price,
-		Low:    ticker.Price,
-		Close:  ticker.Price,
+		Symbol: snapshot.Symbol,
+		At:     snapshot.At,
+		Open:   snapshot.LastPrice,
+		High:   snapshot.LastPrice,
+		Low:    snapshot.LastPrice,
+		Close:  snapshot.LastPrice,
 		Volume: 0,
 	}}, nil
 }
@@ -231,7 +387,7 @@ func (p *LiveMarketProvider) SnapshotList() ([]LivePriceSnapshot, LiveSymbolsSum
 }
 
 func (p *LiveMarketProvider) refreshSymbol(ctx context.Context, symbol string) error {
-	ticker, err := p.fetcher.Fetch(ctx, symbol)
+	snapshot, err := p.fetcher.Fetch(ctx, symbol)
 	now := p.clock.Now()
 	var events []domain.DomainEvent
 
@@ -247,6 +403,7 @@ func (p *LiveMarketProvider) refreshSymbol(ctx context.Context, symbol string) e
 	if err != nil {
 		entry.State = SymbolStateDegraded
 		entry.Error = err.Error()
+		entry.ErrorCode = errorCode(err, "LIVE_PROVIDER_ERROR")
 		if previousState != SymbolStateDegraded {
 			events = append(events,
 				domain.DomainEvent{Topic: "live.symbol.state_changed", AggregateID: symbol, Payload: map[string]any{"symbol": symbol, "from": previousState, "to": entry.State, "provider": entry.Provider}},
@@ -258,9 +415,26 @@ func (p *LiveMarketProvider) refreshSymbol(ctx context.Context, symbol string) e
 		return err
 	}
 
-	entry.Price = ticker.Price
-	entry.LastUpdated = ticker.At.UTC()
+	entry.Price = snapshot.LastPrice
+	if entry.Price == 0 {
+		entry.Price = snapshot.Price
+	}
+	entry.MarkPrice = snapshot.MarkPrice
+	entry.BidPrice = snapshot.BidPrice
+	entry.BidQty = snapshot.BidQty
+	entry.AskPrice = snapshot.AskPrice
+	entry.AskQty = snapshot.AskQty
+	entry.Spread = snapshot.Spread
+	entry.LastUpdated = snapshot.At.UTC()
+	if entry.LastUpdated.IsZero() {
+		entry.LastUpdated = now
+	}
+	entry.ReceivedAt = snapshot.ReceivedAt.UTC()
+	if entry.ReceivedAt.IsZero() {
+		entry.ReceivedAt = now
+	}
 	entry.Error = ""
+	entry.ErrorCode = ""
 	entry.State = SymbolStateActive
 	if previousState != SymbolStateActive {
 		events = append(events, domain.DomainEvent{Topic: "live.symbol.state_changed", AggregateID: symbol, Payload: map[string]any{"symbol": symbol, "from": previousState, "to": entry.State, "provider": entry.Provider, "price": entry.Price}})
@@ -295,14 +469,68 @@ func snapshotFromEntry(entry liveSymbolEntry, now time.Time, staleAfter time.Dur
 		Symbol:          entry.Symbol,
 		State:           state,
 		Price:           entry.Price,
+		LastPrice:       entry.Price,
+		MarkPrice:       entry.MarkPrice,
+		BidPrice:        entry.BidPrice,
+		BidQty:          entry.BidQty,
+		AskPrice:        entry.AskPrice,
+		AskQty:          entry.AskQty,
+		Spread:          entry.Spread,
 		LastUpdated:     entry.LastUpdated,
+		ReceivedAt:      entry.ReceivedAt,
+		FreshnessMs:     freshnessMs(now, entry.LastUpdated),
 		LastAccessed:    entry.LastAccessed,
 		SubscriberCount: entry.SubscriberCount,
 		Provider:        entry.Provider,
 		Error:           entry.Error,
+		ErrorCode:       entry.ErrorCode,
 	}
 }
 
 func normalizeSymbol(symbol string) string {
 	return strings.ToUpper(strings.TrimSpace(symbol))
+}
+
+func marketSnapshotFromEntry(entry liveSymbolEntry, now time.Time, staleAfter time.Duration) domain.MarketSnapshot {
+	item := snapshotFromEntry(entry, now, staleAfter)
+	return domain.MarketSnapshot{
+		Symbol:      item.Symbol,
+		Price:       item.Price,
+		LastPrice:   item.LastPrice,
+		MarkPrice:   item.MarkPrice,
+		BidPrice:    item.BidPrice,
+		BidQty:      item.BidQty,
+		AskPrice:    item.AskPrice,
+		AskQty:      item.AskQty,
+		Spread:      item.Spread,
+		At:          item.LastUpdated,
+		ReceivedAt:  item.ReceivedAt,
+		FreshnessMs: item.FreshnessMs,
+		Provider:    item.Provider,
+		State:       domain.MarketState(item.State),
+		ErrorCode:   item.ErrorCode,
+	}
+}
+
+func freshnessMs(now, at time.Time) int64 {
+	if at.IsZero() {
+		return 0
+	}
+	return now.Sub(at).Milliseconds()
+}
+
+func errorCode(err error, fallback string) string {
+	if appErr, ok := err.(*domain.AppError); ok && appErr.Code != "" {
+		return appErr.Code
+	}
+	return fallback
+}
+
+func validateLiveInterval(interval string) error {
+	switch strings.TrimSpace(interval) {
+	case "1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d":
+		return nil
+	default:
+		return domain.ValidationError("INVALID_INTERVAL", "invalid kline interval")
+	}
 }

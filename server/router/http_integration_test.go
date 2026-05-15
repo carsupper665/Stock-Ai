@@ -239,6 +239,44 @@ func mustJSON(v any) []byte {
 	return out
 }
 
+func postJSONWithTokenCaptureStatus(t *testing.T, client *http.Client, url, token string, payload any) (int, map[string]any) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(mustJSON(payload)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("post request: %v", err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp.StatusCode, body
+}
+
+func assertJSONDoesNotContainSubstrings(t *testing.T, payload any, forbidden ...string) {
+	t.Helper()
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	lower := strings.ToLower(string(raw))
+	for _, needle := range forbidden {
+		if needle == "" {
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(needle)) {
+			t.Fatalf("payload leaked forbidden value %q: %s", needle, string(raw))
+		}
+	}
+}
+
 func uploadCSV(t *testing.T, client *http.Client, url, fileName, contents string, wantStatus int) map[string]any {
 	t.Helper()
 
@@ -321,6 +359,13 @@ func TestAccountWebSocketReceivesTradeEvents(t *testing.T) {
 	if first["type"] != "snapshot" {
 		t.Fatalf("unexpected initial message: %+v", first)
 	}
+	if first["account_id"] != account.ID {
+		t.Fatalf("snapshot must be account scoped, got %+v", first)
+	}
+	payload, ok := first["payload"].(map[string]any)
+	if !ok || payload["account"] == nil || payload["positions"] == nil || payload["open_orders"] == nil || payload["recent_trades"] == nil || payload["market"] == nil {
+		t.Fatalf("snapshot missing account envelope fields: %+v", first)
+	}
 
 	agent := &http.Client{}
 	postJSONWithToken(t, agent, ts.URL+"/orders", token, map[string]any{
@@ -340,7 +385,7 @@ func TestAccountWebSocketReceivesTradeEvents(t *testing.T) {
 		if err := conn.ReadJSON(&msg); err != nil {
 			continue
 		}
-		if msg["topic"] == "trade.executed" {
+		if msg["type"] == "event" && msg["account_id"] == account.ID && msg["topic"] == "trade.executed" {
 			sawTrade = true
 			break
 		}
@@ -348,6 +393,102 @@ func TestAccountWebSocketReceivesTradeEvents(t *testing.T) {
 	if !sawTrade {
 		t.Fatalf("expected trade.executed event over websocket")
 	}
+}
+
+func TestAccountWebSocketUsesFrozenEnvelopeAndRedactsSecrets(t *testing.T) {
+	app := newHTTPTestApp(t)
+
+	ctx := context.Background()
+	if _, err := app.Sandboxes.Create(ctx, service.CreateSandboxInput{
+		ID:                "sandbox-ws-envelope",
+		Name:              "WS Envelope Sandbox",
+		StartDatetime:     time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		ReplayCurrentTime: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		ReplaySpeed:       1,
+		DatasetID:         "dataset-http",
+	}); err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	if _, err := app.Sandboxes.Start(ctx, "sandbox-ws-envelope"); err != nil {
+		t.Fatalf("start sandbox: %v", err)
+	}
+	account, err := app.Accounts.Create(ctx, service.CreateAccountInput{SandboxID: "sandbox-ws-envelope", Name: "ws-envelope-agent", InitialBalance: 1000})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	token, _, err := app.Tokens.Create(ctx, service.CreateTokenInput{AccountID: account.ID, Name: "ws-envelope-token", Scopes: []string{"trade:read", "trade:write", "account:read", "market:read"}})
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+
+	engine := New(app)
+	ts := httptest.NewServer(engine)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/account"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+token)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	var snapshot map[string]any
+	if err := conn.ReadJSON(&snapshot); err != nil {
+		t.Fatalf("read initial snapshot: %v", err)
+	}
+	if snapshot["type"] != "snapshot" {
+		t.Fatalf("unexpected initial message: %+v", snapshot)
+	}
+	if snapshot["account_id"] != account.ID {
+		t.Fatalf("expected snapshot account_id %q, got %+v", account.ID, snapshot)
+	}
+	payload, ok := snapshot["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected snapshot payload object, got %+v", snapshot["payload"])
+	}
+	for _, key := range []string{"account", "positions", "open_orders", "recent_trades", "market"} {
+		if _, exists := payload[key]; !exists {
+			t.Fatalf("expected snapshot payload to contain %q, got %+v", key, payload)
+		}
+	}
+	assertJSONDoesNotContainSubstrings(t, snapshot, token, "token_hash", "password", "salt", "api_key", "api_secret")
+
+	agent := &http.Client{}
+	postJSONWithToken(t, agent, ts.URL+"/orders", token, map[string]any{
+		"symbol":        "BTCUSDT",
+		"side":          "buy",
+		"position_side": "long",
+		"order_type":    "market",
+		"qty":           1,
+		"leverage":      2,
+	}, http.StatusCreated)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		var msg map[string]any
+		if err := conn.ReadJSON(&msg); err != nil {
+			continue
+		}
+		if msg["topic"] != "trade.executed" {
+			continue
+		}
+		if msg["type"] != "event" {
+			t.Fatalf("expected event envelope type, got %+v", msg)
+		}
+		if msg["account_id"] != account.ID {
+			t.Fatalf("expected event account_id %q, got %+v", account.ID, msg)
+		}
+		if msg["aggregate_id"] == nil || msg["created_at"] == nil {
+			t.Fatalf("expected event aggregate_id and created_at, got %+v", msg)
+		}
+		assertJSONDoesNotContainSubstrings(t, msg, token, "token_hash", "password", "salt", "api_key", "api_secret")
+		return
+	}
+
+	t.Fatalf("expected trade.executed event over websocket")
 }
 
 func TestReplayDatasetHTTPFlow(t *testing.T) {
@@ -603,15 +744,22 @@ func TestLiveAccountHTTPFlow(t *testing.T) {
 		"price_mode":         "live",
 		"credentials_status": "healthy",
 		"supported_symbols":  []string{"BTCUSDT", "ETHUSDT"},
+		"api_key":            "paper-visible-key",
+		"api_secret":         "paper-visible-secret",
 	}, http.StatusCreated)
 	if created["type"] != store.AccountTypeLive {
 		t.Fatalf("unexpected live account response: %+v", created)
 	}
+	assertJSONDoesNotContainSubstrings(t, created, "paper-visible-key", "paper-visible-secret", "token_hash", "password", "salt", "api_key", "api_secret")
 
 	list := getJSON(t, client, ts.URL+"/admin/live-accounts", "", http.StatusOK)
 	if len(list["items"].([]any)) == 0 {
 		t.Fatalf("expected live account list items, got %+v", list)
 	}
+	assertJSONDoesNotContainSubstrings(t, list, "paper-visible-key", "paper-visible-secret", "token_hash", "password", "salt", "api_key", "api_secret")
+
+	detail := getJSON(t, client, ts.URL+"/admin/live-accounts/"+created["id"].(string), "", http.StatusOK)
+	assertJSONDoesNotContainSubstrings(t, detail, "paper-visible-key", "paper-visible-secret", "token_hash", "password", "salt", "api_key", "api_secret")
 
 	updated := patchJSON(t, client, ts.URL+"/admin/live-accounts/"+created["id"].(string), map[string]any{
 		"credentials_status": "stale",
@@ -619,6 +767,7 @@ func TestLiveAccountHTTPFlow(t *testing.T) {
 	if updated["credentials_status"] != "stale" {
 		t.Fatalf("unexpected updated live account: %+v", updated)
 	}
+	assertJSONDoesNotContainSubstrings(t, updated, "paper-visible-key", "paper-visible-secret", "token_hash", "password", "salt", "api_key", "api_secret")
 
 	tokenResp := postJSON(t, client, ts.URL+"/tokens", map[string]any{
 		"account_id": created["id"],
@@ -633,16 +782,98 @@ func TestLiveAccountHTTPFlow(t *testing.T) {
 		t.Fatalf("unexpected live market price: %+v", price)
 	}
 
-	orderErr := postJSONWithTokenExpectStatus(t, agent, ts.URL+"/orders", token, map[string]any{
+	orderResp := postJSONWithToken(t, agent, ts.URL+"/orders", token, map[string]any{
 		"symbol":        "BTCUSDT",
 		"side":          "buy",
 		"position_side": "long",
 		"order_type":    "market",
 		"qty":           1,
 		"leverage":      1,
-	}, http.StatusConflict)
-	if orderErr["code"] == nil {
-		t.Fatalf("expected order rejection payload, got %+v", orderErr)
+	}, http.StatusCreated)
+	if orderResp["status"] != store.OrderStatusFilled || orderResp["sandbox_id"] != "" {
+		t.Fatalf("unexpected paper live order response: %+v", orderResp)
+	}
+	assertJSONDoesNotContainSubstrings(t, orderResp, token, "paper-visible-key", "paper-visible-secret", "token_hash", "password", "salt", "api_key", "api_secret")
+}
+
+func TestLiveOrderClientOrderIDIsIdempotentOverHTTP(t *testing.T) {
+	app := newHTTPTestApp(t)
+	engine := New(app)
+	ts := httptest.NewServer(engine)
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+
+	postJSON(t, client, ts.URL+"/admin/login", map[string]any{"username": "root", "password": "root-pass"}, http.StatusOK)
+	postJSON(t, client, ts.URL+"/admin/sandboxes", map[string]any{
+		"id":                  "sandbox-client-order-id",
+		"name":                "Client Order ID Sandbox",
+		"start_datetime":      "2025-01-01T00:00:00Z",
+		"replay_current_time": "2025-01-01T00:00:00Z",
+		"replay_speed":        1,
+		"dataset_id":          "dataset-http",
+	}, http.StatusCreated)
+	postJSON(t, client, ts.URL+"/admin/sandboxes/sandbox-client-order-id/start", map[string]any{}, http.StatusOK)
+
+	accountResp := postJSON(t, client, ts.URL+"/admin/sandboxes/sandbox-client-order-id/accounts", map[string]any{
+		"name":            "agent-client-order-id",
+		"initial_balance": 1000,
+	}, http.StatusCreated)
+	tokenResp := postJSON(t, client, ts.URL+"/tokens", map[string]any{
+		"account_id": accountResp["id"],
+		"name":       "client-order-id-token",
+		"scopes":     []string{"trade:read", "trade:write", "account:read", "market:read"},
+	}, http.StatusCreated)
+	token := tokenResp["token"].(string)
+	agent := &http.Client{}
+
+	orderPayload := map[string]any{
+		"symbol":          "BTCUSDT",
+		"side":            "buy",
+		"position_side":   "long",
+		"order_type":      "limit",
+		"qty":             1,
+		"price":           99,
+		"leverage":        2,
+		"client_order_id": "strategy-001",
+	}
+	firstStatus, first := postJSONWithTokenCaptureStatus(t, agent, ts.URL+"/orders", token, orderPayload)
+	if firstStatus != http.StatusCreated {
+		t.Fatalf("expected first order status %d, got %d: %+v", http.StatusCreated, firstStatus, first)
+	}
+
+	secondStatus, second := postJSONWithTokenCaptureStatus(t, agent, ts.URL+"/orders", token, orderPayload)
+	if secondStatus != http.StatusOK && secondStatus != http.StatusCreated {
+		t.Fatalf("expected idempotent replay to return 200 or 201, got %d: %+v", secondStatus, second)
+	}
+	if first["id"] != second["id"] {
+		t.Fatalf("expected same client_order_id to return existing order, got first=%+v second=%+v", first, second)
+	}
+
+	orders := getJSON(t, agent, ts.URL+"/orders", token, http.StatusOK)
+	if got := len(orders["items"].([]any)); got != 1 {
+		t.Fatalf("expected one persisted order for repeated client_order_id, got %d: %+v", got, orders)
+	}
+
+	conflictStatus, conflict := postJSONWithTokenCaptureStatus(t, agent, ts.URL+"/orders", token, map[string]any{
+		"symbol":          "BTCUSDT",
+		"side":            "buy",
+		"position_side":   "long",
+		"order_type":      "limit",
+		"qty":             2,
+		"price":           99,
+		"leverage":        2,
+		"client_order_id": "strategy-001",
+	})
+	if conflictStatus != http.StatusConflict {
+		t.Fatalf("expected conflicting payload to return %d, got %d: %+v", http.StatusConflict, conflictStatus, conflict)
+	}
+	if conflict["code"] != "CLIENT_ORDER_ID_CONFLICT" {
+		t.Fatalf("expected conflict code CLIENT_ORDER_ID_CONFLICT, got %+v", conflict)
 	}
 }
 

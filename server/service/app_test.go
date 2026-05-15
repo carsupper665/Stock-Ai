@@ -820,14 +820,18 @@ func TestLiveAccountCRUDAndTokenIssuance(t *testing.T) {
 		t.Fatalf("expected token for live account, got token=%q err=%v", token, err)
 	}
 
-	if _, err := app.Trading.PlaceOrder(ctx, live.ID, PlaceOrderInput{
+	order, err := app.Trading.PlaceOrder(ctx, live.ID, PlaceOrderInput{
 		Symbol:       "BTCUSDT",
 		Side:         store.OrderSideBuy,
 		PositionSide: store.PositionSideLong,
 		OrderType:    store.OrderTypeMarket,
 		Quantity:     1,
 		Leverage:     1,
-	}); err == nil {
-		t.Fatalf("expected live account order placement to be rejected")
+	})
+	if err != nil {
+		t.Fatalf("expected paper live account order placement to succeed: %v", err)
+	}
+	if order.Status != store.OrderStatusFilled || order.SandboxID != "" {
+		t.Fatalf("unexpected paper live order: %+v", order)
 	}
 }

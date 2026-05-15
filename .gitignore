@@ -6,6 +6,7 @@ web/node_modules/*
 web/dist/*
 web/vite-*.log
 server/DB.db
+server/.gocache/
 tmp/*
 .omx/*
 openspec/*

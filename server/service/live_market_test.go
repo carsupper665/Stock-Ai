@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -18,15 +20,16 @@ func (f fakeLiveFetcher) Name() string {
 	return "fake"
 }
 
-func (f fakeLiveFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketTicker, error) {
+func (f fakeLiveFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketSnapshot, error) {
 	if f.err != nil {
-		return domain.MarketTicker{}, f.err
+		return domain.MarketSnapshot{}, f.err
 	}
 	price, ok := f.prices[symbol]
 	if !ok {
-		return domain.MarketTicker{}, domain.NotFoundError("LIVE_PRICE_NOT_FOUND", "live price not found")
+		return domain.MarketSnapshot{}, domain.NotFoundError("LIVE_PRICE_NOT_FOUND", "live price not found")
 	}
-	return domain.MarketTicker{Symbol: symbol, Price: price, At: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}, nil
+	at := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	return domain.MarketSnapshot{Symbol: symbol, Price: price, LastPrice: price, At: at, ReceivedAt: at, Provider: f.Name(), State: domain.MarketStateActive}, nil
 }
 
 func TestLiveMarketProviderDeduplicatesSubscriptions(t *testing.T) {
@@ -78,31 +81,31 @@ type sequenceLiveFetcher struct {
 }
 
 type fetchResult struct {
-	ticker domain.MarketTicker
-	err    error
+	snapshot domain.MarketSnapshot
+	err      error
 }
 
 func (f *sequenceLiveFetcher) Name() string {
 	return "sequence"
 }
 
-func (f *sequenceLiveFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketTicker, error) {
+func (f *sequenceLiveFetcher) Fetch(ctx context.Context, symbol string) (domain.MarketSnapshot, error) {
 	if f.index >= len(f.results) {
-		return domain.MarketTicker{}, errors.New("no more results")
+		return domain.MarketSnapshot{}, errors.New("no more results")
 	}
 	result := f.results[f.index]
 	f.index++
 	if result.err != nil {
-		return domain.MarketTicker{}, result.err
+		return domain.MarketSnapshot{}, result.err
 	}
-	return result.ticker, nil
+	return result.snapshot, nil
 }
 
 func TestLiveMarketProviderPublishesConnectionEvents(t *testing.T) {
 	app := newTestApp(t)
 	fetcher := &sequenceLiveFetcher{results: []fetchResult{
 		{err: errors.New("upstream down")},
-		{ticker: domain.MarketTicker{Symbol: "BTCUSDT", Price: 101, At: time.Date(2025, 1, 1, 0, 0, 1, 0, time.UTC)}},
+		{snapshot: domain.MarketSnapshot{Symbol: "BTCUSDT", Price: 101, LastPrice: 101, At: time.Date(2025, 1, 1, 0, 0, 1, 0, time.UTC), ReceivedAt: time.Date(2025, 1, 1, 0, 0, 1, 0, time.UTC), Provider: "sequence", State: domain.MarketStateActive}},
 	}}
 	provider := NewLiveMarketProvider(fetcher, app.Clock)
 	provider.SetPublisher(app.Events)
@@ -131,5 +134,43 @@ func TestLiveMarketProviderPublishesConnectionEvents(t *testing.T) {
 
 	if topics[0] != "live.connection.degraded" || topics[1] != "live.connection.recovered" {
 		t.Fatalf("unexpected live connection events: %v", topics)
+	}
+}
+
+func TestBinanceRESTFetcherMapsBookTickerSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/ticker/bookTicker" || r.URL.Query().Get("symbol") != "BTCUSDT" {
+			t.Fatalf("unexpected request %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"symbol":"BTCUSDT","bidPrice":"100.00","bidQty":"2.5","askPrice":"101.00","askQty":"3.5"}`))
+	}))
+	defer server.Close()
+
+	snapshot, err := NewBinanceRESTFetcher(server.URL).Fetch(context.Background(), " btcusdt ")
+	if err != nil {
+		t.Fatalf("fetch book ticker: %v", err)
+	}
+	if snapshot.Symbol != "BTCUSDT" || snapshot.LastPrice != 100.5 || snapshot.Provider != "binance" {
+		t.Fatalf("unexpected snapshot: %+v", snapshot)
+	}
+	if snapshot.BidPrice == nil || *snapshot.BidPrice != 100 || snapshot.AskPrice == nil || *snapshot.AskPrice != 101 || snapshot.Spread == nil || *snapshot.Spread != 1 {
+		t.Fatalf("expected bid/ask/spread, got %+v", snapshot)
+	}
+}
+
+func TestLiveMarketProviderKlineContract(t *testing.T) {
+	app := newTestApp(t)
+	provider := NewLiveMarketProvider(NewStaticLivePriceFetcher(), app.Clock)
+
+	klines, err := provider.GetKlines(context.Background(), "", "btcusdt", "1m", app.Clock.Now().Add(-time.Minute), app.Clock.Now())
+	if err != nil {
+		t.Fatalf("get live klines: %v", err)
+	}
+	if len(klines) < 2 || klines[0].Symbol != "BTCUSDT" || klines[0].Close != 100 {
+		t.Fatalf("unexpected klines: %+v", klines)
+	}
+	if _, err := provider.GetKlines(context.Background(), "", "BTCUSDT", "2m", app.Clock.Now().Add(-time.Minute), app.Clock.Now()); codeOf(err) != "INVALID_INTERVAL" {
+		t.Fatalf("expected invalid interval, got %v", err)
 	}
 }

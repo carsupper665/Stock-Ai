@@ -12,10 +12,13 @@ import (
 )
 
 type AppConfig struct {
-	DB            *gorm.DB
-	SessionSecret string
-	FrontendURL   string
-	Now           func() time.Time
+	DB                    *gorm.DB
+	SessionSecret         string
+	FrontendURL           string
+	Now                   func() time.Time
+	AllowLiveExecution    bool
+	AllowMainnetExecution bool
+	ExchangeAdapter       ExchangeAdapter
 }
 
 type App struct {
@@ -25,6 +28,7 @@ type App struct {
 	Events     *EventBus
 	Market     domain.MarketDataProvider
 	LiveMarket *LiveMarketProvider
+	Exchange   ExchangeAdapter
 	Runtime    *SandboxRuntimeManager
 	Tokens     *TokenService
 	Datasets   *DatasetService
@@ -65,6 +69,7 @@ func NewApp(cfg AppConfig) (*App, error) {
 		Events:     events,
 		Market:     market,
 		LiveMarket: liveMarket,
+		Exchange:   cfg.ExchangeAdapter,
 		Runtime:    runtime,
 		Config:     cfg,
 	}
@@ -74,7 +79,7 @@ func NewApp(cfg AppConfig) (*App, error) {
 	app.Sandboxes = NewSandboxService(repository, clock, events)
 	app.Sandboxes.SetRuntime(runtime)
 	app.Tokens = NewTokenService(repository, clock, events)
-	app.Trading = NewTradingService(repository, clock, market, events, risk, fillPolicy, ledger)
+	app.Trading = NewTradingService(repository, clock, market, liveMarket, cfg.ExchangeAdapter, events, risk, fillPolicy, ledger, cfg)
 	app.Sandboxes.SetProcessor(app.Trading.ProcessSandbox)
 	app.Runtime.SetAutoTickPlanner(app.Sandboxes.PlanRuntimeTick)
 	app.Runtime.SetTickHandler(app.Sandboxes.HandleRuntimeTick)
