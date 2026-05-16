@@ -38,9 +38,9 @@ const stateClass = computed(() => `is-${props.state}`)
   gap: 1rem;
   align-items: center;
   padding: 0.85rem 1rem;
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid var(--border);
-  background: rgba(19, 26, 36, 0.92);
+  background: #f8fafc;
 }
 
 .banner p,
@@ -50,16 +50,18 @@ const stateClass = computed(() => `is-${props.state}`)
 }
 
 .is-connected {
-  border-color: rgba(52, 211, 153, 0.28);
+  border-color: rgba(22, 163, 74, 0.35);
+  background: rgba(22, 163, 74, 0.08);
 }
 
 .is-lagging {
-  border-color: rgba(251, 191, 36, 0.34);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
 }
 
 .is-disconnected {
-  border-color: rgba(248, 113, 113, 0.4);
-  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.1);
 }
 </style>
+

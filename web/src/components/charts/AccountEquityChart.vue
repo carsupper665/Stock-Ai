@@ -23,27 +23,27 @@ const props = defineProps<{
 const option = computed(() => ({
   backgroundColor: 'transparent',
   tooltip: { trigger: 'axis' },
-  legend: { textStyle: { color: '#98a7c2' } },
-  grid: { left: 36, right: 18, top: 36, bottom: 24 },
+  legend: { textStyle: { color: '#64748b', fontWeight: 600 } },
+  grid: { left: 36, right: 20, top: 36, bottom: 24 },
   xAxis: {
     type: 'category',
     boundaryGap: false,
-    axisLabel: { color: '#98a7c2' },
+    axisLabel: { color: '#64748b' },
     data: props.series[0]?.points.map((point) => new Date(point.timestamp).toLocaleTimeString()) ?? [],
   },
   yAxis: {
     type: 'value',
-    axisLabel: { color: '#98a7c2' },
-    splitLine: { lineStyle: { color: 'rgba(149, 164, 187, 0.12)' } },
+    axisLabel: { color: '#64748b' },
+    splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.24)' } },
   },
   series: props.series.map((serie, index) => ({
     name: serie.name,
     type: 'line',
     smooth: true,
     showSymbol: false,
-    lineStyle: { width: 2 },
-    itemStyle: { color: index % 2 === 0 ? '#4ea1ff' : '#34d399' },
-    areaStyle: { opacity: 0.08 },
+    lineStyle: { width: 2.4 },
+    itemStyle: { color: index % 2 === 0 ? '#2563eb' : '#16a34a' },
+    areaStyle: { opacity: 0.1 },
     data: serie.points.map((point) => point.value),
   })),
 }))
@@ -51,10 +51,13 @@ const option = computed(() => ({
 
 <style scoped>
 .chart-wrap {
-  min-height: 240px;
-  padding: 0.75rem;
+  min-height: 250px;
+  padding: 0.9rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
+
 .chart {
-  min-height: 220px;
+  min-height: 228px;
 }
 </style>
+

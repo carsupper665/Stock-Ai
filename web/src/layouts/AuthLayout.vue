@@ -1,6 +1,8 @@
 <template>
   <main class="auth-shell">
-    <RouterView />
+    <section class="auth-panel panel">
+      <RouterView />
+    </section>
   </main>
 </template>
 
@@ -11,4 +13,11 @@
   place-items: center;
   padding: 1.5rem;
 }
+
+.auth-panel {
+  width: min(520px, 100%);
+  padding: 1.25rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
 </style>
+

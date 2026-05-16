@@ -14,8 +14,8 @@ body,
 body {
   font-family: var(--font-body);
   background:
-    radial-gradient(circle at top left, rgba(78, 161, 255, 0.14), transparent 28%),
-    linear-gradient(180deg, #0a0f15 0%, #0d1117 44%, #101825 100%);
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 32%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
   color: var(--text);
 }
 
@@ -44,15 +44,16 @@ th,
 td {
   padding: 0.8rem 0.9rem;
   text-align: left;
-  border-bottom: 1px solid rgba(149, 164, 187, 0.1);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
   vertical-align: top;
 }
 
 th {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--muted);
+  font-weight: 600;
 }
 
 td {
@@ -66,7 +67,7 @@ label {
 }
 
 .panel {
-  background: linear-gradient(180deg, rgba(32, 44, 61, 0.9), rgba(19, 26, 36, 0.95));
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -77,10 +78,18 @@ select.control,
 textarea.control {
   width: 100%;
   border: 1px solid var(--border);
-  background: rgba(11, 16, 23, 0.72);
+  background: #ffffff;
   color: var(--text);
   border-radius: 12px;
   padding: 0.8rem 0.9rem;
+}
+
+.control:focus-visible,
+select.control:focus-visible,
+textarea.control:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.3);
+  outline-offset: 2px;
 }
 
 textarea.control {
@@ -89,15 +98,19 @@ textarea.control {
 }
 
 .btn {
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.72rem 1rem;
-  background: rgba(255, 255, 255, 0.08);
+  background: #ffffff;
   color: var(--text);
+  font-weight: 600;
 }
 
 .btn.primary {
-  background: linear-gradient(135deg, var(--accent), #2277f7);
+  border-color: transparent;
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.22);
 }
 
 .btn.ghost {
@@ -106,13 +119,15 @@ textarea.control {
 }
 
 .btn.warn {
-  background: rgba(251, 191, 36, 0.16);
-  color: #ffe39a;
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
 }
 
 .btn.danger {
-  background: rgba(248, 113, 113, 0.18);
-  color: #ffc3c3;
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
 }
 
 .grid-gap {
@@ -209,3 +224,4 @@ textarea.control {
     grid-template-columns: 1fr;
   }
 }
+

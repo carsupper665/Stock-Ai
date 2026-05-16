@@ -1,11 +1,11 @@
 <template>
   <article class="panel summary-card">
-    <header>
-      <span>{{ label }}</span>
+    <header class="summary-head">
+      <span class="summary-label">{{ label }}</span>
       <slot name="badge" />
     </header>
-    <strong>{{ value }}</strong>
-    <p>{{ detail }}</p>
+    <strong class="summary-value">{{ value }}</strong>
+    <p v-if="detail" class="summary-detail">{{ detail }}</p>
   </article>
 </template>
 
@@ -19,22 +19,39 @@ defineProps<{
 
 <style scoped>
 .summary-card {
-  padding: 1rem;
+  padding: 1.1rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
-header {
+
+.summary-head {
   display: flex;
   justify-content: space-between;
-  color: var(--muted);
-  margin-bottom: 0.75rem;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.65rem;
 }
-strong {
+
+.summary-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.summary-value {
   display: block;
   font-family: var(--font-display);
-  font-size: 1.7rem;
+  font-size: 1.68rem;
+  line-height: 1.2;
   margin-bottom: 0.35rem;
 }
-p {
+
+.summary-detail {
   margin: 0;
   color: var(--muted);
+  font-size: 0.9rem;
 }
 </style>
+

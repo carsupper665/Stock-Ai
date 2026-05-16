@@ -1,19 +1,20 @@
 :root {
-  --bg: #0d1117;
-  --bg-elevated: #131a24;
-  --bg-panel: #182230;
-  --bg-panel-alt: #202c3d;
-  --border: rgba(149, 164, 187, 0.16);
-  --text: #edf3ff;
-  --muted: #98a7c2;
-  --accent: #4ea1ff;
-  --accent-soft: rgba(78, 161, 255, 0.18);
-  --success: #34d399;
-  --warning: #fbbf24;
-  --danger: #f87171;
+  --bg: #f7f8fb;
+  --bg-elevated: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-panel-alt: #f1f5f9;
+  --border: rgba(148, 163, 184, 0.35);
+  --text: #0f172a;
+  --muted: #64748b;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --danger: #ef4444;
   --radius: 18px;
   --radius-sm: 12px;
-  --shadow: 0 24px 48px rgba(3, 8, 20, 0.25);
-  --font-body: "Segoe UI", "Noto Sans TC", sans-serif;
-  --font-display: "Bahnschrift", "Segoe UI", sans-serif;
+  --shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
+  --font-body: "Inter", "Segoe UI", "Noto Sans TC", sans-serif;
+  --font-display: "Inter", "Segoe UI", "Noto Sans TC", sans-serif;
 }
+
