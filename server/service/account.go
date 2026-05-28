@@ -31,13 +31,14 @@ type CreateAccountInput struct {
 }
 
 type UpdateAccountInput struct {
-	Name              *string   `json:"name,omitempty"`
-	Status            *string   `json:"status,omitempty"`
-	Provider          *string   `json:"provider,omitempty"`
-	Environment       *string   `json:"environment,omitempty"`
-	PriceMode         *string   `json:"price_mode,omitempty"`
-	CredentialsStatus *string   `json:"credentials_status,omitempty"`
-	SupportedSymbols  *[]string `json:"supported_symbols,omitempty"`
+	Name               *string   `json:"name,omitempty"`
+	Status             *string   `json:"status,omitempty"`
+	Provider           *string   `json:"provider,omitempty"`
+	Environment        *string   `json:"environment,omitempty"`
+	PriceMode          *string   `json:"price_mode,omitempty"`
+	CredentialsStatus  *string   `json:"credentials_status,omitempty"`
+	SupportedSymbols   *[]string `json:"supported_symbols,omitempty"`
+	LiveTradingEnabled *bool     `json:"live_trading_enabled,omitempty"`
 }
 
 func (s *AccountService) Create(ctx context.Context, input CreateAccountInput) (*store.Account, error) {
@@ -127,6 +128,9 @@ func (s *AccountService) Update(ctx context.Context, accountID string, input Upd
 	}
 	if input.SupportedSymbols != nil {
 		account.SupportedSymbols = store.StringList(*input.SupportedSymbols)
+	}
+	if input.LiveTradingEnabled != nil {
+		account.LiveTradingEnabled = *input.LiveTradingEnabled
 	}
 	if err := s.repo.Save(ctx, account); err != nil {
 		return nil, err

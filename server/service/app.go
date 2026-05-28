@@ -80,11 +80,17 @@ func NewApp(cfg AppConfig) (*App, error) {
 	app.Sandboxes.SetRuntime(runtime)
 	app.Tokens = NewTokenService(repository, clock, events)
 	app.Trading = NewTradingService(repository, clock, market, liveMarket, cfg.ExchangeAdapter, events, risk, fillPolicy, ledger, cfg)
+	// Indicator service: optional helper for computing TA on replay datasets
+	app.Trading = NewTradingService(repository, clock, market, liveMarket, cfg.ExchangeAdapter, events, risk, fillPolicy, ledger, cfg)
 	app.Sandboxes.SetProcessor(app.Trading.ProcessSandbox)
 	app.Runtime.SetAutoTickPlanner(app.Sandboxes.PlanRuntimeTick)
 	app.Runtime.SetTickHandler(app.Sandboxes.HandleRuntimeTick)
 	app.Auth = NewAuthService(repository, app.Tokens, clock)
-	app.Monitor = NewMonitorService(repository, app.Sandboxes, app.Datasets, app.LiveMarket, app.Clock)
+	// attach indicators service to monitor
+	indicators := NewIndicatorService(repository)
+	mon := NewMonitorService(repository, app.Sandboxes, app.Datasets, app.LiveMarket, app.Clock)
+	mon.indicators = indicators
+	app.Monitor = mon
 
 	if err := app.Datasets.RecoverInterruptedImports(context.Background()); err != nil {
 		return nil, err

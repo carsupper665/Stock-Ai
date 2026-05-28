@@ -1,19 +1,22 @@
-# Trading Sandbox Agent Smoke Test
+# Trading Sandbox Account Skill
 
-Use this skill to verify that an existing trading sandbox account can be used end to end by an LLM trading agent.
+Use this skill to smoke-check minimal sandbox account access for an LLM agent. It is only for account-scoped sandbox order and account actions, not for choosing trades or running a strategy.
+
+Policy reference: `brain/skill/llm-agent-policy.md`.
 
 ## Scope
 
-This test only covers the agent trading plane.
-
 The agent token must:
 
-- follow the sandbox clock;
-- read only market data available up to the sandbox current time;
-- trade only through account-scoped endpoints;
-- never use replay controls, dataset setup, sandbox setup, account creation, or direct database changes.
+- follow `GET /sandbox/time` before market reads;
+- read only market data at or before sandbox `current_time`;
+- read only the bound account, orders, positions, trades, and performance;
+- place or cancel orders only through account-scoped order endpoints;
+- stop and report missing fixture data instead of changing replay state or requesting hidden data.
 
 ## Allowed Agent Endpoints
+
+Only these endpoints are in scope:
 
 - `GET /sandbox/time`
 - `GET /market/price`
@@ -22,18 +25,25 @@ The agent token must:
 - `GET /account`
 - `GET /account/performance`
 - `GET /orders`
+- `GET /orders/:id`
 - `GET /positions`
 - `GET /trades`
 - `POST /orders`
 - `POST /orders/:id/cancel`
 
-## Forbidden Agent Actions
+## Forbidden Scope
 
-- Any `/admin/*` endpoint
-- Replay seek, speed, cursor, or dataset controls
-- Any future-candle request
-- Any market price mutation path
-- Any direct database write
+Do not use this skill for:
+
+- strategy logic, trade selection, or portfolio planning;
+- generate signal workflows or indicator-driven recommendations;
+- autonomous loop execution, schedulers, daemons, or repeated self-directed trading;
+- replay controls, including seek, cursor, speed, pause, resume, or dataset switching;
+- admin APIs, dataset APIs, sandbox setup, account creation, token creation, or token rotation;
+- direct DB mutation, fixture mutation, market mutation, or synthetic price injection;
+- future candles or any market-data timestamp after sandbox `current_time`;
+- live execution enablement, live-account trading, exchange-key setup, or testnet/mainnet routing;
+- backtest expansion, optimization, walk-forward analysis, or research pipelines.
 
 ## Preconditions
 
@@ -54,21 +64,10 @@ Default backend URL:
 ```powershell
 $Base = "http://localhost:7794"
 $Token = "<ACCOUNT_BEARER_TOKEN>"
+$Headers = @{ Authorization = "Bearer $Token" }
 ```
 
-## Health Check
-
-```powershell
-Invoke-RestMethod "$Base/healthz"
-```
-
-Expected:
-
-```json
-{"message":"ok"}
-```
-
-## Token Login Check
+## Token Check
 
 ```powershell
 curl.exe -s -H "Content-Type: application/json" `
@@ -76,93 +75,73 @@ curl.exe -s -H "Content-Type: application/json" `
   "$Base/auth/token/login"
 ```
 
-Expected:
+Expected: response includes the account id, sandbox id, and the required scopes.
 
-- response includes `account_id`;
-- response includes sandbox id;
-- response includes the required scopes.
-
-## Sandbox Clock Check
+## Sandbox Time And Market Reads
 
 ```powershell
-$SandboxTimeJson = curl.exe -s -H "Authorization: Bearer $Token" `
-  "$Base/sandbox/time"
-
-$SandboxTime = $SandboxTimeJson | ConvertFrom-Json
+$SandboxTime = Invoke-RestMethod -Headers $Headers "$Base/sandbox/time"
 $CurrentTime = [uri]::EscapeDataString($SandboxTime.current_time)
 
-$SandboxTimeJson
+Invoke-RestMethod -Headers $Headers "$Base/market/price?symbol=BTCUSDT"
+Invoke-RestMethod -Headers $Headers "$Base/market/ticker?symbol=BTCUSDT"
+Invoke-RestMethod -Headers $Headers "$Base/market/klines?symbol=BTCUSDT&interval=1m&to=$CurrentTime"
 ```
 
-Expected:
+Expected: market responses are for `BTCUSDT`, and every kline is at or before sandbox `current_time`.
 
-- `sandbox_id` exists;
-- `current_time` exists;
-- `status` is usable, normally `running`.
-
-Use `current_time` as the hard upper bound for every market-data request.
-
-## Market Data Check
+## Account Reads
 
 ```powershell
-curl.exe -s -H "Authorization: Bearer $Token" `
-  "$Base/market/ticker?symbol=BTCUSDT"
-
-curl.exe -s -H "Authorization: Bearer $Token" `
-  "$Base/market/klines?symbol=BTCUSDT&interval=1m&to=$CurrentTime"
+Invoke-RestMethod -Headers $Headers "$Base/account"
+Invoke-RestMethod -Headers $Headers "$Base/account/performance"
+Invoke-RestMethod -Headers $Headers "$Base/orders"
+Invoke-RestMethod -Headers $Headers "$Base/positions"
+Invoke-RestMethod -Headers $Headers "$Base/trades"
 ```
 
-Expected:
+Expected: each request returns only the account bound to the bearer token.
 
-- ticker returns `BTCUSDT`;
-- klines return data;
-- no returned kline is later than sandbox `current_time`.
+## Place, Read, And Cancel Order
 
-## Order Smoke Test
+Use this smoke payload exactly unless the existing fixture requires a different symbol.
 
 ```powershell
-$OrderJson = curl.exe -s -H "Authorization: Bearer $Token" `
-  -H "Content-Type: application/json" `
-  -d "{"symbol":"BTCUSDT","side":"buy","position_side":"long","order_type":"market","qty":1,"leverage":1}" `
-  "$Base/orders"
+$OrderBody = @{
+  symbol = "BTCUSDT"
+  side = "buy"
+  position_side = "long"
+  order_type = "market"
+  qty = 1
+  leverage = 1
+} | ConvertTo-Json -Compress
 
-$OrderJson
+$Order = Invoke-RestMethod -Method Post -Headers $Headers `
+  -ContentType "application/json" -Body $OrderBody "$Base/orders"
+
+Invoke-RestMethod -Headers $Headers "$Base/orders/$($Order.id)"
+
+Invoke-RestMethod -Method Post -Headers $Headers "$Base/orders/$($Order.id)/cancel"
 ```
 
 Expected:
 
-- order is accepted;
-- market order reaches `FILLED` when replay price is available.
-
-## Account State Check
-
-```powershell
-curl.exe -s -H "Authorization: Bearer $Token" "$Base/account"
-curl.exe -s -H "Authorization: Bearer $Token" "$Base/account/performance"
-curl.exe -s -H "Authorization: Bearer $Token" "$Base/orders"
-curl.exe -s -H "Authorization: Bearer $Token" "$Base/trades"
-curl.exe -s -H "Authorization: Bearer $Token" "$Base/positions"
-```
-
-Expected:
-
-- `/orders` includes the created order;
-- `/trades` includes an execution;
-- `/positions` includes a long `BTCUSDT` position;
-- `/account` reflects updated margin, available balance, and equity.
+- `POST /orders` accepts the `BTCUSDT` `market` `buy` `long` payload with `qty: 1` and `leverage: 1`.
+- `GET /orders/:id` returns the created account order.
+- `POST /orders/:id/cancel` returns the cancelled order or the current order state when the market order already filled.
 
 ## Pass Criteria
 
 Report the sandbox account as usable only when all are true:
 
-1. `/healthz` returns `ok`.
-2. Token login succeeds.
-3. `GET /sandbox/time` succeeds.
-4. Market ticker succeeds.
-5. Kline query uses `to <= sandbox current_time`.
-6. No future-candle request is used.
-7. Market order succeeds and reaches `FILLED`.
-8. Trades and positions reflect the filled order.
+1. Token login succeeds for the account token.
+2. `GET /sandbox/time` returns `current_time` and usable status.
+3. Market reads use `to <= sandbox current_time`.
+4. Account, performance, orders, positions, and trades reads succeed.
+5. `POST /orders` accepts the short smoke payload.
+6. `GET /orders/:id` returns the account-owned order.
+7. `POST /orders/:id/cancel` is available for cancellable orders.
+8. No forbidden endpoint or forbidden scope action is used.
 
 ## Failure Triage
 
@@ -170,5 +149,5 @@ Report the sandbox account as usable only when all are true:
 - `token scope is not sufficient`: recreate token with `market:read`, `trade:write`, `trade:read`, and `account:read`.
 - `ACCOUNT_SANDBOX_REQUIRED`: token is not bound to a sandbox virtual account.
 - `LIVE_ACCOUNT_TRADING_UNSUPPORTED`: use a virtual sandbox account.
-- Missing ticker or klines: sandbox time may be outside dataset coverage.
-- Order rejected or not filled: confirm sandbox is running, symbol matches dataset symbol, and replay price exists at current time.
+- Missing ticker or klines: sandbox time may be outside dataset coverage; do not use replay controls to compensate.
+- Order rejected: confirm sandbox is running, symbol is `BTCUSDT`, and a replay price exists at sandbox `current_time`.

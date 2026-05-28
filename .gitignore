@@ -1,6 +1,7 @@
 .vscode/*
 .codex/*
 .idea/*
+.sis
 .worktrees/*
 web/node_modules/*
 web/dist/*
@@ -12,3 +13,12 @@ tmp/*
 openspec/*
 docs/*
 test/*
+*.log
+*.env
+*.db
+*.exe
+.playwright-mcp/*
+.sisyphus/*
+cookies.txt
+*.png
+*.csv

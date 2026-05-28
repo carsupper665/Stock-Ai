@@ -15,17 +15,20 @@ type MonitorService struct {
 	datasets  *DatasetService
 	live      *LiveMarketProvider
 	clock     domain.Clock
+	// optional indicator service; may be nil in tests
+	indicators *IndicatorService
 }
 
 type SandboxSnapshot struct {
-	Sandbox       *store.Sandbox       `json:"sandbox"`
-	ReplayControl *ReplayControlStatus `json:"replay_control,omitempty"`
-	Dataset       *DatasetSummary      `json:"dataset,omitempty"`
-	Accounts      []store.Account      `json:"accounts"`
-	Orders        []store.Order        `json:"orders"`
-	Trades        []store.Trade        `json:"trades"`
-	Positions     []store.Position     `json:"positions"`
-	FreshnessAt   time.Time            `json:"freshness_at"`
+	Sandbox       *store.Sandbox              `json:"sandbox"`
+	ReplayControl *ReplayControlStatus        `json:"replay_control,omitempty"`
+	Dataset       *DatasetSummary             `json:"dataset,omitempty"`
+	Accounts      []store.Account             `json:"accounts"`
+	Orders        []store.Order               `json:"orders"`
+	Trades        []store.Trade               `json:"trades"`
+	Positions     []store.Position            `json:"positions"`
+	FreshnessAt   time.Time                   `json:"freshness_at"`
+	Indicators    map[string][]IndicatorPoint `json:"indicators,omitempty"`
 }
 
 type LiveSymbolsSnapshot struct {
@@ -72,7 +75,7 @@ func (s *MonitorService) Snapshot(ctx context.Context, sandboxID string) (*Sandb
 		freshnessAt = s.clock.Now()
 	}
 
-	return &SandboxSnapshot{
+	snapshot := &SandboxSnapshot{
 		Sandbox:       sandbox,
 		ReplayControl: replayControlStatus(*sandbox, sandbox.ReplayCurrentTime),
 		Dataset:       dataset,
@@ -81,7 +84,16 @@ func (s *MonitorService) Snapshot(ctx context.Context, sandboxID string) (*Sandb
 		Trades:        trades,
 		Positions:     positions,
 		FreshnessAt:   freshnessAt,
-	}, nil
+	}
+
+	// compute indicators for dataset (optional)
+	if dataset != nil && s.indicators != nil {
+		if inds, err := s.indicators.ComputeForDataset(ctx, dataset.ID, snapshot.ReplayControl.CurrentTime); err == nil {
+			snapshot.Indicators = inds
+		}
+	}
+
+	return snapshot, nil
 }
 
 func (s *MonitorService) LiveSymbols(ctx context.Context) (*LiveSymbolsSnapshot, error) {

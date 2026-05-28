@@ -1,0 +1,6 @@
+{
+  "name": "Trading Sandbox Operations Console",
+  "description": "A professional trading sandbox operations console featuring replay datasets, live monitors, agent boundaries, and real-time dashboard visualization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

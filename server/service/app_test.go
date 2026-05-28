@@ -297,6 +297,186 @@ func TestTradingServiceLimitOrderCancelAndFill(t *testing.T) {
 	}
 }
 
+func TestMultiVirtualAccountSandboxIsolation(t *testing.T) {
+	app := newTestApp(t)
+	seedReplaySandbox(t, app.DB, "sandbox-multi", "acct-alpha")
+
+	sandboxID := "sandbox-multi"
+	beta := store.Account{
+		ID:               "acct-beta",
+		SandboxID:        &sandboxID,
+		Name:             "beta",
+		Type:             store.AccountTypeVirtual,
+		BaseCurrency:     "USD",
+		InitialBalance:   2000,
+		WalletBalance:    2000,
+		AvailableBalance: 2000,
+		Equity:           2000,
+		Status:           store.AccountStatusActive,
+	}
+	if err := app.DB.Create(&beta).Error; err != nil {
+		t.Fatalf("create beta account: %v", err)
+	}
+
+	ctx := context.Background()
+	if _, err := app.Sandboxes.Start(ctx, sandboxID); err != nil {
+		t.Fatalf("start sandbox: %v", err)
+	}
+
+	alphaMarket, err := app.Trading.PlaceOrder(ctx, "acct-alpha", PlaceOrderInput{
+		Symbol:       "BTCUSDT",
+		Side:         store.OrderSideBuy,
+		PositionSide: store.PositionSideLong,
+		OrderType:    store.OrderTypeMarket,
+		Quantity:     1,
+		Leverage:     2,
+	})
+	if err != nil {
+		t.Fatalf("place alpha market order: %v", err)
+	}
+	if alphaMarket.Status != store.OrderStatusFilled {
+		t.Fatalf("expected alpha market order to fill, got %+v", alphaMarket)
+	}
+
+	alphaPending, err := app.Trading.PlaceOrder(ctx, "acct-alpha", PlaceOrderInput{
+		Symbol:       "BTCUSDT",
+		Side:         store.OrderSideBuy,
+		PositionSide: store.PositionSideLong,
+		OrderType:    store.OrderTypeLimit,
+		Quantity:     0.5,
+		Price:        90,
+		Leverage:     2,
+	})
+	if err != nil {
+		t.Fatalf("place alpha pending order: %v", err)
+	}
+	if _, err := app.Trading.CancelOrder(ctx, "acct-beta", alphaPending.ID); err == nil {
+		t.Fatalf("expected beta canceling alpha order to fail")
+	}
+
+	betaOrders, err := app.Trading.ListOrders(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("list beta orders before beta trade: %v", err)
+	}
+	if len(betaOrders) != 0 {
+		t.Fatalf("expected beta orders to remain empty before beta trades, got %+v", betaOrders)
+	}
+	betaTrades, err := app.Trading.ListTrades(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("list beta trades before beta trade: %v", err)
+	}
+	if len(betaTrades) != 0 {
+		t.Fatalf("expected beta trades to remain empty before beta trades, got %+v", betaTrades)
+	}
+	betaPositions, err := app.Trading.ListPositions(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("list beta positions before beta trade: %v", err)
+	}
+	if len(betaPositions) != 0 {
+		t.Fatalf("expected beta positions to remain empty before beta trades, got %+v", betaPositions)
+	}
+
+	betaMarket, err := app.Trading.PlaceOrder(ctx, "acct-beta", PlaceOrderInput{
+		Symbol:       "BTCUSDT",
+		Side:         store.OrderSideSell,
+		PositionSide: store.PositionSideShort,
+		OrderType:    store.OrderTypeMarket,
+		Quantity:     2,
+		Leverage:     4,
+	})
+	if err != nil {
+		t.Fatalf("place beta market order: %v", err)
+	}
+	if betaMarket.Status != store.OrderStatusFilled {
+		t.Fatalf("expected beta market order to fill, got %+v", betaMarket)
+	}
+
+	if _, err := app.Sandboxes.Pause(ctx, sandboxID); err != nil {
+		t.Fatalf("pause sandbox: %v", err)
+	}
+	if _, err := app.Sandboxes.UpdateReplayTime(ctx, sandboxID, time.Date(2025, 1, 1, 0, 1, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("update replay time: %v", err)
+	}
+	if err := app.Trading.ProcessSandbox(ctx, sandboxID); err != nil {
+		t.Fatalf("process sandbox: %v", err)
+	}
+
+	alphaOrders, err := app.Trading.ListOrders(ctx, "acct-alpha")
+	if err != nil {
+		t.Fatalf("list alpha orders: %v", err)
+	}
+	if len(alphaOrders) != 2 {
+		t.Fatalf("expected alpha to have 2 own orders, got %+v", alphaOrders)
+	}
+	betaOrders, err = app.Trading.ListOrders(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("list beta orders after beta trade: %v", err)
+	}
+	if len(betaOrders) != 1 || betaOrders[0].AccountID != "acct-beta" {
+		t.Fatalf("expected beta to have only its own order, got %+v", betaOrders)
+	}
+
+	alphaTrades, err := app.Trading.ListTrades(ctx, "acct-alpha")
+	if err != nil {
+		t.Fatalf("list alpha trades: %v", err)
+	}
+	if len(alphaTrades) != 1 || alphaTrades[0].AccountID != "acct-alpha" {
+		t.Fatalf("expected alpha to have one own trade, got %+v", alphaTrades)
+	}
+	betaTrades, err = app.Trading.ListTrades(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("list beta trades after beta trade: %v", err)
+	}
+	if len(betaTrades) != 1 || betaTrades[0].AccountID != "acct-beta" {
+		t.Fatalf("expected beta to have one own trade, got %+v", betaTrades)
+	}
+
+	alphaPositions, err := app.Trading.ListPositions(ctx, "acct-alpha")
+	if err != nil {
+		t.Fatalf("list alpha positions: %v", err)
+	}
+	if len(alphaPositions) != 1 || alphaPositions[0].AccountID != "acct-alpha" || alphaPositions[0].PositionSide != store.PositionSideLong || alphaPositions[0].Quantity != 1 || alphaPositions[0].UnrealizedPnL != -5 {
+		t.Fatalf("unexpected alpha position isolation state: %+v", alphaPositions)
+	}
+	betaPositions, err = app.Trading.ListPositions(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("list beta positions after beta trade: %v", err)
+	}
+	if len(betaPositions) != 1 || betaPositions[0].AccountID != "acct-beta" || betaPositions[0].PositionSide != store.PositionSideShort || betaPositions[0].Quantity != 2 || betaPositions[0].UnrealizedPnL != 10 {
+		t.Fatalf("unexpected beta position isolation state: %+v", betaPositions)
+	}
+
+	alphaAccount, err := app.Trading.GetAccountSummary(ctx, "acct-alpha")
+	if err != nil {
+		t.Fatalf("get alpha account summary: %v", err)
+	}
+	betaAccount, err := app.Trading.GetAccountSummary(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("get beta account summary: %v", err)
+	}
+	if alphaAccount.WalletBalance != 1000 || alphaAccount.LockedMargin != 50 || alphaAccount.UnrealizedPnL != -5 || alphaAccount.Equity != 995 || alphaAccount.AvailableBalance != 945 {
+		t.Fatalf("unexpected alpha account state: %+v", alphaAccount)
+	}
+	if betaAccount.WalletBalance != 2000 || betaAccount.LockedMargin != 50 || betaAccount.UnrealizedPnL != 10 || betaAccount.Equity != 2010 || betaAccount.AvailableBalance != 1960 {
+		t.Fatalf("unexpected beta account state: %+v", betaAccount)
+	}
+
+	alphaPerformance, err := app.Trading.GetPerformance(ctx, "acct-alpha")
+	if err != nil {
+		t.Fatalf("get alpha performance: %v", err)
+	}
+	betaPerformance, err := app.Trading.GetPerformance(ctx, "acct-beta")
+	if err != nil {
+		t.Fatalf("get beta performance: %v", err)
+	}
+	if alphaPerformance.AccountID != "acct-alpha" || alphaPerformance.Equity != 995 || alphaPerformance.ReturnPct != -0.5 || alphaPerformance.AvailableFunds != 945 {
+		t.Fatalf("unexpected alpha performance: %+v", alphaPerformance)
+	}
+	if betaPerformance.AccountID != "acct-beta" || betaPerformance.Equity != 2010 || betaPerformance.ReturnPct != 0.5 || betaPerformance.AvailableFunds != 1960 {
+		t.Fatalf("unexpected beta performance: %+v", betaPerformance)
+	}
+}
+
 func TestTradingServiceShortPositionLifecycle(t *testing.T) {
 	app := newTestApp(t)
 	seedReplaySandbox(t, app.DB, "sandbox-short", "account-short")
