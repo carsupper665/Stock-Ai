@@ -88,6 +88,15 @@ func (s *TokenService) Revoke(ctx context.Context, tokenID string) error {
 	return nil
 }
 
+func (s *TokenService) ListByAccount(ctx context.Context, accountID string) ([]store.AccountToken, error) {
+	var tokens []store.AccountToken
+	err := s.repo.WithContext(ctx).
+		Where("account_id = ? AND revoked_at IS NULL", accountID).
+		Order("created_at desc").
+		Find(&tokens).Error
+	return tokens, err
+}
+
 func (s *TokenService) Verify(ctx context.Context, rawToken string, requiredScopes []string) (*store.AccountToken, *store.Account, error) {
 	tokenID, secret, err := splitRawToken(rawToken)
 	if err != nil {

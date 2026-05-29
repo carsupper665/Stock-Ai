@@ -69,6 +69,24 @@ func register(engine *gin.Engine, h *controller.Handler) {
 		admin.DELETE("/accounts/:id", h.DeleteAccount)
 		admin.GET("/monitor/sandboxes/:id/snapshot", h.SandboxSnapshot)
 		admin.GET("/monitor/live-symbols", h.LiveSymbolsSnapshot)
+
+		// Admin trading console (T3)
+		admin.GET("/accounts", h.AdminListAccounts)
+		admin.POST("/accounts/:id/orders", h.AdminPlaceOrder)
+		admin.GET("/accounts/:id/orders", h.AdminListOrders)
+		admin.GET("/accounts/:id/orders/:oid", h.AdminGetOrder)
+		admin.POST("/accounts/:id/orders/:oid/cancel", h.AdminCancelOrder)
+		admin.GET("/accounts/:id/trades", h.AdminListTrades)
+		admin.GET("/accounts/:id/positions", h.AdminListPositions)
+		admin.GET("/accounts/:id/summary", h.AdminGetAccountSummary)
+		admin.GET("/accounts/:id/tokens", h.AdminListTokens)
+		admin.POST("/accounts/:id/tokens", h.AdminCreateToken)
+		admin.DELETE("/accounts/:id/tokens/:tid", h.AdminRevokeToken)
+
+		// Admin live-market data (T4)
+		admin.GET("/live/price", h.AdminLivePrice)
+		admin.GET("/live/klines", h.AdminLiveKlines)
+		admin.GET("/live/indicators", h.AdminLiveIndicators)
 	}
 
 	engine.POST("/tokens", h.AdminRequired(), h.CreateToken)

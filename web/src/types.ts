@@ -106,6 +106,99 @@ export type ActivePage =
   | 'performance'
   | 'activity'
   | 'alerts'
-  | 'agent-boundary';
+  | 'agent-boundary'
+  | 'trading-console'
+  | 'technical-analysis';
 
 export type ViewState = 'normal' | 'loading' | 'error';
+
+// ─── Trading domain types ────────────────────────────────────────────────────
+
+export interface AdminAccount {
+  readonly id: string;
+  readonly name: string;
+  readonly type: 'live' | 'virtual';
+  readonly status: string;
+  readonly base_currency: string;
+  readonly wallet_balance: number;
+  readonly available_balance: number;
+  readonly equity: number;
+  readonly sandbox_id?: string;
+  readonly environment?: string;
+  readonly provider?: string;
+  readonly price_mode?: string;
+}
+
+export interface Order {
+  readonly id: string;
+  readonly account_id: string;
+  readonly symbol: string;
+  readonly side: 'buy' | 'sell';
+  readonly position_side: 'long' | 'short';
+  readonly type: 'market' | 'limit' | 'stop';
+  readonly quantity: number;
+  readonly price?: number;
+  readonly stop_price?: number;
+  readonly leverage: number;
+  readonly status: string;
+  readonly filled_quantity: number;
+  readonly fill_price?: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface Position {
+  readonly id: string;
+  readonly account_id: string;
+  readonly symbol: string;
+  readonly position_side: 'long' | 'short';
+  readonly quantity: number;
+  readonly avg_entry_price: number;
+  readonly unrealized_pnl: number;
+  readonly realized_pnl: number;
+  readonly leverage: number;
+  readonly updated_at: string;
+}
+
+export interface Trade {
+  readonly id: string;
+  readonly account_id: string;
+  readonly order_id: string;
+  readonly symbol: string;
+  readonly side: 'buy' | 'sell';
+  readonly position_side: 'long' | 'short';
+  readonly quantity: number;
+  readonly price: number;
+  readonly realized_pnl: number;
+  readonly executed_at: string;
+}
+
+export interface AccountToken {
+  readonly id: string;
+  readonly account_id: string;
+  readonly token_name: string;
+  readonly scope: string;
+  readonly expires_at?: string;
+  readonly last_used_at?: string;
+}
+
+export interface Kline {
+  readonly symbol: string;
+  readonly at: string;
+  readonly open: number;
+  readonly high: number;
+  readonly low: number;
+  readonly close: number;
+  readonly volume: number;
+}
+
+export interface IndicatorPoint {
+  readonly time: string;
+  readonly value: number;
+}
+
+export interface IndicatorsResponse {
+  readonly symbol: string;
+  readonly interval: string;
+  readonly indicators: Record<string, IndicatorPoint[]>;
+}

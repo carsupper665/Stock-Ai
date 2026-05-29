@@ -29,6 +29,8 @@ import PerformanceView from './components/PerformanceView';
 import ActivityView from './components/ActivityView';
 import AlertsView from './components/AlertsView';
 import AgentBoundaryView from './components/AgentBoundaryView';
+import TradingConsoleView from './components/TradingConsoleView';
+import TechnicalAnalysisView from './components/TechnicalAnalysisView';
 import { loginAdmin } from './api/auth';
 import { listSandboxAccounts } from './api/accounts';
 import { listDatasets } from './api/datasets';
@@ -372,6 +374,14 @@ export default function App() {
           <AgentBoundaryView
             theme={theme}
           />
+        );
+      case 'trading-console':
+        return (
+          <TradingConsoleView theme={theme} />
+        );
+      case 'technical-analysis':
+        return (
+          <TechnicalAnalysisView theme={theme} />
         );
       default:
         return (

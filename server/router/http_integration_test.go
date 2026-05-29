@@ -491,6 +491,85 @@ func TestAccountWebSocketUsesFrozenEnvelopeAndRedactsSecrets(t *testing.T) {
 	t.Fatalf("expected trade.executed event over websocket")
 }
 
+func TestAdminPlaceOrderAcceptsFrontendPayloadShape(t *testing.T) {
+	app := newHTTPTestApp(t)
+	engine := New(app)
+	ts := httptest.NewServer(engine)
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+
+	postJSON(t, client, ts.URL+"/admin/login", map[string]any{"username": "root", "password": "root-pass"}, http.StatusOK)
+
+	postJSON(t, client, ts.URL+"/admin/sandboxes", map[string]any{
+		"id":                  "sandbox-admin-orders",
+		"name":                "Admin Orders Sandbox",
+		"start_datetime":      "2025-01-01T00:00:00Z",
+		"replay_current_time": "2025-01-01T00:00:00Z",
+		"replay_speed":        1,
+		"dataset_id":          "dataset-http",
+	}, http.StatusCreated)
+	postJSON(t, client, ts.URL+"/admin/sandboxes/sandbox-admin-orders/start", map[string]any{}, http.StatusOK)
+
+	accountResp := postJSON(t, client, ts.URL+"/admin/sandboxes/sandbox-admin-orders/accounts", map[string]any{
+		"name":            "admin-order-agent",
+		"initial_balance": 1000,
+	}, http.StatusCreated)
+	accountID := accountResp["id"].(string)
+
+	orderResp := postJSON(t, client, ts.URL+"/admin/accounts/"+accountID+"/orders", map[string]any{
+		"symbol":        "BTCUSDT",
+		"side":          "buy",
+		"position_side": "long",
+		"type":          "market",
+		"quantity":      1,
+		"leverage":      2,
+	}, http.StatusCreated)
+
+	if orderResp["order_type"] != store.OrderTypeMarket {
+		t.Fatalf("expected market order_type, got %+v", orderResp)
+	}
+	if orderResp["qty"].(float64) != 1 {
+		t.Fatalf("expected qty=1, got %+v", orderResp)
+	}
+}
+
+func TestAdminLiveIndicatorsExposeTimeFieldForFrontend(t *testing.T) {
+	app := newHTTPTestApp(t)
+	engine := New(app)
+	ts := httptest.NewServer(engine)
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+
+	postJSON(t, client, ts.URL+"/admin/login", map[string]any{"username": "root", "password": "root-pass"}, http.StatusOK)
+
+	payload := getJSON(t, client, ts.URL+"/admin/live/indicators?symbol=BTCUSDT&interval=1h", "", http.StatusOK)
+	indicators, ok := payload["indicators"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected indicators object, got %+v", payload)
+	}
+	obvSeries, ok := indicators["obv"].([]any)
+	if !ok || len(obvSeries) == 0 {
+		t.Fatalf("expected obv indicator points, got %+v", indicators)
+	}
+	firstPoint, ok := obvSeries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected indicator point object, got %+v", obvSeries[0])
+	}
+	if _, ok := firstPoint["time"]; !ok {
+		t.Fatalf("expected indicator point to include time field for frontend, got %+v", firstPoint)
+	}
+}
+
 func TestReplayDatasetHTTPFlow(t *testing.T) {
 	app := newHTTPTestApp(t)
 	engine := New(app)

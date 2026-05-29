@@ -103,6 +103,17 @@ func (s *AccountService) ListLive(ctx context.Context) ([]store.Account, error) 
 	return accounts, err
 }
 
+// ListAll returns all accounts (live + virtual). Pass typeFilter "live" or "virtual" to narrow; empty string = all.
+func (s *AccountService) ListAll(ctx context.Context, typeFilter string) ([]store.Account, error) {
+	var accounts []store.Account
+	q := s.repo.WithContext(ctx)
+	if typeFilter == store.AccountTypeLive || typeFilter == store.AccountTypeVirtual {
+		q = q.Where("type = ?", typeFilter)
+	}
+	err := q.Order("created_at desc").Find(&accounts).Error
+	return accounts, err
+}
+
 func (s *AccountService) Update(ctx context.Context, accountID string, input UpdateAccountInput) (*store.Account, error) {
 	account, err := s.repo.FindAccount(ctx, accountID)
 	if err != nil {

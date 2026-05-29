@@ -686,6 +686,197 @@ func (h *Handler) SandboxSnapshot(c *gin.Context) {
 	c.JSON(http.StatusOK, snapshot)
 }
 
+// ──────────────────────────────────────────────────────────────
+// Admin trading console handlers (T3 + T4)
+// ──────────────────────────────────────────────────────────────
+
+// AdminListAccounts returns all accounts, optionally filtered by ?type=live|virtual.
+func (h *Handler) AdminListAccounts(c *gin.Context) {
+	typeFilter := c.Query("type")
+	accounts, err := h.App.Accounts.ListAll(c.Request.Context(), typeFilter)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": accounts})
+}
+
+// AdminPlaceOrder lets the admin place an order on behalf of any account.
+func (h *Handler) AdminPlaceOrder(c *gin.Context) {
+	var req service.PlaceOrderInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, domain.ValidationError("INVALID_REQUEST", "invalid order payload"))
+		return
+	}
+	order, err := h.App.Trading.PlaceOrder(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, order)
+}
+
+// AdminListOrders returns all orders for the given account.
+func (h *Handler) AdminListOrders(c *gin.Context) {
+	orders, err := h.App.Trading.ListOrders(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": orders})
+}
+
+// AdminGetOrder returns a single order (must belong to the path account).
+func (h *Handler) AdminGetOrder(c *gin.Context) {
+	order, err := h.App.Trading.GetOrder(c.Request.Context(), c.Param("oid"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if order.AccountID != c.Param("id") {
+		writeError(c, domain.ForbiddenError("order does not belong to account"))
+		return
+	}
+	c.JSON(http.StatusOK, order)
+}
+
+// AdminCancelOrder cancels an order on behalf of any account.
+func (h *Handler) AdminCancelOrder(c *gin.Context) {
+	order, err := h.App.Trading.CancelOrder(c.Request.Context(), c.Param("id"), c.Param("oid"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, order)
+}
+
+// AdminListTrades returns all trades for the given account.
+func (h *Handler) AdminListTrades(c *gin.Context) {
+	trades, err := h.App.Trading.ListTrades(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": trades})
+}
+
+// AdminListPositions returns all positions for the given account.
+func (h *Handler) AdminListPositions(c *gin.Context) {
+	positions, err := h.App.Trading.ListPositions(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": positions})
+}
+
+// AdminGetAccountSummary returns the account summary (balance, equity, etc.).
+func (h *Handler) AdminGetAccountSummary(c *gin.Context) {
+	account, err := h.App.Trading.GetAccountSummary(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, account)
+}
+
+// AdminListTokens returns all active tokens for the given account.
+func (h *Handler) AdminListTokens(c *gin.Context) {
+	tokens, err := h.App.Tokens.ListByAccount(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": tokens})
+}
+
+// AdminCreateToken creates a new API token for the given account.
+func (h *Handler) AdminCreateToken(c *gin.Context) {
+	var req service.CreateTokenInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, domain.ValidationError("INVALID_REQUEST", "invalid token payload"))
+		return
+	}
+	req.AccountID = c.Param("id")
+	plaintext, token, err := h.App.Tokens.Create(c.Request.Context(), req)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"id": token.ID, "account_id": token.AccountID, "scopes": token.Scopes(), "token": plaintext})
+}
+
+// AdminRevokeToken revokes a token that belongs to the given account.
+func (h *Handler) AdminRevokeToken(c *gin.Context) {
+	if err := h.App.Tokens.Revoke(c.Request.Context(), c.Param("tid")); err != nil {
+		writeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ──────────────────────────────────────────────────────────────
+// Admin live-market handlers (T4)
+// ──────────────────────────────────────────────────────────────
+
+// AdminLivePrice returns the latest live market price for a symbol.
+func (h *Handler) AdminLivePrice(c *gin.Context) {
+	symbol := c.Query("symbol")
+	if symbol == "" {
+		writeError(c, domain.ValidationError("MISSING_SYMBOL", "symbol query param is required"))
+		return
+	}
+	snapshot, err := h.App.LiveMarket.GetSnapshot(c.Request.Context(), symbol)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, snapshot)
+}
+
+// AdminLiveKlines fetches candlestick data directly from Binance for the admin.
+// Query params: symbol, interval (default 1h).
+func (h *Handler) AdminLiveKlines(c *gin.Context) {
+	symbol := c.Query("symbol")
+	if symbol == "" {
+		writeError(c, domain.ValidationError("MISSING_SYMBOL", "symbol query param is required"))
+		return
+	}
+	interval := c.DefaultQuery("interval", "1h")
+	to := time.Now()
+	from := to.Add(-200 * time.Hour)
+	klines, err := h.App.LiveMarket.GetKlines(c.Request.Context(), "", symbol, interval, from, to)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": klines})
+}
+
+// AdminLiveIndicators fetches Binance klines and computes technical indicators.
+// Query params: symbol, interval (default 1h).
+func (h *Handler) AdminLiveIndicators(c *gin.Context) {
+	symbol := c.Query("symbol")
+	if symbol == "" {
+		writeError(c, domain.ValidationError("MISSING_SYMBOL", "symbol query param is required"))
+		return
+	}
+	interval := c.DefaultQuery("interval", "1h")
+	to := time.Now()
+	from := to.Add(-500 * time.Hour)
+	klines, err := h.App.LiveMarket.GetKlines(c.Request.Context(), "", symbol, interval, from, to)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	indicators, err := h.App.Indicators.ComputeFromKlines(klines)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"symbol": symbol, "interval": interval, "indicators": indicators})
+}
+
 func (h *Handler) AdminMonitorWS(c *gin.Context) {
 	conn, err := h.Upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {

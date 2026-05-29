@@ -228,6 +228,91 @@ func (f *BinanceRESTFetcher) Fetch(ctx context.Context, symbol string) (domain.M
 	}, nil
 }
 
+func (f *BinanceRESTFetcher) FetchKlines(ctx context.Context, symbol, interval string, from, to time.Time) ([]domain.Kline, error) {
+	if err := validateLiveInterval(interval); err != nil {
+		return nil, err
+	}
+	normalized := normalizeSymbol(symbol)
+	if normalized == "" {
+		return nil, domain.ValidationError("INVALID_SYMBOL", "symbol is required")
+	}
+	params := url.Values{}
+	params.Set("symbol", normalized)
+	params.Set("interval", interval)
+	params.Set("startTime", strconv.FormatInt(from.UnixMilli(), 10))
+	params.Set("endTime", strconv.FormatInt(to.UnixMilli(), 10))
+	params.Set("limit", "500")
+	endpoint := f.baseURL + "/api/v3/klines?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+		return nil, domain.NotFoundError("LIVE_KLINES_NOT_FOUND", "klines not found for symbol")
+	}
+	if resp.StatusCode >= 400 {
+		return nil, domain.NewError(http.StatusBadGateway, "LIVE_PROVIDER_ERROR", "live market provider returned an error", map[string]any{"status": resp.StatusCode})
+	}
+	// Binance klines response: [[openTime, open, high, low, close, volume, closeTime, ...], ...]
+	// element[0] = openTime(ms int64), [1]–[5] = string floats
+	var raw [][]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	klines := make([]domain.Kline, 0, len(raw))
+	for _, row := range raw {
+		if len(row) < 6 {
+			continue
+		}
+		var openTimeMs int64
+		if err := json.Unmarshal(row[0], &openTimeMs); err != nil {
+			continue
+		}
+		parseStr := func(r json.RawMessage) (float64, error) {
+			var s string
+			if err := json.Unmarshal(r, &s); err != nil {
+				return 0, err
+			}
+			return strconv.ParseFloat(s, 64)
+		}
+		open, err := parseStr(row[1])
+		if err != nil {
+			continue
+		}
+		high, err := parseStr(row[2])
+		if err != nil {
+			continue
+		}
+		low, err := parseStr(row[3])
+		if err != nil {
+			continue
+		}
+		close_, err := parseStr(row[4])
+		if err != nil {
+			continue
+		}
+		volume, err := parseStr(row[5])
+		if err != nil {
+			continue
+		}
+		klines = append(klines, domain.Kline{
+			Symbol: normalized,
+			At:     time.UnixMilli(openTimeMs).UTC(),
+			Open:   open,
+			High:   high,
+			Low:    low,
+			Close:  close_,
+			Volume: volume,
+		})
+	}
+	return klines, nil
+}
+
 func (p *LiveMarketProvider) TouchSymbol(symbol string) {
 	normalized := normalizeSymbol(symbol)
 	if normalized == "" {

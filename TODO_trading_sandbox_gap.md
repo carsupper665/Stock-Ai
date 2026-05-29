@@ -12,6 +12,7 @@
   - Keep: `GET /sandbox/time`, `GET /market/*`, `GET /account`, `GET /account/performance`, `GET /orders`, `GET /positions`, `GET /trades`, `POST /orders`, `POST /orders/:id/cancel`
   - Do not add strategy generation, replay admin control, dataset management, or live execution policy into this skill.
 - [ ] If needed, split a second doc for "backend implementation checklist" so the current skill remains a smoke-test/runbook instead of becoming a giant spec.
+- [x] Added separate TA/FIBO analysis skill at `brain/technical-analysis-fibo/SKILL.md` to keep sandbox account skill narrowly scoped.
 
 ## P0 - Must Close First
 

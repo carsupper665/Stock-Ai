@@ -15,6 +15,7 @@ type AppConfig struct {
 	DB                    *gorm.DB
 	SessionSecret         string
 	FrontendURL           string
+	LiveMarketBaseURL     string
 	Now                   func() time.Time
 	AllowLiveExecution    bool
 	AllowMainnetExecution bool
@@ -37,6 +38,7 @@ type App struct {
 	Trading    *TradingService
 	Auth       *AuthService
 	Monitor    *MonitorService
+	Indicators *IndicatorService
 	Config     AppConfig
 }
 
@@ -44,6 +46,7 @@ func NewApp(cfg AppConfig) (*App, error) {
 	if cfg.DB == nil {
 		return nil, fmt.Errorf("db is required")
 	}
+	hasCustomClock := cfg.Now != nil
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -55,7 +58,11 @@ func NewApp(cfg AppConfig) (*App, error) {
 	clock := funcClock{now: cfg.Now}
 	events := NewEventBus(cfg.DB, clock)
 	market := NewReplayMarketProvider(repository, clock)
-	liveMarket := NewLiveMarketProvider(NewStaticLivePriceFetcher(), clock)
+	liveFetcher := LivePriceFetcher(NewBinanceRESTFetcher(cfg.LiveMarketBaseURL))
+	if hasCustomClock {
+		liveFetcher = NewStaticLivePriceFetcher()
+	}
+	liveMarket := NewLiveMarketProvider(liveFetcher, clock)
 	liveMarket.SetPublisher(events)
 	runtime := NewSandboxRuntimeManager()
 	ledger := SimpleLedger{}
@@ -80,14 +87,12 @@ func NewApp(cfg AppConfig) (*App, error) {
 	app.Sandboxes.SetRuntime(runtime)
 	app.Tokens = NewTokenService(repository, clock, events)
 	app.Trading = NewTradingService(repository, clock, market, liveMarket, cfg.ExchangeAdapter, events, risk, fillPolicy, ledger, cfg)
-	// Indicator service: optional helper for computing TA on replay datasets
-	app.Trading = NewTradingService(repository, clock, market, liveMarket, cfg.ExchangeAdapter, events, risk, fillPolicy, ledger, cfg)
 	app.Sandboxes.SetProcessor(app.Trading.ProcessSandbox)
 	app.Runtime.SetAutoTickPlanner(app.Sandboxes.PlanRuntimeTick)
 	app.Runtime.SetTickHandler(app.Sandboxes.HandleRuntimeTick)
 	app.Auth = NewAuthService(repository, app.Tokens, clock)
-	// attach indicators service to monitor
 	indicators := NewIndicatorService(repository)
+	app.Indicators = indicators
 	mon := NewMonitorService(repository, app.Sandboxes, app.Datasets, app.LiveMarket, app.Clock)
 	mon.indicators = indicators
 	app.Monitor = mon

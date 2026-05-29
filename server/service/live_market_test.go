@@ -174,3 +174,37 @@ func TestLiveMarketProviderKlineContract(t *testing.T) {
 		t.Fatalf("expected invalid interval, got %v", err)
 	}
 }
+
+func TestBinanceRESTFetcherMapsKlines(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/klines" {
+			t.Fatalf("unexpected request path %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("symbol") != "BTCUSDT" {
+			t.Fatalf("unexpected symbol %s", r.URL.Query().Get("symbol"))
+		}
+		if r.URL.Query().Get("interval") != "1h" {
+			t.Fatalf("unexpected interval %s", r.URL.Query().Get("interval"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			[1710000000000,"100.0","105.0","99.0","104.0","10.5",1710003599999,"0",1,"0","0","0"],
+			[1710003600000,"104.0","106.0","103.0","105.5","8.0",1710007199999,"0",1,"0","0","0"]
+		]`))
+	}))
+	defer server.Close()
+
+	fetcher := NewBinanceRESTFetcher(server.URL)
+	from := time.UnixMilli(1710000000000).UTC()
+	to := time.UnixMilli(1710007199999).UTC()
+	klines, err := fetcher.FetchKlines(context.Background(), "btcusdt", "1h", from, to)
+	if err != nil {
+		t.Fatalf("fetch klines: %v", err)
+	}
+	if len(klines) != 2 {
+		t.Fatalf("expected 2 klines, got %d", len(klines))
+	}
+	if klines[0].Symbol != "BTCUSDT" || klines[0].At != from || klines[0].Open != 100 || klines[0].High != 105 || klines[0].Low != 99 || klines[0].Close != 104 || klines[0].Volume != 10.5 {
+		t.Fatalf("unexpected first kline: %+v", klines[0])
+	}
+}

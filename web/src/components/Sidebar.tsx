@@ -12,7 +12,9 @@ import {
   Shield,
   Lock,
   Unlock,
-  Terminal
+  Terminal,
+  TrendingUp,
+  CandlestickChart
 } from 'lucide-react';
 import { ActivePage, Theme } from '../types';
 
@@ -65,6 +67,13 @@ export default function Sidebar({
         { id: 'performance' as ActivePage, label: 'Performance Rank', icon: Trophy },
         { id: 'activity' as ActivePage, label: 'Operational Activity', icon: History },
         { id: 'alerts' as ActivePage, label: 'Alert Center', icon: Bell, badge: alertCount > 0 ? String(alertCount) : undefined, badgeStyle: 'error' }
+      ]
+    },
+    {
+      label: 'Trading Console',
+      items: [
+        { id: 'trading-console' as ActivePage, label: 'Place Orders', icon: TrendingUp },
+        { id: 'technical-analysis' as ActivePage, label: 'Technical Analysis', icon: CandlestickChart },
       ]
     },
     {

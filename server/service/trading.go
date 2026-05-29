@@ -34,7 +34,9 @@ type PlaceOrderInput struct {
 	Side          string  `json:"side"`
 	PositionSide  string  `json:"position_side"`
 	OrderType     string  `json:"order_type"`
+	Type          string  `json:"type,omitempty"`
 	Quantity      float64 `json:"qty"`
+	QuantityAlt   float64 `json:"quantity,omitempty"`
 	Price         float64 `json:"price,omitempty"`
 	StopPrice     float64 `json:"stop_price,omitempty"`
 	Leverage      float64 `json:"leverage,omitempty"`
@@ -66,6 +68,7 @@ func NewTradingService(repo *repo.Repository, clock domain.Clock, market domain.
 }
 
 func (s *TradingService) PlaceOrder(ctx context.Context, accountID string, input PlaceOrderInput) (*store.Order, error) {
+	input = canonicalizePlaceOrderInput(input)
 	account, err := s.repo.FindAccount(ctx, accountID)
 	if err != nil {
 		return nil, domain.NotFoundError("ACCOUNT_NOT_FOUND", "account not found")
@@ -230,7 +233,7 @@ func (s *TradingService) resolveTradingMode(account store.Account) (TradingMode,
 			return "", domain.ValidationError("INVALID_TRADING_MODE", "live accounts require price_mode=live")
 		}
 		switch account.Environment {
-		case "paper":
+		case "paper", "production":
 			return TradingModePaper, nil
 		case "testnet":
 			if account.CredentialsStatus != "healthy" {
@@ -379,6 +382,19 @@ func validateSupportedSymbol(account store.Account, symbol string) error {
 
 func normalizeOrderSymbol(symbol string) string {
 	return strings.ToUpper(strings.TrimSpace(symbol))
+}
+
+func canonicalizePlaceOrderInput(input PlaceOrderInput) PlaceOrderInput {
+	if strings.TrimSpace(input.OrderType) == "" {
+		input.OrderType = input.Type
+	}
+	if input.Quantity <= 0 && input.QuantityAlt > 0 {
+		input.Quantity = input.QuantityAlt
+	}
+	input.OrderType = strings.ToLower(strings.TrimSpace(input.OrderType))
+	input.Side = strings.ToLower(strings.TrimSpace(input.Side))
+	input.PositionSide = strings.ToLower(strings.TrimSpace(input.PositionSide))
+	return input
 }
 
 func (s *TradingService) findOrderByClientID(ctx context.Context, accountID, clientOrderID string) (*store.Order, error) {

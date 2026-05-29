@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"time"
 
+	"server/domain"
 	"server/model/repo"
 	"server/model/store"
 )
@@ -13,6 +15,15 @@ import (
 type IndicatorPoint struct {
 	At    time.Time `json:"at"`
 	Value float64   `json:"value"`
+}
+
+func (p IndicatorPoint) MarshalJSON() ([]byte, error) {
+	type payload struct {
+		At    time.Time `json:"at"`
+		Time  time.Time `json:"time"`
+		Value float64   `json:"value"`
+	}
+	return json.Marshal(payload{At: p.At, Time: p.At, Value: p.Value})
 }
 
 // IndicatorService computes common technical indicators from replay klines
@@ -57,6 +68,34 @@ func (s *IndicatorService) ComputeForDataset(ctx context.Context, datasetID stri
 		times[i] = klines[i].Ts
 	}
 
+	return computeIndicatorsFromArrays(times, highs, lows, closes, volumes), nil
+}
+
+// ComputeFromKlines computes the full indicator set from any []domain.Kline slice (e.g. live Binance data).
+// Returns an empty map (no error) when klines is empty.
+func (s *IndicatorService) ComputeFromKlines(klines []domain.Kline) (map[string][]IndicatorPoint, error) {
+	n := len(klines)
+	if n == 0 {
+		return map[string][]IndicatorPoint{}, nil
+	}
+	highs := make([]float64, n)
+	lows := make([]float64, n)
+	closes := make([]float64, n)
+	volumes := make([]float64, n)
+	times := make([]time.Time, n)
+	for i, k := range klines {
+		highs[i] = k.High
+		lows[i] = k.Low
+		closes[i] = k.Close
+		volumes[i] = k.Volume
+		times[i] = k.At
+	}
+	return computeIndicatorsFromArrays(times, highs, lows, closes, volumes), nil
+}
+
+// computeIndicatorsFromArrays is the shared core that both ComputeForDataset and ComputeFromKlines delegate to.
+func computeIndicatorsFromArrays(times []time.Time, highs, lows, closes, volumes []float64) map[string][]IndicatorPoint {
+	n := len(times)
 	out := map[string][]IndicatorPoint{}
 
 	out["sma_20"] = pointsFromSMASeries(times, smaSeries(closes, 20))
@@ -106,7 +145,7 @@ func (s *IndicatorService) ComputeForDataset(ctx context.Context, datasetID stri
 	out["ad"] = pointsFromSeries(times, adSeries(highs, lows, closes, volumes))
 	out["bias_20"] = pointsFromSeries(times, biasSeries(closes, 20))
 
-	return out, nil
+	return out
 }
 
 type smaPoint struct {

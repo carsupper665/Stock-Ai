@@ -163,6 +163,37 @@ func TestLiveExecutionSafetyGates(t *testing.T) {
 	}
 }
 
+func TestProductionEnvironmentTreatedAsPaper(t *testing.T) {
+	app := newTestApp(t)
+	ctx := context.Background()
+	account, err := app.Accounts.Create(ctx, CreateAccountInput{
+		Name:             "production-paper",
+		InitialBalance:   1000,
+		Type:             store.AccountTypeLive,
+		Environment:      "production",
+		PriceMode:        "live",
+		SupportedSymbols: []string{"BTCUSDT"},
+	})
+	if err != nil {
+		t.Fatalf("create production live account: %v", err)
+	}
+
+	order, err := app.Trading.PlaceOrder(ctx, account.ID, PlaceOrderInput{
+		Symbol:       "BTCUSDT",
+		Side:         store.OrderSideBuy,
+		PositionSide: store.PositionSideLong,
+		OrderType:    store.OrderTypeMarket,
+		Quantity:     1,
+		Leverage:     1,
+	})
+	if err != nil {
+		t.Fatalf("place production live order: %v", err)
+	}
+	if order.Status != store.OrderStatusFilled {
+		t.Fatalf("expected paper fill for production environment, got %+v", order)
+	}
+}
+
 func TestLiveTradingAuditEvents(t *testing.T) {
 	app := newTestApp(t)
 	ctx := context.Background()
