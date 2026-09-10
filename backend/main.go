@@ -8,6 +8,9 @@ import (
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/logging"
+	"backend/internal/market"
+	"backend/internal/market/crypto"
+	"backend/internal/market/stock"
 )
 
 func main() {
@@ -36,7 +39,23 @@ func main() {
 		apiLog.Fatalf("%v", err)
 	}
 
-	engine := api.New(cfg, store, apiLog)
+	marketLog, err := logging.New("market", cfg.LogDir, cfg.LogMaxLines, cfg.Debug)
+	if err != nil {
+		apiLog.Fatalf("market logger 建立失敗: %v", err)
+	}
+	defer marketLog.Close()
+
+	prices := market.New(map[string]market.Source{
+		market.Crypto: crypto.NewBinance(),
+		market.Stock:  stock.New(),
+	}, marketLog, market.Options{
+		FreshTTL:    cfg.MarketFreshTTL,
+		IdleTimeout: cfg.MarketIdleTimeout,
+		WaitTimeout: cfg.MarketWaitTimeout,
+	})
+	defer prices.Close()
+
+	engine := api.New(cfg, store, prices, apiLog)
 	apiLog.Infof(context.Background(), "服務啟動於 :%s", cfg.Port)
 	if err := engine.Run(":" + cfg.Port); err != nil {
 		apiLog.Fatalf("服務啟動失敗: %v", err)

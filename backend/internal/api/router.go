@@ -6,6 +6,7 @@ import (
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/logging"
+	"backend/internal/market"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,10 +18,11 @@ type Server struct {
 	store    *database.Store
 	auth     *auth.Authenticator
 	accounts *account.Service
+	market   *market.Runtime
 }
 
 // New 組出 gin engine：套上共用 middleware，然後掛路由。
-func New(cfg *config.Config, store *database.Store, log *logging.Logger) *gin.Engine {
+func New(cfg *config.Config, store *database.Store, prices *market.Runtime, log *logging.Logger) *gin.Engine {
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -31,6 +33,7 @@ func New(cfg *config.Config, store *database.Store, log *logging.Logger) *gin.En
 		store:    store,
 		auth:     auth.New(cfg.UserToken, cfg.UserName, store),
 		accounts: account.New(store),
+		market:   prices,
 	}
 
 	engine := gin.New()
@@ -63,4 +66,9 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 
 	// 帳號自查：Account Token 查自己
 	v1.GET("/account", s.requireAny(), s.selfAccount)
+
+	// 行情：USER 與 Account 都可以讀
+	v1.GET("/market/price", s.requireAny(), s.marketPrice)
+	// 訂閱狀態是營運資訊，只給 USER
+	v1.GET("/market/subscriptions", s.requireUser(), s.marketSubscriptions)
 }

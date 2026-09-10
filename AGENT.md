@@ -20,3 +20,4 @@ Do not increase architectural complexity unless strictly required by the task.
 18. 每次修改後確認：更簡單、更少代碼、更少依賴、邊界更清楚。
 19. 核心原則：**能刪不加、能直接不繞、能獨立不耦合。**
 20. 所有的功能都需要完整的可執行可復現測試檔案集中到```./當前模塊/test/```底下，例如```./backend/test````
+21. 註解只寫在必要處：非顯而易見的取捨、刻意的特殊作法、規格依據。不要為了說明程式碼在做什麼而註解。

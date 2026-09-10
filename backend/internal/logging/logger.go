@@ -45,6 +45,9 @@ type Logger struct {
 
 	file     atomic.Pointer[os.File]
 	rotating atomic.Bool
+	// seq 讓每次輪替都拿到不同的檔名。只靠時間戳不夠：
+	// 大量日誌可以在同一個時間刻度內寫完，開回同一個檔案就等於沒輪替。
+	seq atomic.Uint64
 
 	// counter 只用來決定何時輪替，刻意不做同步。
 	// 併發下少算幾行不影響正確性，換來寫入路徑零成本。
@@ -56,11 +59,6 @@ func New(name, dir string, max int, debug bool) (*Logger, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("建立日誌目錄 %q 失敗: %w", dir, err)
 	}
-	f, err := openLogFile(dir, name)
-	if err != nil {
-		return nil, err
-	}
-
 	l := &Logger{
 		name:    name,
 		dir:     dir,
@@ -68,6 +66,10 @@ func New(name, dir string, max int, debug bool) (*Logger, error) {
 		debug:   debug,
 		console: colorable.NewColorableStdout(),
 		stderr:  colorable.NewColorableStderr(),
+	}
+	f, err := l.openFile()
+	if err != nil {
+		return nil, err
 	}
 	l.file.Store(f)
 	return l, nil
@@ -77,9 +79,10 @@ func New(name, dir string, max int, debug bool) (*Logger, error) {
 // 用完手上的 handle，就不需要為了關檔而在寫入路徑加鎖。
 var closeGrace = 500 * time.Millisecond
 
-func openLogFile(dir, name string) (*os.File, error) {
-	// 檔名帶到毫秒：只到秒的話，同一秒內連續輪替會開到同一個檔案，等於沒輪替。
-	path := filepath.Join(dir, fmt.Sprintf("%s-%s.log", name, time.Now().Format("20060102-150405.000")))
+// openFile 開一個新的日誌檔，檔名為 <名稱>-<時間>-<序號>.log。
+func (l *Logger) openFile() (*os.File, error) {
+	name := fmt.Sprintf("%s-%s-%03d.log", l.name, time.Now().Format("20060102-150405"), l.seq.Add(1))
+	path := filepath.Join(l.dir, name)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("開啟日誌檔 %q 失敗: %w", path, err)
@@ -192,7 +195,7 @@ func (l *Logger) countLine() {
 }
 
 func (l *Logger) rotate() {
-	f, err := openLogFile(l.dir, l.name)
+	f, err := l.openFile()
 	if err != nil {
 		l.rotating.Store(false)
 		l.emit(l.stderr, []byte(fmt.Sprintf("日誌輪替失敗: %v\n", err)))

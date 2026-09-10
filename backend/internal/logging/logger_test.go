@@ -69,19 +69,22 @@ func TestRotationCreatesNewFileAndKeepsWriting(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		l.Info(ctx, "before rotation")
 	}
-	waitFor(t, "輪替產生第二個日誌檔", func() bool { return len(logFiles(t, dir)) > 1 })
+	waitFor(t, "輪替產生新的日誌檔", func() bool { return len(logFiles(t, dir)) > 1 })
+	// 輪替是背景進行的，等它做完才問「現在寫到哪個檔案」。
+	waitFor(t, "輪替結束", func() bool { return !l.rotating.Load() })
 
-	// 輪替後仍要能繼續寫，而且寫進最新的檔案。
+	current := l.file.Load().Name()
 	l.Info(ctx, "after rotation marker")
 
-	files := logFiles(t, dir)
-	newest := files[len(files)-1]
-	data, err := os.ReadFile(newest)
+	data, err := os.ReadFile(current)
 	if err != nil {
-		t.Fatalf("讀取最新日誌檔: %v", err)
+		t.Fatalf("讀取目前的日誌檔: %v", err)
 	}
 	if !strings.Contains(string(data), "after rotation marker") {
-		t.Fatalf("輪替後的訊息沒有寫進最新檔案 %s，內容: %q", newest, data)
+		t.Fatalf("輪替後的訊息沒有寫進目前的檔案 %s，內容: %q", current, data)
+	}
+	if first := logFiles(t, dir)[0]; current == first {
+		t.Fatal("輪替後仍在寫第一個檔案")
 	}
 }
 

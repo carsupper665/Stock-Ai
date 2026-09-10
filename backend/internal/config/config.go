@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config 是整個 backend 的執行期設定，全部來自環境變數或 .env。
@@ -24,6 +25,11 @@ type Config struct {
 
 	FeeRateMaker float64 // 掛單成交費率
 	FeeRateTaker float64 // 市價成交費率
+
+	// 行情參數。規格 §8、§11 標示為「暫定」，因此開放設定。
+	MarketFreshTTL    time.Duration // 快取多久內算新鮮
+	MarketIdleTimeout time.Duration // 多久沒人要價就停掉訂閱
+	MarketWaitTimeout time.Duration // 等新報價的上限
 }
 
 // Load 讀取 .env（若存在）後組出設定。真實環境變數優先於 .env。
@@ -50,6 +56,15 @@ func Load(envPath string) (*Config, error) {
 	if cfg.FeeRateTaker, err = envFloat("FEE_RATE_TAKER", 0.0004); err != nil {
 		return nil, err
 	}
+	if cfg.MarketFreshTTL, err = envDuration("MARKET_FRESH_TTL", 1500*time.Millisecond); err != nil {
+		return nil, err
+	}
+	if cfg.MarketIdleTimeout, err = envDuration("MARKET_IDLE_TIMEOUT", 60*time.Second); err != nil {
+		return nil, err
+	}
+	if cfg.MarketWaitTimeout, err = envDuration("MARKET_WAIT_TIMEOUT", 5*time.Second); err != nil {
+		return nil, err
+	}
 
 	return cfg, cfg.validate()
 }
@@ -63,6 +78,9 @@ func (c *Config) validate() error {
 	}
 	if c.FeeRateMaker < 0 || c.FeeRateTaker < 0 {
 		return errors.New("手續費率不可為負數")
+	}
+	if c.MarketFreshTTL <= 0 || c.MarketIdleTimeout <= 0 || c.MarketWaitTimeout <= 0 {
+		return errors.New("行情的時間參數必須大於 0")
 	}
 	return nil
 }
@@ -128,6 +146,20 @@ func envBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return v
+}
+
+// envDuration 讀取時間長度，接受 Go 的寫法（例如 1.5s、60s、200ms）。
+// 寫錯就報錯，不要靜默套用預設值——那會讓人以為設定生效了。
+func envDuration(key string, fallback time.Duration) (time.Duration, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s 必須是時間長度（例如 1.5s、60s），收到 %q", key, raw)
+	}
+	return v, nil
 }
 
 func envFloat(key string, fallback float64) (float64, error) {

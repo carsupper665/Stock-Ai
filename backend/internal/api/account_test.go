@@ -2,16 +2,21 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/logging"
+	"backend/internal/market"
+	"backend/internal/market/stock"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -46,12 +51,49 @@ func newTestServer(t *testing.T) (*gin.Engine, *database.Store) {
 	log.SetConsole(io.Discard)
 	t.Cleanup(func() { _ = log.Close() })
 
+	prices := market.New(map[string]market.Source{
+		market.Crypto: staticSource{price: testPrice},
+		market.Stock:  failingSource{},
+	}, nil, market.Options{WaitTimeout: 2 * time.Second})
+	t.Cleanup(prices.Close)
+
 	cfg := &config.Config{
 		UserToken: testUserToken,
 		UserName:  "Bless",
 		DBDriver:  "sqlite",
 	}
-	return New(cfg, store, log), store
+	return New(cfg, store, prices, log), store
+}
+
+const testPrice = 60000.0
+
+// staticSource 持續送出固定價格，讓 API 測試不必碰到真實行情來源。
+type staticSource struct{ price float64 }
+
+func (staticSource) Name() string { return "static" }
+
+func (s staticSource) Stream(ctx context.Context, _ string, out chan<- float64) error {
+	for {
+		select {
+		case out <- s.price:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case <-time.After(10 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// failingSource 代表尚未接上的市場。
+type failingSource struct{}
+
+func (failingSource) Name() string { return "failing" }
+
+func (failingSource) Stream(_ context.Context, symbol string, _ chan<- float64) error {
+	return fmt.Errorf("%w（symbol=%s）", stock.ErrNotImplemented, symbol)
 }
 
 // do 發出一個請求並回傳狀態碼與解析後的 body。token 為空時不帶 Authorization。
