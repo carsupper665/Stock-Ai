@@ -1,24 +1,32 @@
-.vscode/*
-.codex/*
-.idea/*
+# 編輯器 / IDE
+.vscode/
+.idea/
+
+# AI agent 工作狀態
+.codex/
+.omo/
+.omx/
+.sisyphus/
 .sis
-.worktrees/*
-web/node_modules/*
-web/dist/*
-web/vite-*.log
-server/DB.db
-server/.gocache/
-tmp/*
-.omx/*
-openspec/*
-docs/*
-test/*
-*.log
+.playwright-mcp/
+.worktrees/
+
+# 機密與憑證
 *.env
-*.db
-*.exe
-.playwright-mcp/*
-.sisyphus/*
+.env*
+!.env.example
 cookies.txt
-*.png
-*.csv
+
+# 建置產物與相依
+node_modules/
+dist/
+build/
+*.exe
+
+# 本機執行期檔案
+*.log
+*.db
+tmp/
+
+# 行情資料（本機用，見 scripts/download_crypto_data.py）
+data/*.csv

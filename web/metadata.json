@@ -1,5 +1,0 @@
-{
-  "name": "Trading Sandbox Operations Console",
-  "description": "Demo-only React operations console for replay datasets, sandbox controls, monitoring views, and agent boundary rules.",
-  "requestFramePermissions": []
-}
