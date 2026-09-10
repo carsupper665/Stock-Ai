@@ -87,6 +87,12 @@ func openLogFile(dir, name string) (*os.File, error) {
 	return f, nil
 }
 
+// SetConsole 改寫 console 的輸出目的地，主要用於測試時導向 io.Discard。
+// 必須在開始寫入日誌之前呼叫。
+func (l *Logger) SetConsole(w io.Writer) {
+	l.console, l.stderr = w, w
+}
+
 // Close 關閉目前的日誌檔。
 func (l *Logger) Close() error {
 	if f := l.file.Load(); f != nil {

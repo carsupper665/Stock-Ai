@@ -28,12 +28,15 @@ func main() {
 	}
 	defer dbLog.Close()
 
-	db, err := database.Open(cfg, dbLog)
+	store, err := database.Open(cfg, dbLog)
 	if err != nil {
 		apiLog.Fatalf("%v", err)
 	}
+	if err := store.Migrate(); err != nil {
+		apiLog.Fatalf("%v", err)
+	}
 
-	engine := api.New(cfg, db, apiLog)
+	engine := api.New(cfg, store, apiLog)
 	apiLog.Infof(context.Background(), "服務啟動於 :%s", cfg.Port)
 	if err := engine.Run(":" + cfg.Port); err != nil {
 		apiLog.Fatalf("服務啟動失敗: %v", err)

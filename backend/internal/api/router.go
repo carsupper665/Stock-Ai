@@ -1,24 +1,36 @@
 package api
 
 import (
+	"backend/internal/account"
+	"backend/internal/auth"
 	"backend/internal/config"
+	"backend/internal/database"
 	"backend/internal/logging"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // Server 持有 handler 需要的相依。各模組的 handler 都掛在這上面。
 type Server struct {
-	cfg *config.Config
-	db  *gorm.DB
-	log *logging.Logger
+	cfg      *config.Config
+	log      *logging.Logger
+	store    *database.Store
+	auth     *auth.Authenticator
+	accounts *account.Service
 }
 
 // New 組出 gin engine：套上共用 middleware，然後掛路由。
-func New(cfg *config.Config, db *gorm.DB, log *logging.Logger) *gin.Engine {
+func New(cfg *config.Config, store *database.Store, log *logging.Logger) *gin.Engine {
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
+	}
+
+	s := &Server{
+		cfg:      cfg,
+		log:      log,
+		store:    store,
+		auth:     auth.New(cfg.UserToken, cfg.UserName, store),
+		accounts: account.New(store),
 	}
 
 	engine := gin.New()
@@ -26,7 +38,7 @@ func New(cfg *config.Config, db *gorm.DB, log *logging.Logger) *gin.Engine {
 	engine.Use(logging.RequestID())
 	engine.Use(logging.AccessLog(log))
 
-	registerRoutes(engine, &Server{cfg: cfg, db: db, log: log})
+	registerRoutes(engine, s)
 	return engine
 }
 
@@ -35,6 +47,20 @@ func New(cfg *config.Config, db *gorm.DB, log *logging.Logger) *gin.Engine {
 func registerRoutes(engine *gin.Engine, s *Server) {
 	v1 := engine.Group("/v1")
 
-	// 健康檢查
+	// 健康檢查：不需要身分
 	v1.GET("/health", s.health)
+
+	// 帳號管理：只有 USER Token
+	admin := v1.Group("/accounts", s.requireUser())
+	{
+		admin.POST("", s.createAccount)
+		admin.GET("", s.listAccounts)
+		admin.GET("/:id", s.getAccount)
+		admin.PATCH("/:id", s.updateAccount)
+		admin.DELETE("/:id", s.deleteAccount)
+		admin.POST("/:id/token/reset", s.resetAccountToken)
+	}
+
+	// 帳號自查：Account Token 查自己
+	v1.GET("/account", s.requireAny(), s.selfAccount)
 }

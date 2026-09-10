@@ -30,3 +30,7 @@ tmp/
 
 # 行情資料（本機用，見 scripts/download_crypto_data.py）
 data/*.csv
+
+# Python
+__pycache__/
+*.pyc
