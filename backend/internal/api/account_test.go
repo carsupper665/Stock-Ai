@@ -58,9 +58,11 @@ func newTestServer(t *testing.T) (*gin.Engine, *database.Store) {
 	t.Cleanup(prices.Close)
 
 	cfg := &config.Config{
-		UserToken: testUserToken,
-		UserName:  "Bless",
-		DBDriver:  "sqlite",
+		UserToken:    testUserToken,
+		UserName:     "Bless",
+		DBDriver:     "sqlite",
+		FeeRateMaker: 0.0005,
+		FeeRateTaker: 0.001,
 	}
 	return New(cfg, store, prices, log), store
 }

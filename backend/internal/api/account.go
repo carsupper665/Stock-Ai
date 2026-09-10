@@ -128,21 +128,41 @@ func (s *Server) resetAccountToken(c *gin.Context) {
 	c.JSON(http.StatusOK, viewAccount(acc, true))
 }
 
-// selfAccount 讓持有 Account Token 的呼叫者查詢自己的帳號。
+// selfAccount 是 Account Token 的帳務總覽。
 // 不回傳 token：規格 §1 規定只有 USER 可以查看 Account Token。
 func (s *Server) selfAccount(c *gin.Context) {
-	id, ok := identityOf(c)
-	if !ok || id.IsUser() {
-		fail(c, http.StatusForbidden, "forbidden", "這個端點只有 Account Token 可以使用")
+	accountID, ok := s.ownAccount(c)
+	if !ok {
 		return
 	}
 
-	acc, err := s.accounts.Get(c.Request.Context(), id.AccountID)
+	acc, err := s.accounts.Get(c.Request.Context(), accountID)
 	if err != nil {
 		s.writeAccountError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, viewAccount(acc, false))
+	summary, err := s.trading.Summary(c.Request.Context(), accountID)
+	if err != nil {
+		s.writeTradingError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, selfAccountView{
+		accountView:  viewAccount(acc, false),
+		LockedMargin: round(summary.LockedMargin),
+		Available:    round(summary.Available),
+		Unrealized:   round(summary.Unrealized),
+		Equity:       round(summary.Equity),
+	})
+}
+
+// selfAccountView 在帳號基本資料上補齊保證金與權益。
+type selfAccountView struct {
+	accountView
+	LockedMargin float64 `json:"locked_margin"`
+	Available    float64 `json:"available"`
+	Unrealized   float64 `json:"unrealized_pnl"`
+	Equity       float64 `json:"equity"`
 }
 
 // writeAccountError 把 service 與 store 的錯誤對應到 HTTP 回應。

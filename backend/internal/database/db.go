@@ -49,6 +49,15 @@ func Open(cfg *config.Config, log *logging.Logger) (*Store, error) {
 		return nil, fmt.Errorf("連線資料庫失敗 (%s): %w", cfg.DBDriver, err)
 	}
 
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("取得資料庫連線失敗: %w", err)
+	}
+	if cfg.DBDriver == "sqlite" {
+		// sqlite 同時只容得下一個寫入者，多條連線會互相卡成 database is locked。
+		sqlDB.SetMaxOpenConns(1)
+	}
+
 	store := &Store{db: db}
 	if err := store.Ping(context.Background()); err != nil {
 		return nil, fmt.Errorf("資料庫無回應 (%s): %w", cfg.DBDriver, err)
@@ -83,7 +92,7 @@ func (s *Store) Ping(ctx context.Context) error {
 
 // Migrate 建立或更新資料表結構。新增 model 時加進這個清單。
 func (s *Store) Migrate() error {
-	if err := s.db.AutoMigrate(&Account{}); err != nil {
+	if err := s.db.AutoMigrate(&Account{}, &Order{}, &Position{}, &Trade{}); err != nil {
 		return fmt.Errorf("建立資料表失敗: %w", err)
 	}
 	return nil

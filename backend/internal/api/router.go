@@ -7,6 +7,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/logging"
 	"backend/internal/market"
+	"backend/internal/trading"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +20,7 @@ type Server struct {
 	auth     *auth.Authenticator
 	accounts *account.Service
 	market   *market.Runtime
+	trading  *trading.Service
 }
 
 // New 組出 gin engine：套上共用 middleware，然後掛路由。
@@ -34,6 +36,7 @@ func New(cfg *config.Config, store *database.Store, prices *market.Runtime, log 
 		auth:     auth.New(cfg.UserToken, cfg.UserName, store),
 		accounts: account.New(store),
 		market:   prices,
+		trading:  trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker),
 	}
 
 	engine := gin.New()
@@ -62,6 +65,10 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 		admin.PATCH("/:id", s.updateAccount)
 		admin.DELETE("/:id", s.deleteAccount)
 		admin.POST("/:id/token/reset", s.resetAccountToken)
+
+		admin.GET("/:id/positions", s.userListPositions)
+		admin.GET("/:id/orders", s.userListOrders)
+		admin.GET("/:id/trades", s.userListTrades)
 	}
 
 	// 帳號自查：Account Token 查自己
@@ -71,4 +78,16 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 	v1.GET("/market/price", s.requireAny(), s.marketPrice)
 	// 訂閱狀態是營運資訊，只給 USER
 	v1.GET("/market/subscriptions", s.requireUser(), s.marketSubscriptions)
+
+	// 交易：身分一律由 token 決定，不接受 client 指定帳號（規格 §4）
+	trade := v1.Group("", s.requireAny())
+	{
+		trade.POST("/orders", s.placeOrder)
+		trade.GET("/orders", s.listOrders)
+		trade.GET("/orders/:id", s.getOrder)
+		trade.POST("/orders/:id/cancel", s.cancelOrder)
+		trade.GET("/positions", s.listPositions)
+		trade.POST("/positions/:id/close", s.closePosition)
+		trade.GET("/trades", s.listTrades)
+	}
 }
