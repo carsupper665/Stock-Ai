@@ -25,6 +25,9 @@ const (
 
 	RoleMaker = "maker"
 	RoleTaker = "taker"
+
+	AuthorUser    = "user"
+	AuthorAccount = "account"
 )
 
 // Account 是一個虛擬交易帳號。
@@ -112,4 +115,14 @@ type Trade struct {
 	RealizedPnL float64
 
 	CreatedAt time.Time
+}
+
+// Message 只存真實作者，"you" 是查詢時依請求者身分算出來的（規格 §13）。
+// USER 沒有 id，AuthorID 留空、以 AuthorType 區分。
+type Message struct {
+	ID         string    `gorm:"primaryKey;size:64"`
+	AuthorType string    `gorm:"size:16;not null"`
+	AuthorID   string    `gorm:"size:64;not null;index"`
+	Content    string    `gorm:"size:2000;not null"`
+	CreatedAt  time.Time `gorm:"index"`
 }

@@ -20,9 +20,6 @@ import (
 	"backend/internal/trading"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 const testUserToken = "user-token-secret"
@@ -31,15 +28,10 @@ func newTestServer(t *testing.T) (*gin.Engine, *database.Store) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{
-		TranslateError: true,
-		Logger:         gormlogger.Discard,
-	})
+	store, err := database.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("開啟測試資料庫: %v", err)
 	}
-	store := database.NewStore(db)
-	// Windows 上檔案沒關就刪不掉 TempDir。
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("建表: %v", err)

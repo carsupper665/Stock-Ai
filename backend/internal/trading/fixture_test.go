@@ -9,10 +9,6 @@ import (
 
 	"backend/internal/database"
 	"backend/internal/market"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 // fixedSource 持續送出目前設定的價格，讓測試可以隨時改盤。
@@ -58,14 +54,10 @@ type fixture struct {
 func newFixture(t *testing.T, balance, price float64) *fixture {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{
-		TranslateError: true,
-		Logger:         gormlogger.Discard,
-	})
+	store, err := database.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("開啟測試資料庫: %v", err)
 	}
-	store := database.NewStore(db)
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("建表: %v", err)

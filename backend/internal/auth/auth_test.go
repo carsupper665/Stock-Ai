@@ -7,25 +7,16 @@ import (
 	"testing"
 
 	"backend/internal/database"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 const userToken = "user-token-secret"
 
 func newTestAuth(t *testing.T) (*Authenticator, *database.Store) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{
-		TranslateError: true,
-		Logger:         gormlogger.Discard,
-	})
+	store, err := database.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("開啟測試資料庫: %v", err)
 	}
-	store := database.NewStore(db)
-	// Windows 上檔案沒關就刪不掉 TempDir。
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("建表: %v", err)

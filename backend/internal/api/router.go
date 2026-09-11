@@ -7,6 +7,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/logging"
 	"backend/internal/market"
+	"backend/internal/message"
 	"backend/internal/trading"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ type Server struct {
 	accounts *account.Service
 	market   *market.Runtime
 	trading  *trading.Service
+	messages *message.Service
 }
 
 // New 組出 gin engine：套上共用 middleware，然後掛路由。
@@ -37,6 +39,7 @@ func New(cfg *config.Config, store *database.Store, prices *market.Runtime, trad
 		accounts: account.New(store),
 		market:   prices,
 		trading:  trader,
+		messages: message.New(store, cfg.UserName),
 	}
 
 	engine := gin.New()
@@ -91,4 +94,8 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 		trade.PATCH("/positions/:id", s.setStops)
 		trade.GET("/trades", s.listTrades)
 	}
+
+	// 留言板：讀取公開，帶了 token 就解析身分、帶錯就 401（規格 §17）；發布需要 token
+	v1.GET("/messages", s.optionalAuth(), s.listMessages)
+	v1.POST("/messages", s.requireAny(), s.postMessage)
 }

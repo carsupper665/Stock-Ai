@@ -40,11 +40,7 @@ func Open(cfg *config.Config, log *logging.Logger) (*Store, error) {
 		return nil, fmt.Errorf("不支援的 DB_DRIVER: %q", cfg.DBDriver)
 	}
 
-	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger:                                   &gormLog{log: log, slow: 200 * time.Millisecond, debug: cfg.Debug},
-		TranslateError:                           true,
-		DisableForeignKeyConstraintWhenMigrating: false,
-	})
+	db, err := gorm.Open(dialector, gormConfig(&gormLog{log: log, slow: 200 * time.Millisecond, debug: cfg.Debug}))
 	if err != nil {
 		return nil, fmt.Errorf("連線資料庫失敗 (%s): %w", cfg.DBDriver, err)
 	}
@@ -67,9 +63,28 @@ func Open(cfg *config.Config, log *logging.Logger) (*Store, error) {
 	return store, nil
 }
 
-// NewStore 用既有的 gorm 連線建立 Store，供測試使用。
-func NewStore(db *gorm.DB) *Store {
-	return &Store{db: db}
+// OpenSQLite 直接開一個 sqlite 檔案且不記日誌，供測試與工具使用。
+func OpenSQLite(path string) (*Store, error) {
+	db, err := gorm.Open(sqlite.Open(path), gormConfig(gormlogger.Discard))
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxOpenConns(1)
+	return &Store{db: db}, nil
+}
+
+// gormConfig 統一所有連線的設定。時間一律以 UTC 寫入：sqlite 把時間存成
+// 帶時區的文字，範圍查詢是字串比大小，寫入與查詢的時區不一致就會靜默出錯。
+func gormConfig(logger gormlogger.Interface) *gorm.Config {
+	return &gorm.Config{
+		Logger:         logger,
+		TranslateError: true,
+		NowFunc:        func() time.Time { return time.Now().UTC() },
+	}
 }
 
 // Close 關閉資料庫連線。
@@ -92,7 +107,7 @@ func (s *Store) Ping(ctx context.Context) error {
 
 // Migrate 建立或更新資料表結構。新增 model 時加進這個清單。
 func (s *Store) Migrate() error {
-	if err := s.db.AutoMigrate(&Account{}, &Order{}, &Position{}, &Trade{}); err != nil {
+	if err := s.db.AutoMigrate(&Account{}, &Order{}, &Position{}, &Trade{}, &Message{}); err != nil {
 		return fmt.Errorf("建立資料表失敗: %w", err)
 	}
 	return nil
