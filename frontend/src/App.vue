@@ -1,8 +1,11 @@
 <script setup>
+import { useRoute } from 'vue-router'
+
 import { nav } from './core/pages.js'
 import { logout, session } from './core/session.js'
 import { setTheme } from './core/theme.js'
 
+const route = useRoute()
 const theme = localStorage.getItem('theme') ?? ''
 </script>
 
@@ -21,7 +24,8 @@ const theme = localStorage.getItem('theme') ?? ''
       <button @click="logout">登出</button>
     </template>
   </header>
-  <RouterView />
+  <!-- 換了參數或 query 就整頁重建，頁面的 useLoad 不用自己 watch 路由 -->
+  <RouterView :key="route.fullPath" />
 </template>
 
 <style scoped>

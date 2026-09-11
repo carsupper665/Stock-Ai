@@ -51,6 +51,7 @@ frontend/
       theme.js              # setTheme：套用並記住 light／dark／跟系統
     pages/                  # 一個資料夾一個頁面（§3）
       login/
+      health/               # 範例頁：抄這個；不要了就刪
       accounts/
       account-detail/
       market/
@@ -223,11 +224,11 @@ export async function api(method, path, body, token = session.token) {
 
   const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
   if (res.status === 204) return null
-  const data = await res.json()
+  const data = await res.json().catch(() => ({}))     // 後端掛了時代理回空的 502，不能讓解析錯誤蓋掉狀態碼
   if (res.ok) return data
 
   if (res.status === 401 && token && token === session.token) logout()
-  throw Object.assign(new Error(data.message), { status: res.status, code: data.error })
+  throw Object.assign(new Error(data.message ?? `${res.status} ${res.statusText}`), { status: res.status, code: data.error })
 }
 ```
 
@@ -235,6 +236,7 @@ export async function api(method, path, body, token = session.token) {
 
 - 成功直接回後端 JSON；204 回 `null`。不轉型、不改 key、不快取、不重試。
 - 失敗丟 `Error`，帶 `status`、`code`（後端的 `error` 欄位）、`message`（後端給人看的文字）。頁面通常直接顯示 `message`。
+  後端沒開時代理回的是空的 502，`message` 會是 `502 Bad Gateway`，`code` 是 `undefined`。
 - 第四個參數 `token` 可覆寫，給「用某個帳號的 token 代打」用（§10 D 組）。代打的 token 收到 401 只丟錯，不會把 USER 登出。
 - `VITE_API_BASE` 預設空字串＝同源：開發走 vite proxy，正式走反向代理。
 
@@ -298,6 +300,9 @@ async function create(form) {
 ```
 
 寫入（建立、修改、刪除）不經過 `useLoad`：頁面自己 `try/catch`、成功就 `reload()`。這是 `core/` 唯一的 composable，不再加第二個。
+
+殼的 `<RouterView :key="route.fullPath" />` 讓路由參數或 query 一變就整頁重建，`useLoad` 自然重跑：
+`/accounts/a` 換到 `/accounts/b`、`?status=open` 換到 `?status=filled`，頁面都不用自己 watch 路由。
 
 ## 7. 樣式與主題
 
@@ -398,7 +403,7 @@ VITE_DEV_TOKEN=
 |---|---|
 | `pages.test.js` | 每個 `pages/*/index.js` 都有 `path`（以 `/` 開頭）、`name`、`component`；`name` 不重複；只有 `login` 是 `public`；每個 `component()` 都載得起來；`nav` 只收有 `nav` 的頁面且已排序 |
 | `router.test.js` | 用 `addRoute` 掛一個受保護的測試路由，不依賴真實頁面：沒 token 被送去 `login` 且 `query.redirect` 是原路徑；有 token 進得去；`/login` 免 token；不認得的路徑不 404 |
-| `api.test.js` | 帶 `Authorization` 與 JSON body；204 回 `null`；錯誤信封變成 `{status, code, message}`；自己的 token 401 會 `logout`、代打的 token 401 只丟錯（mock `fetch`） |
+| `api.test.js` | 帶 `Authorization` 與 JSON body；204 回 `null`；錯誤信封變成 `{status, code, message}`；自己的 token 401 會 `logout`、代打的 token 401 只丟錯；空的 502 也拿得到狀態碼（mock `fetch`） |
 | `theme.test.js` | `src/**/*.{vue,css}` 除了 `theme.css` 沒有 `#hex`、`rgb(`、`hsl(`（`import.meta.glob` 讀原始碼掃） |
 
 頁面不寫單元測試：對著真後端手動驗，跟 `backend/test/*.py` 一樣是真流程。頁面長相定下來後再考慮 e2e。
@@ -525,7 +530,7 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 
 | Step | 做什麼 | 驗收 |
 |---|---|---|
-| 1 骨架 | `package.json`、`vite.config.js`、`index.html`、`main.js`、`App.vue`、`theme.css`、`core/` 八個檔、`pages/login/`、`test/` 四支 | `npm test` 過；未登入開任何路徑都被送到 `/login`；貼對 token 進得去、貼錯看到後端 `message`；重新整理不掉登入 |
+| 1 骨架 | `package.json`、`vite.config.js`、`index.html`、`main.js`、`App.vue`、`theme.css`、`core/` 八個檔、`pages/login/`、`pages/health/`（範例）、`test/` 四支 | `npm test` 過；未登入開任何路徑都被送到 `/login`；貼對 token 進得去、貼錯看到後端 `message`；重新整理不掉登入 |
 | 2 帳號 | `pages/accounts/`（列表、建立、改名、停用／啟用、刪除）、`pages/account-detail/`（基本資料、token 顯示／複製／重設、部位、訂單含 `status` 篩選、成交） | 對著 `go run .` 走完 `backend/test/02_account.py`、`04_trading.py` 建出的資料 |
 | 3 行情 | `pages/market/`（查價：market + symbol；訂閱狀態表） | 查 BTCUSDT 有價；訂閱表看得到 `active` → 閒置後 `inactive` |
 | 4 留言板 | `pages/messages/`（列表、發布、`before` 載入更早、自己顯示 `you`） | 對照 `backend/test/06_message.py` 的四種身分 |

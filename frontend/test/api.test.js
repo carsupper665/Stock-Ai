@@ -48,6 +48,14 @@ it('錯誤信封變成帶 status、code、message 的 Error', async () => {
   expect(location.assign).not.toHaveBeenCalled()
 })
 
+it('後端掛掉時代理回的空 502 也要拿得到狀態碼', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 502, statusText: 'Bad Gateway' }))
+  const err = await api('GET', '/v1/health').catch((e) => e)
+  expect(err.status).toBe(502)
+  expect(err.code).toBeUndefined()
+  expect(err.message).toBe('502 Bad Gateway')
+})
+
 it('自己的 token 收到 401 會登出', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond(401, { error: 'unauthorized', message: 'token 無效' }))
   await api('GET', '/v1/accounts').catch(() => {})
