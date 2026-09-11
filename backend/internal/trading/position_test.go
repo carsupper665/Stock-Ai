@@ -140,18 +140,18 @@ func TestApplyFillTreatsTinyRemainderAsClosed(t *testing.T) {
 
 func TestUnrealized(t *testing.T) {
 	long := pos(database.Long, 2, 100, 10)
-	if got := unrealized(long, 110); !near(got, 20) {
+	if got := Unrealized(long, 110); !near(got, 20) {
 		t.Fatalf("多單浮盈應為 (110-100)×2=20，得到 %v", got)
 	}
-	if got := unrealized(long, 95); !near(got, -10) {
+	if got := Unrealized(long, 95); !near(got, -10) {
 		t.Fatalf("多單浮虧應為 -10，得到 %v", got)
 	}
 
 	short := pos(database.Short, 2, 100, 10)
-	if got := unrealized(short, 90); !near(got, 20) {
+	if got := Unrealized(short, 90); !near(got, 20) {
 		t.Fatalf("空單浮盈應為 (100-90)×2=20，得到 %v", got)
 	}
-	if got := unrealized(short, 105); !near(got, -10) {
+	if got := Unrealized(short, 105); !near(got, -10) {
 		t.Fatalf("空單浮虧應為 -10，得到 %v", got)
 	}
 }

@@ -21,6 +21,7 @@ const (
 	OrderOpen     = "open"
 	OrderFilled   = "filled"
 	OrderCanceled = "canceled"
+	OrderRejected = "rejected"
 
 	RoleMaker = "maker"
 	RoleTaker = "taker"
@@ -59,6 +60,9 @@ type Order struct {
 	Leverage   float64 `gorm:"not null"`
 	StopLoss   float64
 	TakeProfit float64
+	// ReduceOnly 的單只能減倉，部位不夠就拒絕，不會反向開倉。
+	// 平倉與停損停利觸發都是這種單。
+	ReduceOnly bool
 
 	Status         string `gorm:"size:16;not null;index"`
 	FilledQuantity float64

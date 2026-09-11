@@ -231,3 +231,49 @@ func TestUserCanReadAnyAccountActivity(t *testing.T) {
 		t.Fatalf("另一個帳號不該看到別人的部位: %v", body)
 	}
 }
+
+func TestSetStopsEndpoint(t *testing.T) {
+	engine, _ := newTestServer(t)
+	_, token := createAccountFor(t, engine, "BTC-Agent-01", 1_000_000)
+	do(t, engine, http.MethodPost, "/v1/orders", token, buyOrder(0.01, 10))
+
+	_, body := do(t, engine, http.MethodGet, "/v1/positions", token, nil)
+	positions, _ := body["positions"].([]any)
+	position, _ := positions[0].(map[string]any)
+	positionID, _ := position["id"].(string)
+	path := "/v1/positions/" + positionID
+
+	status, updated := do(t, engine, http.MethodPatch, path, token, gin.H{
+		"stop_loss": testPrice - 1000, "take_profit": testPrice + 1000,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("設定停損停利應回 200，得到 %d: %v", status, updated)
+	}
+	if updated["stop_loss"] != testPrice-1000 || updated["take_profit"] != testPrice+1000 {
+		t.Fatalf("回應應帶回設定值: %v", updated)
+	}
+
+	status, updated = do(t, engine, http.MethodPatch, path, token, gin.H{"stop_loss": 0})
+	if status != http.StatusOK {
+		t.Fatalf("移除停損應回 200，得到 %d", status)
+	}
+	if _, present := updated["stop_loss"]; present {
+		t.Fatalf("移除後不該再有 stop_loss: %v", updated)
+	}
+	if updated["take_profit"] != testPrice+1000 {
+		t.Fatalf("只移除停損不該動到停利: %v", updated)
+	}
+
+	if status, _ := do(t, engine, http.MethodPatch, path, token, gin.H{"stop_loss": testPrice + 1}); status != http.StatusBadRequest {
+		t.Fatalf("多單停損高於現價應回 400，得到 %d", status)
+	}
+	if status, _ := do(t, engine, http.MethodPatch, path, token, gin.H{}); status != http.StatusBadRequest {
+		t.Fatalf("空的修改應回 400，得到 %d", status)
+	}
+	if status, _ := do(t, engine, http.MethodPatch, path, testUserToken, gin.H{"stop_loss": 1}); status != http.StatusForbidden {
+		t.Fatalf("USER 不能改別人的停損停利，應回 403，得到 %d", status)
+	}
+	if status, _ := do(t, engine, http.MethodPatch, "/v1/positions/pos_missing", token, gin.H{"stop_loss": 1}); status != http.StatusNotFound {
+		t.Fatalf("不存在的部位應回 404，得到 %d", status)
+	}
+}

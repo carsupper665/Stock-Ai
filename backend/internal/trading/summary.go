@@ -63,7 +63,7 @@ func (s *Service) Positions(ctx context.Context, accountID, product string) ([]O
 		views = append(views, OpenPosition{
 			Position:   positions[i],
 			MarkPrice:  price.Price,
-			Unrealized: unrealized(&positions[i], price.Price),
+			Unrealized: Unrealized(&positions[i], price.Price),
 		})
 	}
 	return views, nil

@@ -12,8 +12,6 @@ const (
 	takerFee = 0.001
 )
 
-// fixedSource 持續送出目前設定的價格，讓測試可以隨時改盤。
-
 func TestMarketBuyOpensPositionAndChargesFee(t *testing.T) {
 	f := newFixture(t, 10000, 100)
 

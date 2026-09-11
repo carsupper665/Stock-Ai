@@ -89,8 +89,8 @@ func sameDirection(a, b float64) bool {
 	return a > 0 && b > 0 || a < 0 && b < 0
 }
 
-// unrealized 依現價計算未實現損益。
-func unrealized(pos *database.Position, price float64) float64 {
+// Unrealized 依現價計算未實現損益。
+func Unrealized(pos *database.Position, price float64) float64 {
 	if pos.Side == database.Short {
 		return (pos.EntryPrice - price) * pos.Quantity
 	}

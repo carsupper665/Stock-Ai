@@ -24,7 +24,7 @@ type Server struct {
 }
 
 // New 組出 gin engine：套上共用 middleware，然後掛路由。
-func New(cfg *config.Config, store *database.Store, prices *market.Runtime, log *logging.Logger) *gin.Engine {
+func New(cfg *config.Config, store *database.Store, prices *market.Runtime, trader *trading.Service, log *logging.Logger) *gin.Engine {
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -36,7 +36,7 @@ func New(cfg *config.Config, store *database.Store, prices *market.Runtime, log 
 		auth:     auth.New(cfg.UserToken, cfg.UserName, store),
 		accounts: account.New(store),
 		market:   prices,
-		trading:  trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker),
+		trading:  trader,
 	}
 
 	engine := gin.New()
@@ -88,6 +88,7 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 		trade.POST("/orders/:id/cancel", s.cancelOrder)
 		trade.GET("/positions", s.listPositions)
 		trade.POST("/positions/:id/close", s.closePosition)
+		trade.PATCH("/positions/:id", s.setStops)
 		trade.GET("/trades", s.listTrades)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"backend/internal/market"
 	"backend/internal/market/crypto"
 	"backend/internal/market/stock"
+	"backend/internal/trading"
 )
 
 func main() {
@@ -55,7 +56,18 @@ func main() {
 	})
 	defer prices.Close()
 
-	engine := api.New(cfg, store, prices, apiLog)
+	matchLog, err := logging.New("matching", cfg.LogDir, cfg.LogMaxLines, cfg.Debug)
+	if err != nil {
+		apiLog.Fatalf("matching logger 建立失敗: %v", err)
+	}
+	defer matchLog.Close()
+
+	trader := trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker)
+	matcher := trading.NewEngine(trader, cfg.MatchingInterval, matchLog)
+	matcher.Start()
+	defer matcher.Stop()
+
+	engine := api.New(cfg, store, prices, trader, apiLog)
 	apiLog.Infof(context.Background(), "服務啟動於 :%s", cfg.Port)
 	if err := engine.Run(":" + cfg.Port); err != nil {
 		apiLog.Fatalf("服務啟動失敗: %v", err)

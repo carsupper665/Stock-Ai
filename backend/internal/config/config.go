@@ -30,6 +30,8 @@ type Config struct {
 	MarketFreshTTL    time.Duration // 快取多久內算新鮮
 	MarketIdleTimeout time.Duration // 多久沒人要價就停掉訂閱
 	MarketWaitTimeout time.Duration // 等新報價的上限
+
+	MatchingInterval time.Duration // 撮合引擎掃描間隔
 }
 
 // Load 讀取 .env（若存在）後組出設定。真實環境變數優先於 .env。
@@ -65,6 +67,9 @@ func Load(envPath string) (*Config, error) {
 	if cfg.MarketWaitTimeout, err = envDuration("MARKET_WAIT_TIMEOUT", 5*time.Second); err != nil {
 		return nil, err
 	}
+	if cfg.MatchingInterval, err = envDuration("MATCHING_INTERVAL", time.Second); err != nil {
+		return nil, err
+	}
 
 	return cfg, cfg.validate()
 }
@@ -81,6 +86,9 @@ func (c *Config) validate() error {
 	}
 	if c.MarketFreshTTL <= 0 || c.MarketIdleTimeout <= 0 || c.MarketWaitTimeout <= 0 {
 		return errors.New("行情的時間參數必須大於 0")
+	}
+	if c.MatchingInterval <= 0 {
+		return errors.New("MATCHING_INTERVAL 必須大於 0")
 	}
 	return nil
 }

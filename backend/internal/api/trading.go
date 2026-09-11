@@ -18,8 +18,6 @@ const (
 	maxListLimit     = 200
 )
 
-// round 在輸出邊界收斂浮點尾數，避免 0.1+0.2 那類雜訊外流。
-
 type placeOrderRequest struct {
 	Market     string  `json:"market"`
 	Symbol     string  `json:"symbol"`
@@ -82,6 +80,42 @@ func (s *Server) closePosition(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, viewOrder(order))
+}
+
+type setStopsRequest struct {
+	StopLoss   *float64 `json:"stop_loss"`
+	TakeProfit *float64 `json:"take_profit"`
+}
+
+// setStops 設定、更新或移除停損停利：欄位省略不動，0 移除，大於 0 設定。
+func (s *Server) setStops(c *gin.Context) {
+	accountID, ok := s.ownAccount(c)
+	if !ok {
+		return
+	}
+
+	var req setStopsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
+		return
+	}
+
+	pos, err := s.trading.SetStops(c.Request.Context(), accountID, c.Param("id"), trading.StopInput{
+		StopLoss: req.StopLoss, TakeProfit: req.TakeProfit,
+	})
+	if err != nil {
+		s.writeTradingError(c, err)
+		return
+	}
+
+	price, err := s.market.GetPrice(c.Request.Context(), pos.Market, pos.Symbol)
+	if err != nil {
+		s.writeMarketError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, viewPosition(trading.OpenPosition{
+		Position: *pos, MarkPrice: price.Price, Unrealized: trading.Unrealized(pos, price.Price),
+	}))
 }
 
 func (s *Server) cancelOrder(c *gin.Context) {
@@ -219,7 +253,7 @@ func isValidationError(err error) bool {
 		trading.ErrInvalidProduct, trading.ErrInvalidSide, trading.ErrInvalidType,
 		trading.ErrInvalidQuantity, trading.ErrInvalidPrice, trading.ErrInvalidLeverage,
 		trading.ErrSpotLeverage, trading.ErrSpotShort, trading.ErrInvalidStopLoss,
-		trading.ErrCloseTooMuch, trading.ErrLeverageLocked,
+		trading.ErrCloseTooMuch, trading.ErrLeverageLocked, trading.ErrNoStopChange,
 	} {
 		if errors.Is(err, target) {
 			return true
@@ -227,9 +261,6 @@ func isValidationError(err error) bool {
 	}
 	return false
 }
-
-// ownAccount 取出呼叫者自己的帳號。交易與自查都以 token 決定身分，
-// USER 沒有可交易的帳號（規格 §4）。
 
 // ownAccount 取出呼叫者自己的帳號。交易與自查都以 token 決定身分，
 // USER 沒有可交易的帳號（規格 §4）。

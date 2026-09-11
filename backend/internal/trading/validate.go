@@ -24,6 +24,7 @@ var (
 	ErrPositionClosed  = errors.New("部位已不存在")
 	ErrCloseTooMuch    = errors.New("平倉數量超過持倉")
 	ErrLeverageLocked  = errors.New("已有持倉時不能改槓桿，請先平倉")
+	ErrNoStopChange    = errors.New("沒有指定要修改的 stop_loss 或 take_profit")
 )
 
 const maxLeverage = 100

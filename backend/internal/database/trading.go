@@ -42,6 +42,24 @@ func (s *Store) ListOrders(ctx context.Context, accountID, status string, limit 
 	return orders, translate(err)
 }
 
+// OpenLimitOrders 回傳所有帳號的未成交限價單，供撮合引擎掃描。
+func (s *Store) OpenLimitOrders(ctx context.Context) ([]Order, error) {
+	var orders []Order
+	err := s.db.WithContext(ctx).
+		Where("status = ? AND type = ?", OrderOpen, OrderLimit).
+		Order("created_at asc").Find(&orders).Error
+	return orders, translate(err)
+}
+
+// PositionsWithStops 回傳所有設定了停損或停利的部位。
+func (s *Store) PositionsWithStops(ctx context.Context) ([]Position, error) {
+	var positions []Position
+	err := s.db.WithContext(ctx).
+		Where("stop_loss > 0 OR take_profit > 0").
+		Find(&positions).Error
+	return positions, translate(err)
+}
+
 func (s *Store) PositionFor(ctx context.Context, accountID, market, symbol, product string) (*Position, error) {
 	var position Position
 	err := s.db.WithContext(ctx).
