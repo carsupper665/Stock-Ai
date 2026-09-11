@@ -1,0 +1,36 @@
+/* 全站唯一的樣式檔。值都是佔位，「設計長相」那一步只改這裡。 */
+:root {
+  color-scheme: light dark; /* 預設跟系統，被 data-theme 覆寫 */
+  --bg: light-dark(#ffffff, #111111);
+  --fg: light-dark(#111111, #eeeeee);
+  --muted: light-dark(#666666, #999999);
+  --line: light-dark(#dddddd, #333333);
+  --accent: light-dark(#2563eb, #60a5fa);
+  --ok: light-dark(#16a34a, #4ade80);
+  --danger: light-dark(#dc2626, #f87171);
+  --space: 8px;
+  --radius: 4px;
+  --font: system-ui, sans-serif;
+  --mono: ui-monospace, monospace;
+}
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+
+/* 原生元素的長相在這裡定義一次，頁面直接寫 <button>、<table>、<input> */
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
+main { padding: calc(var(--space) * 2); }
+h1 { font-size: 1.25em; margin: 0 0 var(--space); }
+button, input, select, textarea {
+  font: inherit; color: inherit; background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space);
+}
+button { cursor: pointer; }
+button:disabled { cursor: default; color: var(--muted); }
+label { display: flex; flex-direction: column; gap: calc(var(--space) / 2); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: var(--space); border-bottom: 1px solid var(--line); }
+a { color: var(--accent); }
+code { font-family: var(--mono); }
+[data-tone='ok'] { color: var(--ok); }
+[data-tone='danger'] { color: var(--danger); }
+[data-tone='muted'] { color: var(--muted); }

@@ -17,13 +17,13 @@ USER（人）用的控制台。後端行為以 `backend/SPEC.md` 為準，本文
 | 需要 | 用 | 不用 | 為什麼 |
 |---|---|---|---|
 | 框架 | Vue 3，`<script setup>` | Options API | 少寫一半 |
-| 建置 | Vite | | `import.meta.glob` 就是頁面載入器 |
-| 路由 | vue-router 4 | | |
+| 建置 | Vite 8 | | `import.meta.glob` 就是頁面載入器 |
+| 路由 | vue-router 5 | | |
 | 全域狀態 | 一個 `reactive()` | Pinia | 全站只有一份狀態：登入身分 |
 | HTTP | `fetch` | axios | 25 行函式夠用 |
 | 樣式 | 一個 `theme.css`：CSS 變數 + 原生元素 | UI 框架、Tailwind、SCSS、CSS-in-JS | 長相之後改一個檔（§7） |
 | 型別 | 無 | TS | 查後端 |
-| 測試 | vitest + happy-dom | | 只測 `core/` 與頁面包契約 |
+| 測試 | Vitest 5 + happy-dom | | 只測 `core/` 與頁面包契約 |
 
 依賴：`vue`、`vue-router`。開發依賴：`vite`、`@vitejs/plugin-vue`、`vitest`、`happy-dom`。就這六個。
 
@@ -41,7 +41,7 @@ frontend/
     App.vue                 # 殼：選單（由路由 meta 產生）+ 主題切換 + <RouterView/>
     theme.css               # 全站唯一的樣式檔：變數 + 原生元素長相（§7）
     core/                   # 只做接線，不含業務
-      pages.js              # 頁面包載入器（2 行）
+      pages.js              # 頁面包載入器：routes 與 nav（3 行）
       router.js             # 路由 + 唯一的 auth 守衛
       session.js            # 登入狀態：token、name、save、logout
       auth.js               # login(input)；provider 切換點
@@ -58,7 +58,7 @@ frontend/
   test/                     # vitest（§9）
 ```
 
-`core/` 八個檔加起來約 90 行，之後不該再長。業務全在 `pages/`。
+`core/` 八個檔加起來約 100 行，之後不該再長。業務全在 `pages/`。
 跨頁共用的元件才放 `src/shared/`；現在沒有，需要時再建（AGENT.md 5、9）。
 
 依賴方向單向、無循環：
@@ -106,7 +106,10 @@ export default {
 // src/core/pages.js
 const modules = import.meta.glob('../pages/*/index.js', { eager: true })
 export const routes = Object.values(modules).map((m) => m.default)
+export const nav = routes.filter((r) => r.meta?.nav).sort((a, b) => a.meta.nav - b.meta.nav)
 ```
+
+`nav` 給殼畫選單，也決定首頁（選單第一項）。
 
 新增頁面的全部動作：建資料夾、寫 `index.js`、寫 `Page.vue`。重新整理就出現在選單。
 
@@ -120,16 +123,15 @@ export const routes = Object.values(modules).map((m) => m.default)
 ```js
 // src/core/router.js
 import { createRouter, createWebHistory } from 'vue-router'
-import { routes } from './pages.js'
+import { nav, routes } from './pages.js'
 import { session } from './session.js'
+
+// 首頁是選單第一項；還沒有任何頁面時退到登入頁
+const home = { name: nav[0]?.name ?? 'login' }
 
 export const router = createRouter({
   history: createWebHistory(),
-  routes: [
-    ...routes,
-    { path: '/', redirect: { name: 'accounts' } },
-    { path: '/:pathMatch(.*)*', redirect: '/' },
-  ],
+  routes: [...routes, { path: '/', redirect: home }, { path: '/:pathMatch(.*)*', redirect: '/' }],
 })
 
 router.beforeEach((to) => {
@@ -169,7 +171,7 @@ import { save } from './session.js'
 import * as token from './providers/token.js'
 
 const providers = { token }                                   // 接 IDP 時加一行：oidc
-export const providerName = import.meta.env.VITE_AUTH_PROVIDER ?? 'token'
+const providerName = import.meta.env.VITE_AUTH_PROVIDER ?? 'token'
 
 export async function login(input) {
   save(await providers[providerName].login(input))
@@ -194,7 +196,7 @@ export async function login({ token }) {
 }
 ```
 
-登入頁：一個輸入框（開發時由 `VITE_DEV_TOKEN` 預填）→ `login({ token })` → 成功後 `router.push(redirect ?? '/')`，失敗顯示後端的 `message`。
+登入頁：一個輸入框（開發時由 `VITE_DEV_TOKEN` 預填）→ `login({ token })` → 成功後 `router.push(redirect ?? '/')`，失敗顯示後端的 `message`。已登入時改顯示身分與登出鈕。
 
 **oidc provider（預留，接自家 IDP 時實作）**
 
@@ -202,7 +204,7 @@ export async function login({ token }) {
 - `login({})`：把 `redirect` 目標存進 `sessionStorage`，產生 PKCE、導去 IDP 的 authorize endpoint，`redirect_uri` 是 `<origin>/login`。
 - `login({ code, state })`：IDP 導回 `/login?code=…` 時由登入頁呼叫；驗 state、用 code 換 token；回 `{ token: access_token, name: id_token.name }`。
 - 同一個 `login(input)`，用 `input.code` 有沒有值區分去程與回程，不另開函式。
-- 需要新增：`core/providers/oidc.js`、`.env` 的 `VITE_OIDC_ISSUER`、`VITE_OIDC_CLIENT_ID`、`auth.js` 的一行、登入頁把輸入框換成按鈕（`providerName === 'oidc'`）。
+- 需要新增：`core/providers/oidc.js`、`.env` 的 `VITE_OIDC_ISSUER`、`VITE_OIDC_CLIENT_ID`、`auth.js` 的一行、登入頁把輸入框換成按鈕（把 `providerName` export 出去判斷）。
 - 後端要能認 IDP 的 JWT，見 §11。
 - 預留的是契約與切換點，**不寫空殼檔案**（AGENT.md 5、11）。
 
@@ -250,7 +252,7 @@ export const deleteAccount = (id) => api('DELETE', `/v1/accounts/${id}`)
 
 ## 6. 資料載入
 
-每一頁都要「載入中／錯誤／資料／重載」，這四個狀態只寫一次：
+每一頁都要「載入中／錯誤／資料／最後更新時間／重載」，這些狀態只寫一次：
 
 ```js
 // src/core/load.js
@@ -260,12 +262,14 @@ export function useLoad(fn) {
   const data = ref(null)
   const error = ref(null)
   const loading = ref(false)
+  const at = ref(null)
 
   async function reload() {
     loading.value = true
     error.value = null
     try {
       data.value = await fn()
+      at.value = new Date()
     } catch (e) {
       error.value = e
     } finally {
@@ -274,7 +278,7 @@ export function useLoad(fn) {
   }
 
   reload()
-  return { data, error, loading, reload }
+  return { data, error, loading, at, reload }
 }
 ```
 
@@ -284,7 +288,7 @@ export function useLoad(fn) {
 import { useLoad } from '../../core/load.js'
 import { listAccounts, createAccount } from './api.js'
 
-const { data, error, loading, reload } = useLoad(listAccounts)
+const { data, error, loading, at, reload } = useLoad(listAccounts)
 
 async function create(form) {
   await createAccount(form)
@@ -332,7 +336,7 @@ code { font-family: var(--mono); }
 [data-tone='danger'] { color: var(--danger); }
 ```
 
-每個變數只寫一次、同時帶亮暗兩個值，切主題就是改 `color-scheme`。原生控件與捲軸跟著 `color-scheme` 自動變色，不用另外處理。
+上面是骨架，實際內容以 `src/theme.css` 為準。每個變數只寫一次、同時帶亮暗兩個值，切主題就是改 `color-scheme`。原生控件與捲軸跟著 `color-scheme` 自動變色，不用另外處理。
 
 ```js
 // src/core/theme.js
@@ -392,8 +396,8 @@ VITE_DEV_TOKEN=
 
 | 檔案 | 驗什麼 |
 |---|---|
-| `pages.test.js` | 每個 `pages/*/index.js` 都有 `path`（以 `/` 開頭）、`name`、`component`；`name` 不重複；只有 `login` 是 `public`；每個 `component()` 都載得起來 |
-| `router.test.js` | 沒 token 開 `/accounts` 被送去 `login` 且 `query.redirect === '/accounts'`；有 token 進得去；`/login` 免 token |
+| `pages.test.js` | 每個 `pages/*/index.js` 都有 `path`（以 `/` 開頭）、`name`、`component`；`name` 不重複；只有 `login` 是 `public`；每個 `component()` 都載得起來；`nav` 只收有 `nav` 的頁面且已排序 |
+| `router.test.js` | 用 `addRoute` 掛一個受保護的測試路由，不依賴真實頁面：沒 token 被送去 `login` 且 `query.redirect` 是原路徑；有 token 進得去；`/login` 免 token；不認得的路徑不 404 |
 | `api.test.js` | 帶 `Authorization` 與 JSON body；204 回 `null`；錯誤信封變成 `{status, code, message}`；自己的 token 401 會 `logout`、代打的 token 401 只丟錯（mock `fetch`） |
 | `theme.test.js` | `src/**/*.{vue,css}` 除了 `theme.css` 沒有 `#hex`、`rgb(`、`hsl(`（`import.meta.glob` 讀原始碼掃） |
 
