@@ -6,8 +6,8 @@ USER（人）用的控制台。後端行為以 `backend/SPEC.md` 為準，本文
 ## 0. 原則
 
 1. 沿用 `AGENT.md` 全部 21 條；單檔 300 行。
-2. 不用 TypeScript。欄位形狀直接看後端 `backend/internal/api/*.go` 的 view struct，§9 每個回應都標了定義位置。
-3. 先不設計頁面長相：不引入 UI 框架、不建 CSS 系統。頁面先用原生元素把資料流跑通，長相是之後的獨立步驟。
+2. 不用 TypeScript。欄位形狀直接看後端 `backend/internal/api/*.go` 的 view struct，§10 每個回應都標了定義位置。
+3. 先不設計頁面長相：不引入 UI 框架、不建 class 系統。頁面用原生元素把資料流跑通；長相集中在一個 `theme.css`（§7），之後獨立一步只改那個檔。
 4. 新增頁面 = 新增一個資料夾。`core/` 與其他頁面零修改。
 5. 預設所有路由都要登入。公開頁自己標 `meta.public`，目前只有登入頁。
 6. 登入方式是可換的 provider：現在貼 USER Token，之後接自家 IDP（OIDC）。切換點只有一行。
@@ -21,6 +21,7 @@ USER（人）用的控制台。後端行為以 `backend/SPEC.md` 為準，本文
 | 路由 | vue-router 4 | | |
 | 全域狀態 | 一個 `reactive()` | Pinia | 全站只有一份狀態：登入身分 |
 | HTTP | `fetch` | axios | 25 行函式夠用 |
+| 樣式 | 一個 `theme.css`：CSS 變數 + 原生元素 | UI 框架、Tailwind、SCSS、CSS-in-JS | 長相之後改一個檔（§7） |
 | 型別 | 無 | TS | 查後端 |
 | 測試 | vitest + happy-dom | | 只測 `core/` 與頁面包契約 |
 
@@ -36,8 +37,9 @@ frontend/
   index.html
   .env.example
   src/
-    main.js                 # createApp(App).use(router).mount('#app')
-    App.vue                 # 殼：選單（由路由 meta 產生）+ <RouterView/>
+    main.js                 # import theme.css；createApp(App).use(router).mount('#app')
+    App.vue                 # 殼：選單（由路由 meta 產生）+ 主題切換 + <RouterView/>
+    theme.css               # 全站唯一的樣式檔：變數 + 原生元素長相（§7）
     core/                   # 只做接線，不含業務
       pages.js              # 頁面包載入器（2 行）
       router.js             # 路由 + 唯一的 auth 守衛
@@ -46,16 +48,17 @@ frontend/
       providers/token.js    # 現在的登入方式：貼 USER Token
       api.js                # fetch 包裝：帶 token、拆錯誤信封
       load.js               # useLoad：頁面載資料的唯一寫法
+      theme.js              # setTheme：套用並記住 light／dark／跟系統
     pages/                  # 一個資料夾一個頁面（§3）
       login/
       accounts/
       account-detail/
       market/
       messages/
-  test/                     # vitest（§8）
+  test/                     # vitest（§9）
 ```
 
-`core/` 七個檔加起來約 80 行，之後不該再長。業務全在 `pages/`。
+`core/` 八個檔加起來約 90 行，之後不該再長。業務全在 `pages/`。
 跨頁共用的元件才放 `src/shared/`；現在沒有，需要時再建（AGENT.md 5、9）。
 
 依賴方向單向、無循環：
@@ -65,6 +68,7 @@ pages/*  →  core/api.js  →  core/session.js
          →  core/load.js
          →  core/auth.js  →  core/providers/*.js  →  core/api.js
 core/router.js  →  core/pages.js（讀 pages/*/index.js）、core/session.js
+App.vue  →  core/router.js、core/session.js、core/theme.js
 ```
 
 ## 3. 頁面包契約
@@ -199,7 +203,7 @@ export async function login({ token }) {
 - `login({ code, state })`：IDP 導回 `/login?code=…` 時由登入頁呼叫；驗 state、用 code 換 token；回 `{ token: access_token, name: id_token.name }`。
 - 同一個 `login(input)`，用 `input.code` 有沒有值區分去程與回程，不另開函式。
 - 需要新增：`core/providers/oidc.js`、`.env` 的 `VITE_OIDC_ISSUER`、`VITE_OIDC_CLIENT_ID`、`auth.js` 的一行、登入頁把輸入框換成按鈕（`providerName === 'oidc'`）。
-- 後端要能認 IDP 的 JWT，見 §10。
+- 後端要能認 IDP 的 JWT，見 §11。
 - 預留的是契約與切換點，**不寫空殼檔案**（AGENT.md 5、11）。
 
 ## 5. API 層
@@ -229,7 +233,7 @@ export async function api(method, path, body, token = session.token) {
 
 - 成功直接回後端 JSON；204 回 `null`。不轉型、不改 key、不快取、不重試。
 - 失敗丟 `Error`，帶 `status`、`code`（後端的 `error` 欄位）、`message`（後端給人看的文字）。頁面通常直接顯示 `message`。
-- 第四個參數 `token` 可覆寫，給「用某個帳號的 token 代打」用（§9 D 組）。代打的 token 收到 401 只丟錯，不會把 USER 登出。
+- 第四個參數 `token` 可覆寫，給「用某個帳號的 token 代打」用（§10 D 組）。代打的 token 收到 401 只丟錯，不會把 USER 登出。
 - `VITE_API_BASE` 預設空字串＝同源：開發走 vite proxy，正式走反向代理。
 
 頁面的 `api.js` 長這樣，一行一個端點：
@@ -291,7 +295,68 @@ async function create(form) {
 
 寫入（建立、修改、刪除）不經過 `useLoad`：頁面自己 `try/catch`、成功就 `reload()`。這是 `core/` 唯一的 composable，不再加第二個。
 
-## 7. 開發與部署
+## 7. 樣式與主題
+
+全站長相只住在一個檔：`src/theme.css`，`main.js` import 一次。頁面不寫顏色、不發明 class。
+
+```css
+/* src/theme.css —— 值都是佔位，「設計長相」那一步只改這裡 */
+:root {
+  color-scheme: light dark;                  /* 預設跟系統，被 data-theme 覆寫 */
+  --bg:     light-dark(#ffffff, #111111);
+  --fg:     light-dark(#111111, #eeeeee);
+  --muted:  light-dark(#666666, #999999);
+  --line:   light-dark(#dddddd, #333333);
+  --accent: light-dark(#2563eb, #60a5fa);
+  --ok:     light-dark(#16a34a, #4ade80);
+  --danger: light-dark(#dc2626, #f87171);
+  --space: 8px;
+  --radius: 4px;
+  --font: system-ui, sans-serif;
+  --mono: ui-monospace, monospace;
+}
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark']  { color-scheme: dark; }
+
+/* 原生元素的長相在這裡定義一次，頁面直接寫 <button>、<table>、<input> */
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
+button, input, select, textarea {
+  font: inherit; color: inherit; background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space);
+}
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: var(--space); border-bottom: 1px solid var(--line); }
+a { color: var(--accent); }
+code { font-family: var(--mono); }
+[data-tone='ok'] { color: var(--ok); }
+[data-tone='danger'] { color: var(--danger); }
+```
+
+每個變數只寫一次、同時帶亮暗兩個值，切主題就是改 `color-scheme`。原生控件與捲軸跟著 `color-scheme` 自動變色，不用另外處理。
+
+```js
+// src/core/theme.js
+export function setTheme(name) {            // 'light' | 'dark' | ''（跟系統）
+  localStorage.setItem('theme', name)
+  document.documentElement.dataset.theme = name
+}
+setTheme(localStorage.getItem('theme') ?? '')
+```
+
+用 `localStorage` 不用 `sessionStorage`：主題偏好要跨分頁、跨登入留著。殼（`App.vue`）放一個三選一的 `<select>` 呼叫 `setTheme`，就是全部的切換 UI。
+
+規則：
+
+1. 顏色、間距、圓角、字體只能寫 `var(--…)`。`src/` 裡 `theme.css` 以外不准出現 `#hex`、`rgb(`、`hsl(`，`test/theme.test.js` 會掃。
+2. 原生元素長相寫一次在 `theme.css`。頁面用 `<button>`、`<table>`、`<input>`，不建 class 命名系統；共用的狀態外觀（獲利／虧損／停用）用 `data-tone`，也只在 `theme.css` 定義。
+3. 元件自己的排版寫在 `<style scoped>`：只有 grid／flex／gap／寬度，間距用 `var(--space)`。不寫外觀。
+4. 不用 UI 框架、Tailwind、SCSS、CSS Modules、CSS-in-JS。一個 `.css`，Vite 直接 import。
+5. 之後「設計長相」= 改 `theme.css` 的值與元素規則，頁面零修改。
+
+`light-dark()` 需要 2024 之後的瀏覽器（Chrome 123、Firefox 120、Safari 17.5）。控制台只有自己用，夠了；
+真要撐舊瀏覽器就改成兩組 `:root` 變數加 `prefers-color-scheme` 媒體查詢，機制不變。
+
+## 8. 開發與部署
 
 ```text
 cd backend  && go run .                     # :7794
@@ -320,22 +385,23 @@ VITE_DEV_TOKEN=
 正式：`npm run build` 產出 `dist/`。反向代理把 `/v1/*` 轉給後端、其他路徑給 `dist/`，
 找不到檔案時回 `index.html`（history 模式必要）。後端不用改、不用 CORS。
 
-## 8. 測試
+## 9. 測試
 
 `frontend/test/*.test.js`，`npm test` = `vitest run`，環境 happy-dom（要有 `sessionStorage`、`location`）。
-只測接線與契約，三支：
+只測接線與契約，四支：
 
 | 檔案 | 驗什麼 |
 |---|---|
 | `pages.test.js` | 每個 `pages/*/index.js` 都有 `path`（以 `/` 開頭）、`name`、`component`；`name` 不重複；只有 `login` 是 `public`；每個 `component()` 都載得起來 |
 | `router.test.js` | 沒 token 開 `/accounts` 被送去 `login` 且 `query.redirect === '/accounts'`；有 token 進得去；`/login` 免 token |
 | `api.test.js` | 帶 `Authorization` 與 JSON body；204 回 `null`；錯誤信封變成 `{status, code, message}`；自己的 token 401 會 `logout`、代打的 token 401 只丟錯（mock `fetch`） |
+| `theme.test.js` | `src/**/*.{vue,css}` 除了 `theme.css` 沒有 `#hex`、`rgb(`、`hsl(`（`import.meta.glob` 讀原始碼掃） |
 
 頁面不寫單元測試：對著真後端手動驗，跟 `backend/test/*.py` 一樣是真流程。頁面長相定下來後再考慮 e2e。
 
-## 9. API 列表
+## 10. API 列表
 
-### 9.1 共同約定
+### 10.1 共同約定
 
 - 認證：`Authorization: Bearer <token>`。USER Token 來自後端 `.env`；Account Token 由後端產生，USER 查帳號時看得到。
 - 時間：UTC、RFC3339、結尾 `Z`。顯示時轉瀏覽器本地時間。
@@ -343,9 +409,9 @@ VITE_DEV_TOKEN=
 - 列表都包在複數 key 裡：`accounts`、`orders`、`positions`、`trades`、`messages`、`subscriptions`。
 - 分頁：`messages` 用 `after`／`before`，值是上一頁最後一則的 `created_at`；`orders`／`trades` 只有 `limit`（預設 50、最多 200、最新在前），沒有游標。
 - 標 `?` 的欄位是後端 `omitempty`：零值時整個欄位不存在，讀取時當 `0`／`false`／`''`。
-- 錯誤信封固定 `{ "error": "<code>", "message": "<給人看的>" }`，見 §9.5。
+- 錯誤信封固定 `{ "error": "<code>", "message": "<給人看的>" }`，見 §10.5。
 
-### 9.2 端點
+### 10.2 端點
 
 **A. 不需要身分**
 
@@ -393,7 +459,7 @@ VITE_DEV_TOKEN=
 D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入（例如緊急平倉）時，
 前端拿該帳號的 token 當 `api()` 第四個參數呼叫這組。第一階段不做這個頁面，API 層先留好參數。
 
-### 9.3 回應形狀
+### 10.3 回應形狀
 
 定義位置都在 `backend/internal/api/`，欄位改了以 Go 為準。
 
@@ -407,7 +473,7 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 | price | `market` `symbol` `price` `updated_at` | `../market/market.go` `Price` |
 | message | `id` `user_name` `content` `created_at` | `message.go` `messageView` |
 
-### 9.4 枚舉
+### 10.4 枚舉
 
 | 欄位 | 值 | 定義 |
 |---|---|---|
@@ -422,7 +488,7 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 | subscription state | `inactive` `activating` `active` | `market/market.go` |
 | message `user_name` | 真名、`you`（自己）、`[deleted]`（作者帳號已刪） | `message/message.go` |
 
-### 9.5 錯誤
+### 10.5 錯誤
 
 | HTTP | `error` | 什麼時候 | 前端 |
 |---|---|---|---|
@@ -439,7 +505,7 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 | 504 | `market_timeout` | 等不到報價 | 顯示，可重試 |
 | 500 | `internal_error` | 後端錯誤 | 顯示 |
 
-## 10. 後端待補
+## 11. 後端待補
 
 接 IDP 時才需要，現在不做：
 
@@ -449,15 +515,15 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 2. `GET /v1/me` → `{kind: "user" 或 "account", name}`（可選）。讓登入頁不用拿 `GET /v1/accounts` 探測 token 種類、
    也能顯示 `USER_NAME`。
 
-## 11. 實作步驟
+## 12. 實作步驟
 
 一步一個 commit，每步都能跑。
 
 | Step | 做什麼 | 驗收 |
 |---|---|---|
-| 1 骨架 | `package.json`、`vite.config.js`、`index.html`、`main.js`、`App.vue`、`core/` 七個檔、`pages/login/`、`test/` 三支 | `npm test` 過；未登入開任何路徑都被送到 `/login`；貼對 token 進得去、貼錯看到後端 `message`；重新整理不掉登入 |
+| 1 骨架 | `package.json`、`vite.config.js`、`index.html`、`main.js`、`App.vue`、`theme.css`、`core/` 八個檔、`pages/login/`、`test/` 四支 | `npm test` 過；未登入開任何路徑都被送到 `/login`；貼對 token 進得去、貼錯看到後端 `message`；重新整理不掉登入 |
 | 2 帳號 | `pages/accounts/`（列表、建立、改名、停用／啟用、刪除）、`pages/account-detail/`（基本資料、token 顯示／複製／重設、部位、訂單含 `status` 篩選、成交） | 對著 `go run .` 走完 `backend/test/02_account.py`、`04_trading.py` 建出的資料 |
 | 3 行情 | `pages/market/`（查價：market + symbol；訂閱狀態表） | 查 BTCUSDT 有價；訂閱表看得到 `active` → 閒置後 `inactive` |
 | 4 留言板 | `pages/messages/`（列表、發布、`before` 載入更早、自己顯示 `you`） | 對照 `backend/test/06_message.py` 的四種身分 |
 
-之後（需要時才做，各自獨立）：頁面長相；手動介入頁（§9 D 組代打）；OIDC（§4 + §10）。
+之後（需要時才做，各自獨立）：頁面長相（只改 `theme.css`，§7）；手動介入頁（§10 D 組代打）；OIDC（§4 + §11）。
