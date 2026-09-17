@@ -28,7 +28,24 @@ const (
 
 	AuthorUser    = "user"
 	AuthorAccount = "account"
+
+	LedgerOrderPlaced   = "order_placed"
+	LedgerFill          = "fill"
+	LedgerOrderRejected = "order_rejected"
+	LedgerOrderCanceled = "order_canceled"
+	LedgerStopsUpdated  = "stops_updated"
 )
+
+// Source 是造成帳戶變動的 Agent Session／Run。非 Agent 操作與舊資料為零值，
+// 對外顯示為 null，不為舊資料虛構 run_id。
+type Source struct {
+	SessionID string `gorm:"size:64"`
+	RunID     int64
+}
+
+func (s Source) Known() bool {
+	return s.SessionID != "" && s.RunID > 0
+}
 
 // Account 是一個虛擬交易帳號。
 //
@@ -74,6 +91,10 @@ type Order struct {
 	RealizedPnL    float64
 	RejectReason   string `gorm:"size:128"`
 
+	// Source 是建立這張單的 Run；Trigger 標記由停損停利自動產生的平倉單。
+	Source  Source `gorm:"embedded;embeddedPrefix:source_"`
+	Trigger string `gorm:"size:16"`
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -95,6 +116,10 @@ type Position struct {
 	StopLoss   float64
 	TakeProfit float64
 
+	// 停損與停利各自記住設定它的 Run，改其中一個不覆寫另一個。
+	StopLossSource   Source `gorm:"embedded;embeddedPrefix:stop_loss_source_"`
+	TakeProfitSource Source `gorm:"embedded;embeddedPrefix:take_profit_source_"`
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -113,7 +138,32 @@ type Trade struct {
 	Price       float64 `gorm:"not null"`
 	Fee         float64
 	RealizedPnL float64
+	Source      Source `gorm:"embedded;embeddedPrefix:source_"`
 
+	CreatedAt time.Time
+}
+
+// LedgerEntry 是一筆可追溯的帳戶事件。只有 fill 會改變餘額（BalanceDelta = 已實現損益 − 手續費）；
+// 其餘事件記錄掛單、拒絕、撤單與停損停利變更的來源。Seq 遞增，作為分頁游標。
+type LedgerEntry struct {
+	Seq        int64  `gorm:"primaryKey;autoIncrement"`
+	AccountID  string `gorm:"size:64;not null;index"`
+	Event      string `gorm:"size:32;not null"`
+	OrderID    string `gorm:"size:64"`
+	TradeID    string `gorm:"size:64"`
+	PositionID string `gorm:"size:64"`
+	Trigger    string `gorm:"size:16"`
+
+	Quantity     float64
+	Price        float64
+	Fee          float64
+	RealizedPnL  float64
+	BalanceDelta float64
+	BalanceAfter float64
+	StopLoss     float64
+	TakeProfit   float64
+
+	Source    Source `gorm:"embedded;embeddedPrefix:source_"`
 	CreatedAt time.Time
 }
 
@@ -124,5 +174,12 @@ type Message struct {
 	AuthorType string    `gorm:"size:16;not null"`
 	AuthorID   string    `gorm:"size:64;not null;index"`
 	Content    string    `gorm:"size:2000;not null"`
+	Tags       []string  `gorm:"-"`
 	CreatedAt  time.Time `gorm:"index"`
+}
+
+type MessageTag struct {
+	MessageID string `gorm:"primaryKey;size:64"`
+	Position  int    `gorm:"primaryKey;autoIncrement:false"`
+	Tag       string `gorm:"not null"`
 }

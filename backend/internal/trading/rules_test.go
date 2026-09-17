@@ -13,10 +13,10 @@ func TestCloseRejectsTooMuchAndMissingPosition(t *testing.T) {
 	f.place(t, futuresBuy(1, 10))
 	positions, _ := f.svc.Positions(context.Background(), f.accountID, "")
 
-	if _, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 5); !errors.Is(err, ErrCloseTooMuch) {
+	if _, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 5, database.Source{}); !errors.Is(err, ErrCloseTooMuch) {
 		t.Fatalf("平倉數量超過持倉應被拒絕，得到 %v", err)
 	}
-	if _, err := f.svc.ClosePosition(context.Background(), f.accountID, "pos_missing", 0); !errors.Is(err, ErrPositionClosed) {
+	if _, err := f.svc.ClosePosition(context.Background(), f.accountID, "pos_missing", 0, database.Source{}); !errors.Is(err, ErrPositionClosed) {
 		t.Fatalf("平不存在的部位應回 ErrPositionClosed，得到 %v", err)
 	}
 }

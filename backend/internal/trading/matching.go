@@ -116,9 +116,11 @@ func (e *Engine) Tick(ctx context.Context) TickResult {
 		if !hit {
 			continue
 		}
-		if _, err := e.svc.closeAt(ctx, pos, pos.Quantity, price); err != nil {
-			if errors.Is(err, ErrPositionClosed) || errors.Is(err, ErrCloseTooMuch) {
-				// 使用者在這一輪之間手動平掉了，不算錯誤。
+		// 快照只決定要不要嘗試；數量與來源由 closeAt 在交易內以持久化部位為準。
+		if _, err := e.svc.closeAt(ctx, pos.AccountID, pos.ID, 0, price, database.Source{}, reason); err != nil {
+			if isBusinessRejection(err) || errors.Is(err, ErrStopInactive) {
+				// 部位在這一輪之間被平掉、stop 被改掉，或帳號處於不可交易狀態：
+				// 都是帳號自己的狀態，不是引擎故障，下一輪重新評估。
 				continue
 			}
 			e.warn(ctx, "部位 %s 觸發 %s 但平倉失敗: %v", pos.ID, reason, err)

@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
+
+	"backend/internal/market"
 )
 
 const (
@@ -37,6 +40,21 @@ func NewBinance() *Binance {
 }
 
 func (b *Binance) Name() string { return "binance" }
+
+// Binance rejects a caller's bad symbol with -1121 (unknown) or -1100 (illegal characters).
+// Both mean the symbol is wrong, so they must not surface as an unavailable source: the caller
+// would be told to retry a symbol that can never work.
+func binanceFailure(status int, body []byte, symbol string) error {
+	var failure struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	_ = json.Unmarshal(body, &failure)
+	if failure.Code == -1121 || failure.Code == -1100 {
+		return fmt.Errorf("%w: %s（symbol=%s）", market.ErrUnknownSymbol, failure.Msg, symbol)
+	}
+	return fmt.Errorf("binance 回應 %d（symbol=%s）: %s", status, symbol, failure.Msg)
+}
 
 // Stream 立刻抓一次價格，之後每隔 Interval 抓一次，直到 ctx 結束。
 // 任何一次抓取失敗就結束訂閱並回報錯誤，由 Runtime 決定是否重新啟動；
@@ -101,7 +119,8 @@ func (b *Binance) fetch(ctx context.Context, symbol string) (float64, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("binance 回應 %d（symbol=%s）", resp.StatusCode, symbol)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxMarketReadBody))
+		return 0, binanceFailure(resp.StatusCode, body, symbol)
 	}
 
 	var payload tickerPrice

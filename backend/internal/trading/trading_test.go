@@ -70,7 +70,7 @@ func TestClosePositionRealizesProfit(t *testing.T) {
 	}
 
 	f.setPrice(t, 120)
-	order, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 0)
+	order, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 0, database.Source{})
 	if err != nil {
 		t.Fatalf("平倉失敗: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestClosePositionPartially(t *testing.T) {
 	positions, _ := f.svc.Positions(context.Background(), f.accountID, "")
 	f.setPrice(t, 110)
 
-	order, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 1)
+	order, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 1, database.Source{})
 	if err != nil {
 		t.Fatalf("部分平倉失敗: %v", err)
 	}
@@ -137,14 +137,14 @@ func TestLimitOrderStaysOpen(t *testing.T) {
 		t.Fatalf("未成交的限價單不該動到餘額或保證金: %+v", s)
 	}
 
-	canceled, err := f.svc.CancelOrder(context.Background(), f.accountID, order.ID)
+	canceled, err := f.svc.CancelOrder(context.Background(), f.accountID, order.ID, database.Source{})
 	if err != nil {
 		t.Fatalf("取消限價單: %v", err)
 	}
 	if canceled.Status != database.OrderCanceled {
 		t.Fatalf("取消後狀態應為 canceled，得到 %s", canceled.Status)
 	}
-	if _, err := f.svc.CancelOrder(context.Background(), f.accountID, order.ID); err == nil {
+	if _, err := f.svc.CancelOrder(context.Background(), f.accountID, order.ID, database.Source{}); err == nil {
 		t.Fatal("重複取消應該失敗")
 	}
 }
@@ -155,7 +155,7 @@ func TestTradesAreRecorded(t *testing.T) {
 
 	positions, _ := f.svc.Positions(context.Background(), f.accountID, "")
 	f.setPrice(t, 120)
-	if _, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 0); err != nil {
+	if _, err := f.svc.ClosePosition(context.Background(), f.accountID, positions[0].ID, 0, database.Source{}); err != nil {
 		t.Fatalf("平倉: %v", err)
 	}
 

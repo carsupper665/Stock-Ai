@@ -25,6 +25,8 @@ var (
 	ErrCloseTooMuch    = errors.New("平倉數量超過持倉")
 	ErrLeverageLocked  = errors.New("已有持倉時不能改槓桿，請先平倉")
 	ErrNoStopChange    = errors.New("沒有指定要修改的 stop_loss 或 take_profit")
+	ErrOrderNotOpen    = errors.New("訂單已不是掛單，無法取消")
+	ErrStopInactive    = errors.New("停損停利在觸發前已被移除或修改")
 )
 
 const maxLeverage = 100
@@ -40,6 +42,7 @@ type PlaceOrderInput struct {
 	Leverage   float64
 	StopLoss   float64
 	TakeProfit float64
+	Source     database.Source
 }
 
 func (in *PlaceOrderInput) normalize() error {
@@ -63,6 +66,10 @@ func (in *PlaceOrderInput) normalize() error {
 
 	if in.Symbol == "" {
 		return market.ErrEmptySymbol
+	}
+	// 限價單不會立刻取價，未知市場的單若被接受會永遠掛著，所以下單時就擋。
+	if in.Market != market.Crypto && in.Market != market.Stock {
+		return fmt.Errorf("%w: %s", market.ErrUnknownMarket, in.Market)
 	}
 	if in.Product != database.ProductSpot && in.Product != database.ProductFutures {
 		return ErrInvalidProduct

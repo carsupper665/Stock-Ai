@@ -114,7 +114,7 @@ func TestFilledOrderIsNotFilledAgain(t *testing.T) {
 func TestCanceledOrderIsIgnored(t *testing.T) {
 	f := newFixture(t, 10000, 100)
 	order := f.place(t, limitOrder(database.SideBuy, 1, 90, 10))
-	if _, err := f.svc.CancelOrder(context.Background(), f.accountID, order.ID); err != nil {
+	if _, err := f.svc.CancelOrder(context.Background(), f.accountID, order.ID, database.Source{}); err != nil {
 		t.Fatalf("取消: %v", err)
 	}
 
@@ -248,15 +248,54 @@ func TestReduceOnlyPreventsFlipOnDoubleClose(t *testing.T) {
 	f.place(t, futuresBuy(1, 10))
 	pos := f.onlyPosition(t)
 
-	if _, err := f.svc.closeAt(context.Background(), pos, 1, 100); err != nil {
+	if _, err := f.svc.closeAt(context.Background(), f.accountID, pos.ID, 1, 100, database.Source{}, ""); err != nil {
 		t.Fatalf("第一次平倉: %v", err)
 	}
-	// 拿著舊的部位快照再平一次，模擬兩筆平倉同時進來。
-	if _, err := f.svc.closeAt(context.Background(), pos, 1, 100); !errors.Is(err, ErrPositionClosed) {
+	// 拿著舊的部位 id 再平一次，模擬兩筆平倉同時進來。
+	if _, err := f.svc.closeAt(context.Background(), f.accountID, pos.ID, 1, 100, database.Source{}, ""); !errors.Is(err, ErrPositionClosed) {
 		t.Fatalf("部位已不在時 reduce-only 單應失敗而不是反向開倉，得到 %v", err)
 	}
 	if positions, _ := f.svc.Positions(context.Background(), f.accountID, ""); len(positions) != 0 {
 		t.Fatalf("第二筆平倉反向開出了部位: %+v", positions)
+	}
+}
+
+// 引擎的快照判定觸發後，closeAt 必須以持久化部位重新評估：stop 已被移除或移到別處就不平，
+// 平倉時的來源是現在設定該 stop 的 Run，而不是快照裡的。
+func TestTriggeredCloseReevaluatesPersistedStop(t *testing.T) {
+	f := newFixture(t, 10000, 100)
+	in := futuresBuy(1, 10)
+	in.StopLoss = 95
+	in.Source = database.Source{SessionID: "s_1", RunID: 1}
+	f.place(t, in)
+	pos := f.onlyPosition(t)
+	ctx := context.Background()
+	ptr := func(v float64) *float64 { return &v }
+
+	// 快照說 95 觸發，但停損已被 Run 2 移到 90：價格 94 不能平。
+	if _, err := f.svc.SetStops(ctx, f.accountID, pos.ID, StopInput{StopLoss: ptr(90), Source: database.Source{SessionID: "s_1", RunID: 2}}); err != nil {
+		t.Fatalf("移動停損: %v", err)
+	}
+	if _, err := f.svc.closeAt(ctx, f.accountID, pos.ID, 0, 94, database.Source{}, TriggerStopLoss); !errors.Is(err, ErrStopInactive) {
+		t.Fatalf("停損已移走時不該平倉，得到 %v", err)
+	}
+	// 停利觸發的快照也不能拿停損來平。
+	if _, err := f.svc.closeAt(ctx, f.accountID, pos.ID, 0, 89, database.Source{}, TriggerTakeProfit); !errors.Is(err, ErrStopInactive) {
+		t.Fatalf("觸發種類不符時不該平倉，得到 %v", err)
+	}
+	if positions, _ := f.svc.Positions(ctx, f.accountID, ""); len(positions) != 1 {
+		t.Fatalf("部位不該被平掉: %+v", positions)
+	}
+
+	closed, err := f.svc.closeAt(ctx, f.accountID, pos.ID, 0, 89, database.Source{SessionID: "stale", RunID: 99}, TriggerStopLoss)
+	if err != nil {
+		t.Fatalf("現在的停損 90 在 89 應平倉: %v", err)
+	}
+	if closed.Trigger != TriggerStopLoss || closed.Source.RunID != 2 || closed.Source.SessionID != "s_1" || !near(closed.Quantity, 1) {
+		t.Fatalf("觸發平倉應追溯到設定 90 的 Run 2 並平掉整個部位: %+v", closed)
+	}
+	if _, err := f.svc.closeAt(ctx, f.accountID, pos.ID, 0, 89, database.Source{}, TriggerStopLoss); !errors.Is(err, ErrPositionClosed) {
+		t.Fatalf("部位已平掉後再觸發應回 ErrPositionClosed，得到 %v", err)
 	}
 }
 

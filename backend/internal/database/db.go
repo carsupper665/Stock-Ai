@@ -107,7 +107,7 @@ func (s *Store) Ping(ctx context.Context) error {
 
 // Migrate 建立或更新資料表結構。新增 model 時加進這個清單。
 func (s *Store) Migrate() error {
-	if err := s.db.AutoMigrate(&Account{}, &Order{}, &Position{}, &Trade{}, &Message{}); err != nil {
+	if err := s.db.AutoMigrate(&Account{}, &Order{}, &Position{}, &Trade{}, &Message{}, &MessageTag{}, &LedgerEntry{}); err != nil {
 		return fmt.Errorf("建立資料表失敗: %w", err)
 	}
 	return nil
@@ -142,6 +142,8 @@ type gormLog struct {
 	debug bool
 }
 
+var _ gorm.ParamsFilter = (*gormLog)(nil)
+
 func (g *gormLog) LogMode(gormlogger.LogLevel) gormlogger.Interface { return g }
 
 func (g *gormLog) Info(ctx context.Context, msg string, args ...any) {
@@ -152,8 +154,21 @@ func (g *gormLog) Warn(ctx context.Context, msg string, args ...any) {
 	g.log.Warnf(ctx, msg, args...)
 }
 
-func (g *gormLog) Error(ctx context.Context, msg string, args ...any) {
-	g.log.Errorf(ctx, msg, args...)
+func (g *gormLog) Error(ctx context.Context, _ string, args ...any) {
+	category := "database"
+	for _, arg := range args {
+		if err, ok := arg.(error); ok {
+			category = databaseErrorCategory(err)
+			break
+		}
+	}
+	g.log.Errorf(ctx, "gorm error=%s", category)
+}
+
+// ParamsFilter is called by GORM before Dialector.Explain. Returning no parameters keeps
+// placeholders in the logged SQL so authority-bearing Account Tokens never reach logs.
+func (g *gormLog) ParamsFilter(_ context.Context, sql string, _ ...interface{}) (string, []interface{}) {
+	return sql, nil
 }
 
 // Trace 記錄每一句 SQL。錯誤一定記，慢查詢記警告，其餘只在 debug 模式下記。
@@ -163,10 +178,25 @@ func (g *gormLog) Trace(ctx context.Context, begin time.Time, fc func() (string,
 
 	switch {
 	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
-		g.log.Errorf(ctx, "%v | %s | rows=%d | %v", elapsed.Round(time.Microsecond), sql, rows, err)
+		g.log.Errorf(ctx, "%v | %s | rows=%d | error=%s", elapsed.Round(time.Microsecond), sql, rows, databaseErrorCategory(err))
 	case elapsed > g.slow:
 		g.log.Warnf(ctx, "慢查詢 %v | %s | rows=%d", elapsed.Round(time.Microsecond), sql, rows)
 	case g.debug:
 		g.log.Debugf(ctx, "%v | %s | rows=%d", elapsed.Round(time.Microsecond), sql, rows)
+	}
+}
+
+func databaseErrorCategory(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, gorm.ErrDuplicatedKey):
+		return "duplicate"
+	case errors.Is(err, gorm.ErrForeignKeyViolated):
+		return "foreign_key"
+	default:
+		return "database"
 	}
 }

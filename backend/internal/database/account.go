@@ -36,6 +36,40 @@ func (s *Store) SaveAccount(ctx context.Context, account *Account) error {
 	return translate(s.db.WithContext(ctx).Save(account).Error)
 }
 
+// UpdateAccountFields only writes fields owned by Account administration. Trading balance and
+// token rotation are separate mutations and must not be overwritten by a stale Account value.
+func (s *Store) UpdateAccountFields(ctx context.Context, id string, userName, status *string) error {
+	fields := make(map[string]any, 2)
+	if userName != nil {
+		fields["user_name"] = *userName
+	}
+	if status != nil {
+		fields["status"] = *status
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	result := s.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(fields)
+	if result.Error != nil {
+		return translate(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateAccountToken(ctx context.Context, id, token string) error {
+	result := s.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("token", token)
+	if result.Error != nil {
+		return translate(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteAccount 永久刪除帳號。找不到時回傳 ErrNotFound。
 func (s *Store) DeleteAccount(ctx context.Context, id string) error {
 	result := s.db.WithContext(ctx).Delete(&Account{}, "id = ?", id)

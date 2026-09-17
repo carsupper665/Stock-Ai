@@ -85,27 +85,39 @@ type UpdateInput struct {
 }
 
 func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*database.Account, error) {
-	acc, err := s.store.AccountByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
+	var userName *string
 	if in.UserName != nil {
 		name, err := cleanName(*in.UserName)
 		if err != nil {
 			return nil, err
 		}
-		acc.UserName = name
+		userName = &name
 	}
+	var status *string
 	if in.Status != nil {
-		status := strings.TrimSpace(*in.Status)
-		if status != database.AccountActive && status != database.AccountDisabled {
+		value := strings.TrimSpace(*in.Status)
+		if value != database.AccountActive && value != database.AccountDisabled {
 			return nil, ErrInvalidStatus
 		}
-		acc.Status = status
+		status = &value
 	}
 
-	if err := s.store.SaveAccount(ctx, acc); err != nil {
+	var acc *database.Account
+	err := s.store.Tx(ctx, func(tx *database.Store) error {
+		if err := tx.LockAccount(ctx, id); err != nil {
+			return err
+		}
+		if _, err := tx.AccountByID(ctx, id); err != nil {
+			return err
+		}
+		if err := tx.UpdateAccountFields(ctx, id, userName, status); err != nil {
+			return err
+		}
+		var err error
+		acc, err = tx.AccountByID(ctx, id)
+		return err
+	})
+	if err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
 			return nil, ErrNameTaken
 		}
@@ -114,22 +126,42 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*datab
 	return acc, nil
 }
 
+// Delete 連帶刪除帳號的部位與未成交掛單。留著的話撮合引擎仍會掃到它們，每輪嘗試平倉
+// 卻找不到帳號；成交紀錄與 Ledger 保留作為審計。
 func (s *Service) Delete(ctx context.Context, id string) error {
-	return s.store.DeleteAccount(ctx, id)
+	return s.store.Tx(ctx, func(tx *database.Store) error {
+		if err := tx.LockAccount(ctx, id); err != nil {
+			return err
+		}
+		if err := tx.DeleteAccountTradingState(ctx, id); err != nil {
+			return err
+		}
+		return tx.DeleteAccount(ctx, id)
+	})
 }
 
 // ResetToken 換發 Account Token，舊 token 立即失效。
 func (s *Service) ResetToken(ctx context.Context, id string) (*database.Account, error) {
-	acc, err := s.store.AccountByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
 	token, err := newToken()
 	if err != nil {
 		return nil, err
 	}
-	acc.Token = token
-	if err := s.store.SaveAccount(ctx, acc); err != nil {
+	var acc *database.Account
+	err = s.store.Tx(ctx, func(tx *database.Store) error {
+		if err := tx.LockAccount(ctx, id); err != nil {
+			return err
+		}
+		if _, err := tx.AccountByID(ctx, id); err != nil {
+			return err
+		}
+		if err := tx.UpdateAccountToken(ctx, id, token); err != nil {
+			return err
+		}
+		var err error
+		acc, err = tx.AccountByID(ctx, id)
+		return err
+	})
+	if err != nil {
 		return nil, fmt.Errorf("換發 token 失敗: %w", err)
 	}
 	return acc, nil

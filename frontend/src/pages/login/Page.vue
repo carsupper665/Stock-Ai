@@ -26,28 +26,35 @@ async function submit() {
 </script>
 
 <template>
-  <main>
-    <h1>登入</h1>
-    <template v-if="session.token">
-      <p>已以 {{ session.name }} 身分登入。</p>
-      <button @click="logout">登出</button>
-    </template>
-    <form v-else @submit.prevent="submit">
-      <label>
-        USER Token
-        <input v-model="token" type="password" autocomplete="off" required />
-      </label>
-      <button :disabled="busy">登入</button>
-      <p v-if="error" data-tone="danger">{{ error }}</p>
-    </form>
-  </main>
+  <div class="wrap">
+    <section class="card col">
+      <div class="row"><i class="dot square" data-tone="acc"></i><b>Agent 控制台</b></div>
+      <template v-if="session.token">
+        <p>已以 <b>{{ session.name }}</b> 身分登入。</p>
+        <div class="row"><RouterLink to="/">進入控制台</RouterLink><button @click="logout">登出</button></div>
+      </template>
+      <form v-else class="col" @submit.prevent="submit">
+        <label>
+          USER TOKEN
+          <input v-model="token" class="mono" type="password" autocomplete="off" required />
+        </label>
+        <p class="note">貼交易後端 <code>.env</code> 的 <code>USER_TOKEN</code>。未登入不能有任何互動；Agent／LLM Server 的管理憑證由代理注入，這裡不用貼。</p>
+        <button data-tone="acc" :disabled="busy">登入</button>
+        <p v-if="error" data-tone="neg">{{ error }}</p>
+      </form>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space);
-  max-width: 24em;
+.wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--pad);
+}
+.card {
+  width: 100%;
+  max-width: 380px;
 }
 </style>

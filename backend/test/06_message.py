@@ -38,8 +38,10 @@ def main():
               str(posted.get("id", "")).startswith("msg_") and bool(posted.get("created_at")), str(posted))
         check("不外露 author 欄位", "author_id" not in posted and "author_type" not in posted, str(posted))
 
-        status, _, _ = server.request("POST", "/v1/messages", alpha, {"content": "BTC breakout looks valid."})
+        status, alpha_posted, _ = server.request("POST", "/v1/messages", alpha,
+                                                  {"content": "BTC breakout looks valid.", "tags": ["ETH-Agent-02"]})
         check("帳號 A 發布回 201", status == 201, f"實際 {status}")
+        check("發布回應保留帳號名稱標籤", alpha_posted.get("tags") == ["ETH-Agent-02"], str(alpha_posted))
         status, _, _ = server.request("POST", "/v1/messages", beta, {"content": "ETH is lagging."})
         check("帳號 B 發布回 201", status == 201, f"實際 {status}")
 
@@ -61,7 +63,7 @@ def main():
         }
         contents = None
         for label, (token, want) in expected.items():
-            status, body, _ = server.request("GET", "/v1/messages?order=asc", token)
+            status, body, _ = server.request("GET", "/v1/messages?sort=asc", token)
             check(f"{label} 查詢回 200", status == 200, f"{status} {body}")
             check(f"{label} 看到的名稱為 {want}", names(body) == want, str(names(body)))
             got_contents = [m.get("content") for m in body.get("messages", [])]
@@ -73,43 +75,47 @@ def main():
         status, err, _ = server.request("GET", "/v1/messages", "at_bogus")
         check("帶錯 token 查詢回 401", status == 401, f"{status} {err}")
 
-        check.section("分頁與排序（規格 §15）")
+        check.section("固定十筆分頁、排序與標籤")
         for i in range(35):
-            server.request("POST", "/v1/messages", alpha, {"content": f"tick {i:02d}"})
+            server.request("POST", "/v1/messages", alpha,
+                           {"content": f"tick {i:02d}", "tags": ["ETH-Agent-02"] if i % 2 == 0 else []})
 
         _, body, _ = server.request("GET", "/v1/messages")
-        check("預設最多 30 則", len(body.get("messages", [])) == 30, f"實際 {len(body.get('messages', []))}")
+        check("預設固定 10 則", len(body.get("messages", [])) == 10, f"實際 {len(body.get('messages', []))}")
         check("預設最新在前", body["messages"][0]["content"] == "tick 34", body["messages"][0]["content"])
+        check("分頁信封包含 page/has_more", body.get("page") == 1 and body.get("has_more") is True, str(body))
 
-        _, body, _ = server.request("GET", "/v1/messages?limit=100")
-        check("limit 超過 30 被壓回 30", len(body.get("messages", [])) == 30, f"實際 {len(body.get('messages', []))}")
+        _, body, _ = server.request("GET", "/v1/messages?page=2")
+        check("第二頁仍固定 10 則", len(body.get("messages", [])) == 10 and body.get("page") == 2, str(body))
 
-        _, body, _ = server.request("GET", "/v1/messages?order=asc&limit=2")
-        check("asc 由舊到新", [m["content"] for m in body["messages"]] == ["Market looks choppy today.", "BTC breakout looks valid."],
-              str([m["content"] for m in body["messages"]]))
+        _, body, _ = server.request("GET", "/v1/messages?sort=asc")
+        check("asc 由舊到新", [m["content"] for m in body["messages"][:3]] ==
+              ["Market looks choppy today.", "BTC breakout looks valid.", "ETH is lagging."], str(body))
 
-        _, page1, _ = server.request("GET", "/v1/messages?order=asc&limit=5")
-        cursor = page1["messages"][-1]["created_at"]
-        _, page2, _ = server.request("GET", f"/v1/messages?order=asc&limit=5&after={cursor}")
-        check("用 after 接續分頁不重複",
-              page2["messages"] and page2["messages"][0]["content"] != page1["messages"][-1]["content"],
-              f"page1 尾 {page1['messages'][-1]['content']} / page2 首 {page2['messages'][0]['content'] if page2['messages'] else None}")
-        check("時間為 UTC RFC3339", cursor.endswith("Z"), cursor)
+        _, tagged, _ = server.request("GET", "/v1/messages?sort=asc&tag=ETH-Agent-02")
+        check("tag 先過濾再固定分頁", len(tagged.get("messages", [])) == 10 and
+              all("ETH-Agent-02" in m.get("tags", []) for m in tagged["messages"]), str(tagged))
 
-        _, older, _ = server.request("GET", f"/v1/messages?before={cursor}&order=asc")
-        check("before 只回傳游標之前的", len(older["messages"]) == 4, f"實際 {len(older['messages'])}")
-
-        for bad in ["limit=0", "limit=abc", "order=sideways", "after=yesterday"]:
+        for bad in ["page=0", "page=abc", "sort=sideways", "limit=10", "order=asc", "tag=%20%20"]:
             status, _, _ = server.request("GET", f"/v1/messages?{bad}")
             check(f"{bad} 回 400", status == 400, f"實際 {status}")
+
+        check.section("刪除權限")
+        status, _, _ = server.request("DELETE", f"/v1/messages/{alpha_posted['id']}", beta)
+        check("其他帳號不可刪除", status == 403, f"實際 {status}")
+        status, _, _ = server.request("DELETE", f"/v1/messages/{alpha_posted['id']}", alpha)
+        check("作者可刪除", status == 204, f"實際 {status}")
+        status, user_post, _ = server.request("POST", "/v1/messages", USER_TOKEN, {"content": "remove me"})
+        status, _, _ = server.request("DELETE", f"/v1/messages/{user_post['id']}", USER_TOKEN)
+        check("USER 可管理刪除", status == 204, f"實際 {status}")
 
         check.section("作者帳號被刪除後留言仍在")
         _, acc_list, _ = server.request("GET", "/v1/accounts", USER_TOKEN)
         beta_id = next(a["id"] for a in acc_list["accounts"] if a["user_name"] == "ETH-Agent-02")
         status, _, _ = server.request("DELETE", f"/v1/accounts/{beta_id}", USER_TOKEN)
         check("刪除帳號 B", status == 204, f"實際 {status}")
-        _, body, _ = server.request("GET", "/v1/messages?order=asc&limit=3")
-        check("留言仍可查到、名稱改為 [deleted]", names(body) == [USER_NAME, "BTC-Agent-01", "[deleted]"], str(names(body)))
+        _, body, _ = server.request("GET", "/v1/messages?sort=asc")
+        check("留言仍可查到、名稱改為 [deleted]", "[deleted]" in names(body), str(names(body)))
 
     return check.report()
 

@@ -42,9 +42,9 @@ func newTestService(t *testing.T) (*Service, *database.Store) {
 	return New(store, "Bless"), store
 }
 
-func mustPost(t *testing.T, s *Service, author auth.Identity, content string) *database.Message {
+func mustPost(t *testing.T, s *Service, author auth.Identity, content string, tags ...string) *database.Message {
 	t.Helper()
-	m, err := s.Post(context.Background(), author, content)
+	m, err := s.Post(context.Background(), author, content, tags)
 	if err != nil {
 		t.Fatalf("發布留言: %v", err)
 	}
@@ -87,14 +87,20 @@ func TestPostRejectsBadContent(t *testing.T) {
 	s, _ := newTestService(t)
 	ctx := context.Background()
 
-	if _, err := s.Post(ctx, alpha, "   "); !errors.Is(err, ErrEmptyContent) {
+	if _, err := s.Post(ctx, alpha, "   ", nil); !errors.Is(err, ErrEmptyContent) {
 		t.Fatalf("空白內容應被拒絕，得到 %v", err)
 	}
-	if _, err := s.Post(ctx, alpha, strings.Repeat("字", MaxContentLen+1)); !errors.Is(err, ErrContentLong) {
+	if _, err := s.Post(ctx, alpha, strings.Repeat("字", MaxContentLen+1), nil); !errors.Is(err, ErrContentLong) {
 		t.Fatalf("過長內容應被拒絕，得到 %v", err)
 	}
-	if _, err := s.Post(ctx, alpha, strings.Repeat("字", MaxContentLen)); err != nil {
+	if _, err := s.Post(ctx, alpha, strings.Repeat("字", MaxContentLen), nil); err != nil {
 		t.Fatalf("剛好上限應可發布: %v", err)
+	}
+	if _, err := s.Post(ctx, alpha, "tagged", []string{"beta", " beta "}); !errors.Is(err, ErrInvalidTags) {
+		t.Fatalf("trim 後重複的 tags 應被拒絕，得到 %v", err)
+	}
+	if posted, err := s.Post(ctx, alpha, strings.Repeat("😀", MaxContentLen), []string{" ETH-Agent-02 "}); err != nil || fmt.Sprint(posted.Tags) != "[ETH-Agent-02]" {
+		t.Fatalf("上限按 Unicode 字元且 tags 應 trim: %+v %v", posted, err)
 	}
 }
 
@@ -103,7 +109,7 @@ func TestYouDependsOnRequester(t *testing.T) {
 	mustPost(t, s, user, "from user")
 	mustPost(t, s, alpha, "from alpha")
 	mustPost(t, s, beta, "from beta")
-	q := Query{Order: "asc"}
+	q := Query{Sort: "asc"}
 
 	cases := []struct {
 		name      string
@@ -117,7 +123,7 @@ func TestYouDependsOnRequester(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			views, err := s.List(context.Background(), q, tc.requester)
+			views, _, err := s.List(context.Background(), q, tc.requester)
 			if err != nil {
 				t.Fatalf("查詢: %v", err)
 			}
@@ -135,7 +141,7 @@ func TestDeletedAccountShowsPlaceholder(t *testing.T) {
 		t.Fatalf("刪除帳號: %v", err)
 	}
 
-	views, err := s.List(context.Background(), Query{}, nil)
+	views, _, err := s.List(context.Background(), Query{}, nil)
 	if err != nil {
 		t.Fatalf("查詢: %v", err)
 	}
@@ -144,58 +150,57 @@ func TestDeletedAccountShowsPlaceholder(t *testing.T) {
 	}
 }
 
-func TestOrderAndLimit(t *testing.T) {
+func TestFixedPaginationSortAndTagFilter(t *testing.T) {
 	s, _ := newTestService(t)
-	for i := 0; i < 35; i++ {
-		mustPost(t, s, alpha, fmt.Sprintf("msg %02d", i))
+	for i := 0; i < 25; i++ {
+		tags := []string{}
+		if i%2 == 0 {
+			tags = []string{beta.UserName}
+		}
+		mustPost(t, s, alpha, fmt.Sprintf("msg %02d", i), tags...)
 		time.Sleep(time.Millisecond)
 	}
 	ctx := context.Background()
 
-	views, _ := s.List(ctx, Query{}, nil)
-	if len(views) != MaxLimit {
-		t.Fatalf("預設應回最多 %d 則，得到 %d", MaxLimit, len(views))
+	views, more, _ := s.List(ctx, Query{}, nil)
+	if len(views) != PageSize || !more {
+		t.Fatalf("預設應回 %d 則並有下一頁，得到 %d more=%v", PageSize, len(views), more)
 	}
-	if views[0].Content != "msg 34" {
+	if views[0].Content != "msg 24" {
 		t.Fatalf("預設 desc 應最新在前，得到 %q", views[0].Content)
 	}
 
-	views, _ = s.List(ctx, Query{Limit: 100}, nil)
-	if len(views) != MaxLimit {
-		t.Fatalf("limit 超過上限應被壓到 %d，得到 %d", MaxLimit, len(views))
+	views, more, _ = s.List(ctx, Query{Page: 3}, nil)
+	if len(views) != 5 || more || views[0].Content != "msg 04" {
+		t.Fatalf("第三頁應有最後 5 則: %v more=%v", views, more)
 	}
 
-	views, _ = s.List(ctx, Query{Order: "asc", Limit: 3}, nil)
-	if len(views) != 3 || views[0].Content != "msg 00" || views[2].Content != "msg 02" {
+	views, _, _ = s.List(ctx, Query{Sort: "asc"}, nil)
+	if len(views) != PageSize || views[0].Content != "msg 00" || views[9].Content != "msg 09" {
 		t.Fatalf("asc 應由舊到新: %v", views)
 	}
 
-	if _, err := s.List(ctx, Query{Order: "sideways"}, nil); !errors.Is(err, ErrInvalidOrder) {
-		t.Fatalf("未知的 order 應被拒絕，得到 %v", err)
+	views, more, _ = s.List(ctx, Query{Sort: "asc", Page: 2, Tag: beta.UserName}, nil)
+	if len(views) != 3 || more || views[0].Content != "msg 20" || fmt.Sprint(views[0].Tags) != "[ETH-Agent-02]" {
+		t.Fatalf("tag 應先過濾再分頁: %v more=%v", views, more)
+	}
+
+	if _, _, err := s.List(ctx, Query{Sort: "sideways"}, nil); !errors.Is(err, ErrInvalidSort) {
+		t.Fatalf("未知的 sort 應被拒絕，得到 %v", err)
 	}
 }
 
-func TestAfterAndBefore(t *testing.T) {
+func TestDeleteAllowsUserAndOwnerOnly(t *testing.T) {
 	s, _ := newTestService(t)
-	first := mustPost(t, s, alpha, "first")
-	time.Sleep(5 * time.Millisecond)
-	second := mustPost(t, s, alpha, "second")
-	time.Sleep(5 * time.Millisecond)
-	mustPost(t, s, alpha, "third")
-	ctx := context.Background()
-
-	views, _ := s.List(ctx, Query{After: &first.CreatedAt, Order: "asc"}, nil)
-	if len(views) != 2 || views[0].Content != "second" {
-		t.Fatalf("after 應排除自己並回傳之後的: %v", views)
+	owned := mustPost(t, s, alpha, "owned", beta.UserName)
+	if err := s.Delete(context.Background(), owned.ID, beta); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("其他帳號不應可刪除，得到 %v", err)
 	}
-
-	views, _ = s.List(ctx, Query{Before: &second.CreatedAt, Order: "asc"}, nil)
-	if len(views) != 1 || views[0].Content != "first" {
-		t.Fatalf("before 應只回傳之前的: %v", views)
+	if err := s.Delete(context.Background(), owned.ID, alpha); err != nil {
+		t.Fatalf("作者應可刪除: %v", err)
 	}
-
-	views, _ = s.List(ctx, Query{After: &first.CreatedAt, Before: &second.CreatedAt}, nil)
-	if len(views) != 0 {
-		t.Fatalf("after 與 before 之間沒有留言時應為空: %v", views)
+	admin := mustPost(t, s, beta, "admin delete")
+	if err := s.Delete(context.Background(), admin.ID, user); err != nil {
+		t.Fatalf("USER 應可管理刪除: %v", err)
 	}
 }

@@ -77,7 +77,7 @@ func (s *Service) settle(ctx context.Context, tx *database.Store, order *databas
 	if err != nil {
 		return err
 	}
-	return tx.CreateTrade(ctx, &database.Trade{
+	if err := tx.CreateTrade(ctx, &database.Trade{
 		ID:          tradeID,
 		AccountID:   order.AccountID,
 		OrderID:     order.ID,
@@ -90,6 +90,20 @@ func (s *Service) settle(ctx context.Context, tx *database.Store, order *databas
 		Price:       price,
 		Fee:         fee,
 		RealizedPnL: realized,
+		Source:      order.Source,
+	}); err != nil {
+		return err
+	}
+	positionID := ""
+	if updated != nil {
+		positionID = updated.ID
+	} else if pos != nil {
+		positionID = pos.ID
+	}
+	return tx.CreateLedgerEntry(ctx, &database.LedgerEntry{
+		AccountID: order.AccountID, Event: database.LedgerFill, OrderID: order.ID, TradeID: tradeID,
+		PositionID: positionID, Trigger: order.Trigger, Quantity: order.Quantity, Price: price, Fee: fee,
+		RealizedPnL: realized, BalanceDelta: realized - fee, BalanceAfter: account.Balance, Source: order.Source,
 	})
 }
 
@@ -105,9 +119,14 @@ func (s *Service) persistPosition(ctx context.Context, tx *database.Store, order
 	if order.Side == database.SideSell {
 		wantSide = database.Short
 	}
-	if updated.Side == wantSide && (order.StopLoss > 0 || order.TakeProfit > 0) {
-		updated.StopLoss = order.StopLoss
-		updated.TakeProfit = order.TakeProfit
+	// 下單附帶的 stop 只覆寫有給的那一個 level 與其來源；沒給的保留既有設定（反手已由 applyFill 清空）。
+	if updated.Side == wantSide {
+		if order.StopLoss > 0 {
+			updated.StopLoss, updated.StopLossSource = order.StopLoss, order.Source
+		}
+		if order.TakeProfit > 0 {
+			updated.TakeProfit, updated.TakeProfitSource = order.TakeProfit, order.Source
+		}
 	}
 
 	if previous != nil {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -11,14 +12,14 @@ func messageNames(body map[string]any) []string {
 	items, _ := body["messages"].([]any)
 	out := make([]string, 0, len(items))
 	for _, raw := range items {
-		m, _ := raw.(map[string]any)
-		name, _ := m["user_name"].(string)
+		message, _ := raw.(map[string]any)
+		name, _ := message["user_name"].(string)
 		out = append(out, name)
 	}
 	return out
 }
 
-func TestPostMessageRequiresTokenAndReturnsYou(t *testing.T) {
+func TestPostMessageRequiresTokenAndReturnsTags(t *testing.T) {
 	engine, _ := newTestServer(t)
 	_, token := createAccountFor(t, engine, "BTC-Agent-01", 100)
 
@@ -29,12 +30,15 @@ func TestPostMessageRequiresTokenAndReturnsYou(t *testing.T) {
 		t.Fatalf("無效 token 發布應回 401，得到 %d", status)
 	}
 
-	status, body := do(t, engine, http.MethodPost, "/v1/messages", token, gin.H{"content": "BTC breakout looks valid."})
-	if status != http.StatusCreated {
-		t.Fatalf("發布應回 201，得到 %d: %v", status, body)
+	status, body := do(t, engine, http.MethodPost, "/v1/messages", token, gin.H{
+		"content": "BTC breakout looks valid.", "tags": []string{"ETH-Agent-02"},
+	})
+	if status != http.StatusCreated || body["user_name"] != "you" || body["content"] != "BTC breakout looks valid." {
+		t.Fatalf("發布回應不符: %d %v", status, body)
 	}
-	if body["user_name"] != "you" || body["content"] != "BTC breakout looks valid." {
-		t.Fatalf("回應應以 you 顯示自己: %v", body)
+	tags, _ := body["tags"].([]any)
+	if len(tags) != 1 || tags[0] != "ETH-Agent-02" {
+		t.Fatalf("回應應帶 tags: %v", body)
 	}
 	for _, hidden := range []string{"author_id", "author_type"} {
 		if _, present := body[hidden]; present {
@@ -48,7 +52,7 @@ func TestPostMessageRequiresTokenAndReturnsYou(t *testing.T) {
 	}
 }
 
-func TestPostMessageRejectsClientSuppliedAuthor(t *testing.T) {
+func TestPostMessageValidation(t *testing.T) {
 	engine, _ := newTestServer(t)
 	_, token := createAccountFor(t, engine, "BTC-Agent-01", 100)
 
@@ -58,8 +62,14 @@ func TestPostMessageRejectsClientSuppliedAuthor(t *testing.T) {
 			t.Fatalf("帶 %s 應回 400，得到 %d: %v", field, status, body)
 		}
 	}
-	if status, _ := do(t, engine, http.MethodPost, "/v1/messages", token, gin.H{"content": "   "}); status != http.StatusBadRequest {
-		t.Fatalf("空白內容應回 400，得到 %d", status)
+	for _, body := range []gin.H{
+		{"content": "   "},
+		{"content": "hi", "tags": []string{"x", " x "}},
+		{"content": "hi", "tags": []string{""}},
+	} {
+		if status, _ := do(t, engine, http.MethodPost, "/v1/messages", token, body); status != http.StatusBadRequest {
+			t.Fatalf("無效內容應回 400，得到 %d: %v", status, body)
+		}
 	}
 }
 
@@ -82,25 +92,14 @@ func TestListMessagesOptionalAuth(t *testing.T) {
 		{"alpha", alpha, []string{"Bless", "you", "ETH-Agent-02"}},
 		{"beta", beta, []string{"Bless", "BTC-Agent-01", "you"}},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			status, body := do(t, engine, http.MethodGet, "/v1/messages?order=asc", tc.token, nil)
-			if status != http.StatusOK {
-				t.Fatalf("查詢應回 200，得到 %d: %v", status, body)
-			}
-			got := messageNames(body)
-			if len(got) != len(tc.want) {
-				t.Fatalf("數量不符: %v", got)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Fatalf("顯示名稱不符: 得到 %v，預期 %v", got, tc.want)
-				}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			status, body := do(t, engine, http.MethodGet, "/v1/messages?sort=asc", test.token, nil)
+			if status != http.StatusOK || fmt.Sprint(messageNames(body)) != fmt.Sprint(test.want) {
+				t.Fatalf("查詢不符: %d got=%v want=%v", status, messageNames(body), test.want)
 			}
 		})
 	}
-
-	// 規格 §17：帶錯 token 必須 401，不可以默默當成匿名。
 	if status, _ := do(t, engine, http.MethodGet, "/v1/messages", "at_bogus", nil); status != http.StatusUnauthorized {
 		t.Fatalf("無效 token 查詢應回 401，得到 %d", status)
 	}
@@ -108,13 +107,41 @@ func TestListMessagesOptionalAuth(t *testing.T) {
 
 func TestListMessagesQueryValidation(t *testing.T) {
 	engine, _ := newTestServer(t)
-
-	for _, bad := range []string{"limit=0", "limit=abc", "order=sideways", "after=yesterday", "before=2026-13-01"} {
+	for _, bad := range []string{"page=0", "page=abc", "sort=sideways", "tag=%20%20", "limit=10", "order=asc", "page=1&page=2"} {
 		if status, _ := do(t, engine, http.MethodGet, "/v1/messages?"+bad, "", nil); status != http.StatusBadRequest {
 			t.Fatalf("%s 應回 400，得到 %d", bad, status)
 		}
 	}
-	if status, _ := do(t, engine, http.MethodGet, "/v1/messages?limit=30&order=desc&after=2020-01-01T00:00:00Z", "", nil); status != http.StatusOK {
+	if status, _ := do(t, engine, http.MethodGet, "/v1/messages?page=2&sort=desc&tag=agent-name", "", nil); status != http.StatusOK {
 		t.Fatalf("合法參數應回 200，得到 %d", status)
+	}
+}
+
+func TestMessagesPageFilterAndDeleteAuthorization(t *testing.T) {
+	engine, _ := newTestServer(t)
+	_, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
+	_, beta := createAccountFor(t, engine, "ETH-Agent-02", 100)
+	ids := make([]string, 0, 12)
+	for index := 0; index < 12; index++ {
+		status, body := do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{
+			"content": fmt.Sprint(index), "tags": []string{"ETH-Agent-02"},
+		})
+		if status != http.StatusCreated {
+			t.Fatal(status, body)
+		}
+		ids = append(ids, body["id"].(string))
+	}
+	status, body := do(t, engine, http.MethodGet, "/v1/messages?page=1&sort=asc&tag=ETH-Agent-02", beta, nil)
+	if status != http.StatusOK || body["page"] != float64(1) || body["has_more"] != true || len(body["messages"].([]any)) != 10 {
+		t.Fatalf("固定十筆分頁回應不符: %d %v", status, body)
+	}
+	if status, _ = do(t, engine, http.MethodDelete, "/v1/messages/"+ids[0], beta, nil); status != http.StatusForbidden {
+		t.Fatalf("非作者帳號刪除應回 403，得到 %d", status)
+	}
+	if status, _ = do(t, engine, http.MethodDelete, "/v1/messages/"+ids[0], alpha, nil); status != http.StatusNoContent {
+		t.Fatalf("作者刪除應回 204，得到 %d", status)
+	}
+	if status, _ = do(t, engine, http.MethodDelete, "/v1/messages/"+ids[1], testUserToken, nil); status != http.StatusNoContent {
+		t.Fatalf("USER 管理刪除應回 204，得到 %d", status)
 	}
 }

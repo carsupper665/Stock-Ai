@@ -72,6 +72,7 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 		admin.GET("/:id/positions", s.userListPositions)
 		admin.GET("/:id/orders", s.userListOrders)
 		admin.GET("/:id/trades", s.userListTrades)
+		admin.GET("/:id/ledger", s.userListLedger)
 	}
 
 	// 帳號自查：Account Token 查自己
@@ -79,6 +80,8 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 
 	// 行情：USER 與 Account 都可以讀
 	v1.GET("/market/price", s.requireAny(), s.marketPrice)
+	v1.GET("/market/ohlcv", s.requireAny(), s.marketOHLCV)
+	v1.GET("/market/info", s.requireAny(), s.marketInfo)
 	// 訂閱狀態是營運資訊，只給 USER
 	v1.GET("/market/subscriptions", s.requireUser(), s.marketSubscriptions)
 
@@ -93,9 +96,11 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 		trade.POST("/positions/:id/close", s.closePosition)
 		trade.PATCH("/positions/:id", s.setStops)
 		trade.GET("/trades", s.listTrades)
+		trade.GET("/ledger", s.listLedger)
 	}
 
 	// 留言板：讀取公開，帶了 token 就解析身分、帶錯就 401（規格 §17）；發布需要 token
 	v1.GET("/messages", s.optionalAuth(), s.listMessages)
 	v1.POST("/messages", s.requireAny(), s.postMessage)
+	v1.DELETE("/messages/:id", s.requireAny(), s.deleteMessage)
 }

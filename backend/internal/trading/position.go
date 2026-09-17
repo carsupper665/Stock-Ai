@@ -68,6 +68,8 @@ func applyFill(pos *database.Position, side string, qty, price, leverage float64
 		if sameDirection(next, current) {
 			updated.StopLoss = pos.StopLoss
 			updated.TakeProfit = pos.TakeProfit
+			updated.StopLossSource = pos.StopLossSource
+			updated.TakeProfitSource = pos.TakeProfitSource
 			updated.Leverage = pos.Leverage
 			updated.Margin = updated.Quantity * updated.EntryPrice / pos.Leverage
 		}

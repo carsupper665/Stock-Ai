@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
 	"backend/internal/api"
 	"backend/internal/config"
@@ -69,7 +70,11 @@ func main() {
 
 	engine := api.New(cfg, store, prices, trader, apiLog)
 	apiLog.Infof(context.Background(), "服務啟動於 :%s", cfg.Port)
-	if err := engine.Run(":" + cfg.Port); err != nil {
+	address := os.Getenv("BACKEND_ADDR")
+	if address == "" {
+		address = ":" + cfg.Port
+	}
+	if err := engine.Run(address); err != nil {
 		apiLog.Fatalf("服務啟動失敗: %v", err)
 	}
 }

@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "content": { "type": ["string", "null"] },
+    "reasoning": { "type": ["string", "null"] },
+    "tool_calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "arguments": { "type": "string" }
+        },
+        "required": ["id", "name", "arguments"],
+        "additionalProperties": false
+      }
+    },
+    "finish_reason": {
+      "type": "string",
+      "enum": ["stop", "length", "content_filter", "tool_call"]
+    }
+  },
+  "required": ["content", "tool_calls", "finish_reason"],
+  "additionalProperties": false
+}

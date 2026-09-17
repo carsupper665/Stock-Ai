@@ -69,3 +69,25 @@ it('代打用的帳號 token 收到 401 只丟錯，不登出', async () => {
   expect(err.status).toBe(401)
   expect(location.assign).not.toHaveBeenCalled()
 })
+
+it('三個服務三種錯誤信封都拆成同樣的 code／message', async () => {
+  const cases = [
+    [{ error: 'not_found', message: '找不到' }, 'not_found', '找不到'],
+    [{ status_code: 409, error: 'SESSION_ALREADY_RUNNING', msg: 'session is running' }, 'SESSION_ALREADY_RUNNING', 'session is running'],
+    [{ error: { code: 'PROVIDER_NOT_FOUND', message: 'Provider does not exist.' } }, 'PROVIDER_NOT_FOUND', 'Provider does not exist.'],
+  ]
+  for (const [body, code, message] of cases) {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond(404, body))
+    const err = await api('GET', '/x').catch((e) => e)
+    expect(err.code).toBe(code)
+    expect(err.message).toBe(message)
+  }
+})
+
+it('管理路由先用 USER token 驗證 console，401 會登出', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond(401, { status_code: 401, error: 'UNAUTHORIZED', msg: 'admin credentials required' }))
+  const err = await api('GET', '/agent/api/v1/sessions', undefined, null).catch((e) => e)
+  expect(fetch.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer ut_me' })
+  expect(err.status).toBe(401)
+  expect(location.assign).toHaveBeenCalledWith('/login')
+})

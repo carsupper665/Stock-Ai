@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"backend/internal/database"
 	"backend/internal/market"
@@ -18,17 +19,40 @@ const (
 	maxListLimit     = 200
 )
 
+// sourceRequest 是 Agent Server 注入的來源。帳號身分仍由 Token 決定，這裡只驗證欄位完整。
+type sourceRequest struct {
+	SessionID *string `json:"session_id"`
+	RunID     *int64  `json:"run_id"`
+}
+
+func parseSource(c *gin.Context, req *sourceRequest) (database.Source, bool) {
+	if req == nil {
+		return database.Source{}, true
+	}
+	if req.SessionID == nil || req.RunID == nil {
+		fail(c, http.StatusBadRequest, "invalid_request", "source 必須同時提供 session_id 與 run_id")
+		return database.Source{}, false
+	}
+	sessionID := strings.TrimSpace(*req.SessionID)
+	if sessionID == "" || len(sessionID) > 64 || *req.RunID <= 0 {
+		fail(c, http.StatusBadRequest, "invalid_request", "source.session_id 必須是 1 到 64 字元，run_id 必須是正整數")
+		return database.Source{}, false
+	}
+	return database.Source{SessionID: sessionID, RunID: *req.RunID}, true
+}
+
 type placeOrderRequest struct {
-	Market     string  `json:"market"`
-	Symbol     string  `json:"symbol"`
-	Product    string  `json:"product"`
-	Side       string  `json:"side"`
-	Type       string  `json:"type"`
-	Quantity   float64 `json:"quantity"`
-	Price      float64 `json:"price"`
-	Leverage   float64 `json:"leverage"`
-	StopLoss   float64 `json:"stop_loss"`
-	TakeProfit float64 `json:"take_profit"`
+	Market     string         `json:"market"`
+	Symbol     string         `json:"symbol"`
+	Product    string         `json:"product"`
+	Side       string         `json:"side"`
+	Type       string         `json:"type"`
+	Quantity   float64        `json:"quantity"`
+	Price      float64        `json:"price"`
+	Leverage   float64        `json:"leverage"`
+	StopLoss   float64        `json:"stop_loss"`
+	TakeProfit float64        `json:"take_profit"`
+	Source     *sourceRequest `json:"source"`
 }
 
 func (s *Server) placeOrder(c *gin.Context) {
@@ -42,12 +66,16 @@ func (s *Server) placeOrder(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
 		return
 	}
+	source, ok := parseSource(c, req.Source)
+	if !ok {
+		return
+	}
 
 	order, err := s.trading.PlaceOrder(c.Request.Context(), accountID, trading.PlaceOrderInput{
 		Market: req.Market, Symbol: req.Symbol, Product: req.Product,
 		Side: req.Side, Type: req.Type,
 		Quantity: req.Quantity, Price: req.Price, Leverage: req.Leverage,
-		StopLoss: req.StopLoss, TakeProfit: req.TakeProfit,
+		StopLoss: req.StopLoss, TakeProfit: req.TakeProfit, Source: source,
 	})
 	if err != nil {
 		s.writeTradingError(c, err)
@@ -57,7 +85,8 @@ func (s *Server) placeOrder(c *gin.Context) {
 }
 
 type closePositionRequest struct {
-	Quantity float64 `json:"quantity"`
+	Quantity float64        `json:"quantity"`
+	Source   *sourceRequest `json:"source"`
 }
 
 func (s *Server) closePosition(c *gin.Context) {
@@ -67,14 +96,18 @@ func (s *Server) closePosition(c *gin.Context) {
 	}
 
 	var req closePositionRequest
-	if c.Request.ContentLength > 0 {
+	if c.Request.ContentLength != 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
 			fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
 			return
 		}
 	}
+	source, ok := parseSource(c, req.Source)
+	if !ok {
+		return
+	}
 
-	order, err := s.trading.ClosePosition(c.Request.Context(), accountID, c.Param("id"), req.Quantity)
+	order, err := s.trading.ClosePosition(c.Request.Context(), accountID, c.Param("id"), req.Quantity, source)
 	if err != nil {
 		s.writeTradingError(c, err)
 		return
@@ -83,8 +116,9 @@ func (s *Server) closePosition(c *gin.Context) {
 }
 
 type setStopsRequest struct {
-	StopLoss   *float64 `json:"stop_loss"`
-	TakeProfit *float64 `json:"take_profit"`
+	StopLoss   *float64       `json:"stop_loss"`
+	TakeProfit *float64       `json:"take_profit"`
+	Source     *sourceRequest `json:"source"`
 }
 
 // setStops 設定、更新或移除停損停利：欄位省略不動，0 移除，大於 0 設定。
@@ -99,23 +133,32 @@ func (s *Server) setStops(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
 		return
 	}
+	source, ok := parseSource(c, req.Source)
+	if !ok {
+		return
+	}
 
 	pos, err := s.trading.SetStops(c.Request.Context(), accountID, c.Param("id"), trading.StopInput{
-		StopLoss: req.StopLoss, TakeProfit: req.TakeProfit,
+		StopLoss: req.StopLoss, TakeProfit: req.TakeProfit, Source: source,
 	})
 	if err != nil {
 		s.writeTradingError(c, err)
 		return
 	}
 
-	price, err := s.market.GetPrice(c.Request.Context(), pos.Market, pos.Symbol)
-	if err != nil {
-		s.writeMarketError(c, err)
-		return
+	// stops 已提交，之後只能回 2xx（Agent 把非 500 錯誤當成「未執行」，見 SPEC §21.5）；
+	// 現價只是盡力補上 mark_price／unrealized_pnl，取不到就留 0。
+	view := trading.OpenPosition{Position: *pos}
+	if price, err := s.market.GetPrice(c.Request.Context(), pos.Market, pos.Symbol); err != nil {
+		s.log.Warnf(c.Request.Context(), "部位 %s 的停損停利已更新，但取不到 %s %s 現價: %v", pos.ID, pos.Market, pos.Symbol, err)
+	} else {
+		view.MarkPrice, view.Unrealized = price.Price, trading.Unrealized(pos, price.Price)
 	}
-	c.JSON(http.StatusOK, viewPosition(trading.OpenPosition{
-		Position: *pos, MarkPrice: price.Price, Unrealized: trading.Unrealized(pos, price.Price),
-	}))
+	c.JSON(http.StatusOK, viewPosition(view))
+}
+
+type cancelOrderRequest struct {
+	Source *sourceRequest `json:"source"`
 }
 
 func (s *Server) cancelOrder(c *gin.Context) {
@@ -123,12 +166,68 @@ func (s *Server) cancelOrder(c *gin.Context) {
 	if !ok {
 		return
 	}
-	order, err := s.trading.CancelOrder(c.Request.Context(), accountID, c.Param("id"))
+	var req cancelOrderRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
+			return
+		}
+	}
+	source, ok := parseSource(c, req.Source)
+	if !ok {
+		return
+	}
+	order, err := s.trading.CancelOrder(c.Request.Context(), accountID, c.Param("id"), source)
 	if err != nil {
 		s.writeTradingError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, viewOrder(order))
+}
+
+func (s *Server) listLedger(c *gin.Context) {
+	if accountID, ok := s.ownAccount(c); ok {
+		s.ledgerFor(c, accountID)
+	}
+}
+
+func (s *Server) userListLedger(c *gin.Context) {
+	s.ledgerFor(c, c.Param("id"))
+}
+
+// ledgerFor 依 seq 由新到舊列出帳戶事件；before_seq 是游標，session_id／run_id 篩選來源。
+func (s *Server) ledgerFor(c *gin.Context, accountID string) {
+	filter := database.LedgerFilter{SessionID: strings.TrimSpace(c.Query("session_id")), Limit: listLimit(c)}
+	var ok bool
+	if filter.RunID, ok = optionalPositiveQuery(c, "run_id"); !ok {
+		return
+	}
+	if filter.BeforeSeq, ok = optionalPositiveQuery(c, "before_seq"); !ok {
+		return
+	}
+	entries, err := s.store.ListLedger(c.Request.Context(), accountID, filter)
+	if err != nil {
+		s.writeTradingError(c, err)
+		return
+	}
+	views := make([]ledgerEntryView, 0, len(entries))
+	for i := range entries {
+		views = append(views, viewLedgerEntry(&entries[i]))
+	}
+	c.JSON(http.StatusOK, gin.H{"entries": views})
+}
+
+func optionalPositiveQuery(c *gin.Context, name string) (int64, bool) {
+	raw := c.Query(name)
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		fail(c, http.StatusBadRequest, "invalid_request", name+" 必須是正整數")
+		return 0, false
+	}
+	return value, true
 }
 
 func (s *Server) listPositions(c *gin.Context) {
@@ -234,6 +333,8 @@ func (s *Server) writeTradingError(c *gin.Context, err error) {
 		fail(c, http.StatusUnprocessableEntity, "insufficient_balance", err.Error())
 	case errors.Is(err, trading.ErrAccountDisabled):
 		fail(c, http.StatusForbidden, "account_disabled", err.Error())
+	case errors.Is(err, trading.ErrOrderNotOpen):
+		fail(c, http.StatusConflict, "order_not_open", err.Error())
 	case errors.Is(err, market.ErrEmptySymbol), errors.Is(err, market.ErrUnknownMarket):
 		fail(c, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, stock.ErrNotImplemented):

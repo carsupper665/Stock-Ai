@@ -34,3 +34,8 @@ data/*.csv
 # Python
 __pycache__/
 *.pyc
+
+.claude/*
+.opencode/*
+.scratch/*
+/frontend/design_handoff_agent_console/*

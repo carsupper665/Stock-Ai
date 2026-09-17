@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"backend/internal/market"
 )
 
 // newFakeBinance 啟一個假的 Binance，handler 決定每次請求的回應。
@@ -162,5 +164,30 @@ func TestStreamPassesSymbolThrough(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("沒有收到請求")
+	}
+}
+
+// 壞 symbol 被當成「來源暫時無法使用」時，呼叫端（Agent）會以為是暫時性故障而重試，
+// 最後判定沒有可用工具；必須明確回報 symbol 錯誤。
+func TestStreamReportsBadSymbolAsUnknownSymbol(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		unknown    bool
+	}{
+		{"無效 symbol", `{"code":-1121,"msg":"Invalid symbol."}`, true},
+		{"symbol 含非法字元", `{"code":-1100,"msg":"Illegal characters found in parameter 'symbol'."}`, true},
+		{"真的是來源故障", `{"code":-1003,"msg":"Too much request weight used."}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newFakeBinance(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			err := b.Stream(context.Background(), "BTC/USDT", make(chan float64, 1))
+			if errors.Is(err, market.ErrUnknownSymbol) != tc.unknown {
+				t.Fatalf("ErrUnknownSymbol=%v，預期 %v；錯誤為 %v", errors.Is(err, market.ErrUnknownSymbol), tc.unknown, err)
+			}
+		})
 	}
 }
