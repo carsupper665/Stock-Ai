@@ -22,16 +22,18 @@ func marketDefinitions() []map[string]any {
 			},
 		},
 		{
-			"name": "get_ohlcv", "description": "Get completed OHLCV candles in an ascending UTC time range.",
+			"name": "get_ohlcv", "description": "Get completed OHLCV candles in ascending UTC time. start_time/end_time are optional RFC3339 timestamps; " +
+				"when omitted the Backend returns the latest candles, and a future end_time is clamped to the Backend's current time. " +
+				"The response's current_time is the Backend query time in UTC — use it as the reference for 'now'.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
 					"market":     map[string]any{"type": "string", "default": "crypto"},
 					"symbol":     map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
 					"interval":   map[string]any{"type": "string", "enum": []string{"1m", "5m", "15m", "1h", "4h", "1d"}},
-					"start_time": map[string]any{"type": "string", "format": "date-time"},
-					"end_time":   map[string]any{"type": "string", "format": "date-time"},
+					"start_time": map[string]any{"type": "string", "format": "date-time", "description": "Optional RFC3339 UTC. Omit to request the latest candles."},
+					"end_time":   map[string]any{"type": "string", "format": "date-time", "description": "Optional RFC3339 UTC. Omit to end at the Backend's current time; a future value is clamped to now."},
 					"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
-				}, "required": []string{"symbol", "interval", "start_time", "end_time"}, "additionalProperties": false,
+				}, "required": []string{"symbol", "interval"}, "additionalProperties": false,
 			},
 		},
 		{
@@ -85,18 +87,9 @@ func OHLCVQuery(arguments json.RawMessage) (url.Values, error) {
 	if err != nil || !validOHLCVInterval(interval) {
 		return nil, errors.New("interval must be one of 1m, 5m, 15m, 1h, 4h, or 1d")
 	}
-	startValue, err := RequiredString(rawArguments.StartTime, "start_time")
+	startValue, endValue, err := optionalTimeRange(rawArguments.StartTime, rawArguments.EndTime)
 	if err != nil {
 		return nil, err
-	}
-	endValue, err := RequiredString(rawArguments.EndTime, "end_time")
-	if err != nil {
-		return nil, err
-	}
-	start, startErr := time.Parse(time.RFC3339, startValue)
-	end, endErr := time.Parse(time.RFC3339, endValue)
-	if startErr != nil || endErr != nil || !start.Before(end) {
-		return nil, errors.New("start_time and end_time must be RFC3339 timestamps with start_time before end_time")
 	}
 	limit := 100
 	if len(rawArguments.Limit) != 0 {
@@ -104,11 +97,52 @@ func OHLCVQuery(arguments json.RawMessage) (url.Values, error) {
 			return nil, errors.New("limit must be an integer from 1 through 500")
 		}
 	}
-	return url.Values{
+	values := url.Values{
 		"market": {market}, "symbol": {symbol}, "interval": {interval},
-		"start_time": {startValue}, "end_time": {endValue},
 		"limit": {strconv.Itoa(limit)},
-	}, nil
+	}
+	if startValue != "" {
+		values.Set("start_time", startValue)
+	}
+	if endValue != "" {
+		values.Set("end_time", endValue)
+	}
+	return values, nil
+}
+
+// optionalTimeRange 允許 start_time／end_time 各自省略（Backend 會收斂到最新
+// Candle 與目前時刻）；兩者都提供時維持 start 必須早於 end 的既有驗證。
+func optionalTimeRange(startRaw, endRaw json.RawMessage) (string, string, error) {
+	startValue, err := optionalTimeString(startRaw, "start_time")
+	if err != nil {
+		return "", "", err
+	}
+	endValue, err := optionalTimeString(endRaw, "end_time")
+	if err != nil {
+		return "", "", err
+	}
+	if startValue != "" && endValue != "" {
+		start, startErr := time.Parse(time.RFC3339, startValue)
+		end, endErr := time.Parse(time.RFC3339, endValue)
+		if startErr != nil || endErr != nil || !start.Before(end) {
+			return "", "", errors.New("start_time and end_time must be RFC3339 timestamps with start_time before end_time")
+		}
+	}
+	return startValue, endValue, nil
+}
+
+func optionalTimeString(raw json.RawMessage, name string) (string, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", nil
+	}
+	value, err := RequiredString(raw, name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := time.Parse(time.RFC3339, value); err != nil {
+		return "", fmt.Errorf("%s must be an RFC3339 timestamp", name)
+	}
+	return value, nil
 }
 
 func MarketInfoQuery(arguments json.RawMessage) (url.Values, error) {
@@ -158,7 +192,7 @@ func ProjectOHLCV(result map[string]json.RawMessage) (any, error) {
 		}
 		rows = append(rows, row)
 	}
-	projected := SelectFields(result, "market", "symbol", "interval", "time_zone")
+	projected := SelectFields(result, "market", "symbol", "interval", "current_time", "time_zone")
 	projected["columns"] = json.RawMessage(`["open_time_unix_ms","open","high","low","close","volume"]`)
 	encodedRows, err := json.Marshal(rows)
 	if err != nil {

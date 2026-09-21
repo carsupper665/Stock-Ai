@@ -34,18 +34,26 @@ func (s *Server) marketSubscriptions(c *gin.Context) {
 }
 
 func (s *Server) marketOHLCV(c *gin.Context) {
-	start, err := time.Parse(time.RFC3339, c.Query("start_time"))
-	if err != nil {
-		fail(c, http.StatusBadRequest, "invalid_request", "start_time 必須是 RFC3339 時間")
-		return
+	var start, end time.Time
+	if raw := c.Query("start_time"); raw != "" {
+		var err error
+		start, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			fail(c, http.StatusBadRequest, "invalid_request", "start_time 必須是 RFC3339 時間")
+			return
+		}
 	}
-	end, err := time.Parse(time.RFC3339, c.Query("end_time"))
-	if err != nil {
-		fail(c, http.StatusBadRequest, "invalid_request", "end_time 必須是 RFC3339 時間")
-		return
+	if raw := c.Query("end_time"); raw != "" {
+		var err error
+		end, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			fail(c, http.StatusBadRequest, "invalid_request", "end_time 必須是 RFC3339 時間")
+			return
+		}
 	}
 	limit := market.DefaultOHLCVLimit
 	if raw, provided := c.GetQuery("limit"); provided {
+		var err error
 		limit, err = strconv.Atoi(raw)
 		if err != nil {
 			fail(c, http.StatusBadRequest, "invalid_request", "limit 必須是整數")

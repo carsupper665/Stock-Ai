@@ -2486,18 +2486,18 @@ Gateway tool declaration:
 ```json
 {
   "name": "get_ohlcv",
-  "description": "Get completed OHLCV candles in an ascending UTC time range.",
+  "description": "Get completed OHLCV candles in ascending UTC time. start_time/end_time are optional RFC3339 timestamps; when omitted the Backend returns the latest candles, and a future end_time is clamped to the Backend's current time. The response's current_time is the Backend query time in UTC — use it as the reference for 'now'.",
   "input_schema": {
     "type": "object",
     "properties": {
       "market": {"type":"string","default":"crypto"},
       "symbol": {"type":"string"},
       "interval": {"type":"string","enum":["1m","5m","15m","1h","4h","1d"]},
-      "start_time": {"type":"string","format":"date-time"},
-      "end_time": {"type":"string","format":"date-time"},
+      "start_time": {"type":"string","format":"date-time","description":"Optional RFC3339 UTC. Omit to request the latest candles."},
+      "end_time": {"type":"string","format":"date-time","description":"Optional RFC3339 UTC. Omit to end at the Backend's current time; a future value is clamped to now."},
       "limit": {"type":"integer","minimum":1,"maximum":500,"default":100}
     },
-    "required": ["symbol","interval","start_time","end_time"],
+    "required": ["symbol","interval"],
     "additionalProperties": false
   }
 }
@@ -2505,9 +2505,11 @@ Gateway tool declaration:
 
 `market` omitted or empty defaults to `crypto`; explicit null/non-string is invalid.
 `symbol` and `interval` are trimmed nonblank strings. `start_time` and `end_time`
-must be RFC3339 timestamps with `start_time < end_time`; after validation Agent
-forwards their exact strings, including fractional precision and numeric UTC
-offset, so Backend alone owns range conversion. `limit` omitted is 100; null,
+are optional RFC3339 timestamps; when both are present they must satisfy
+`start_time < end_time`. Omitted values are not forwarded at all, so Backend alone
+decides the latest-Candle window and clamps a future `end_time` to its current
+time; provided values are forwarded as exact strings, including fractional
+precision and numeric UTC offset. `limit` omitted is 100; null,
 non-integer, values below 1 and values above 500 are invalid. The direct mapping is:
 
 ```http
@@ -2541,6 +2543,7 @@ source rows is HTTP 200 with an empty non-null array:
   "interval": "1m",
   "start_time": "2026-09-13T10:00:00Z",
   "end_time": "2026-09-13T11:00:00Z",
+  "current_time": "2026-09-13T11:00:30Z",
   "time_zone": "UTC",
   "includes_incomplete": false,
   "candles": [

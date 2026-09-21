@@ -413,8 +413,8 @@ Query 合約：
 | `market` | optional，省略時 `crypto` | 去除前後空白並轉小寫；空字串與未註冊市場無效 |
 | `symbol` | required | 非空字串；去除前後空白並轉大寫 |
 | `interval` | required | `1m`、`5m`、`15m`、`1h`、`4h`、`1d` |
-| `start_time` | required | RFC3339 timestamp |
-| `end_time` | required | RFC3339 timestamp，必須晚於 `start_time` |
+| `start_time` | optional，省略時取最新 N 根 | RFC3339 timestamp；省略時為 `end_time` 往前 `limit` 個 interval 的範圍（起點對齊 interval 邊界） |
+| `end_time` | optional，省略時目前時刻 | RFC3339 timestamp；省略或落在未來時收斂到 Backend 目前時刻；與 `start_time` 同時提供時必須晚於 `start_time` |
 | `limit` | optional，省略時 100 | 整數 1–500；空字串、JSON `null` 字樣、非整數及界外值無效 |
 
 Backend v1 只有註冊的 `crypto` Binance Spot source 提供 OHLCV。Backend 對
@@ -422,9 +422,11 @@ Binance `/api/v3/klines` 發出單次查詢，不分頁、不重試、不改查�
 Candle。時間範圍按 Candle `open_time` 採半開區間 `[start_time,end_time)`；回應依
 `open_time` 升序，所有時間及 range metadata 為 UTC。`close_time` 不早於 Backend
 查詢完成時刻的未完成 Candle 會排除。回傳數不超過 `limit`，且絕不超過 500。
-Binance 的毫秒 query boundary 使用 `ceil(start_time)` 與 `ceil(end_time)-1`，不會把
-小於 fractional `start_time` 的毫秒誤納入，也不會把仍位於 fractional `end_time`
-之前的毫秒誤排除。若轉換後不存在任何毫秒，直接回空陣列且不對來源發出反向查詢。
+`current_time` 是 Backend 查詢完成時刻（UTC），讓模型知道目前時間；省略
+`end_time` 時它就是收斂後的 `end_time`。Binance 的毫秒 query boundary 使用
+`ceil(start_time)` 與 `ceil(end_time)-1`，不會把小於 fractional `start_time` 的
+毫秒誤納入，也不會把仍位於 fractional `end_time` 之前的毫秒誤排除。若轉換後
+不存在任何毫秒，直接回空陣列且不對來源發出反向查詢。
 
 成功為 HTTP 200 `application/json`：
 
@@ -435,6 +437,7 @@ Binance 的毫秒 query boundary 使用 `ceil(start_time)` 與 `ceil(end_time)-1
   "interval": "1m",
   "start_time": "2026-09-13T10:00:00Z",
   "end_time": "2026-09-13T11:00:00Z",
+  "current_time": "2026-09-13T11:00:30Z",
   "time_zone": "UTC",
   "includes_incomplete": false,
   "candles": [

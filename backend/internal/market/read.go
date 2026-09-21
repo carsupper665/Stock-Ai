@@ -27,6 +27,11 @@ var supportedOHLCVIntervals = map[string]bool{
 	"1m": true, "5m": true, "15m": true, "1h": true, "4h": true, "1d": true,
 }
 
+var intervalDurations = map[string]time.Duration{
+	"1m": time.Minute, "5m": 5 * time.Minute, "15m": 15 * time.Minute,
+	"1h": time.Hour, "4h": 4 * time.Hour, "1d": 24 * time.Hour,
+}
+
 type Candle struct {
 	OpenTime  time.Time `json:"open_time"`
 	CloseTime time.Time `json:"close_time"`
@@ -47,6 +52,7 @@ type OHLCVResult struct {
 	Interval           string    `json:"interval"`
 	StartTime          time.Time `json:"start_time"`
 	EndTime            time.Time `json:"end_time"`
+	CurrentTime        time.Time `json:"current_time"`
 	TimeZone           string    `json:"time_zone"`
 	IncludesIncomplete bool      `json:"includes_incomplete"`
 	Candles            []Candle  `json:"candles"`
@@ -93,6 +99,9 @@ type MarketInfoResult struct {
 	} `json:"backend_execution"`
 }
 
+// GetOHLCV 回傳已完成 Candle。start／end 皆可省略：end 缺省（或落在未來）時
+// 收斂到目前時刻，start 缺省时取 end 往前 limit 個 interval 的範圍（最新 N 根）。
+// CurrentTime 是 Backend 查詢時刻（UTC），讓模型知道「現在」在哪。
 func (r *Runtime) GetOHLCV(ctx context.Context, marketName, symbol, interval string, start, end time.Time, limit int) (OHLCVResult, error) {
 	source, marketName, symbol, err := r.readSource(marketName, symbol)
 	if err != nil {
@@ -101,12 +110,22 @@ func (r *Runtime) GetOHLCV(ctx context.Context, marketName, symbol, interval str
 	if !supportedOHLCVIntervals[interval] {
 		return OHLCVResult{}, fmt.Errorf("%w: %s", ErrUnsupportedInterval, interval)
 	}
-	start, end = start.UTC(), end.UTC()
-	if start.IsZero() || end.IsZero() || !start.Before(end) {
-		return OHLCVResult{}, ErrInvalidTimeRange
-	}
 	if limit < 1 || limit > MaxOHLCVLimit {
 		return OHLCVResult{}, ErrInvalidLimit
+	}
+	now := r.now().UTC()
+	end = end.UTC()
+	if end.IsZero() || end.After(now) {
+		end = now
+	}
+	start = start.UTC()
+	if start.IsZero() {
+		duration := intervalDurations[interval]
+		// 對齊到 interval 邊界，避免窗口起點落在 Candle 中間而漏掉第一根。
+		start = end.Add(-duration * time.Duration(limit)).Truncate(duration)
+	}
+	if !start.Before(end) {
+		return OHLCVResult{}, ErrInvalidTimeRange
 	}
 	reader, ok := source.(OHLCVSource)
 	if !ok {
@@ -118,7 +137,6 @@ func (r *Runtime) GetOHLCV(ctx context.Context, marketName, symbol, interval str
 	}
 	sort.Slice(candles, func(i, j int) bool { return candles[i].OpenTime.Before(candles[j].OpenTime) })
 	completed := make([]Candle, 0, min(len(candles), limit))
-	now := r.now().UTC()
 	for _, candle := range candles {
 		candle.OpenTime, candle.CloseTime = candle.OpenTime.UTC(), candle.CloseTime.UTC()
 		if candle.OpenTime.Before(start) || !candle.OpenTime.Before(end) || !candle.CloseTime.Before(now) {
@@ -134,7 +152,7 @@ func (r *Runtime) GetOHLCV(ctx context.Context, marketName, symbol, interval str
 	}
 	return OHLCVResult{
 		Market: marketName, Symbol: symbol, Interval: interval, StartTime: start, EndTime: end,
-		TimeZone: "UTC", IncludesIncomplete: false, Candles: completed,
+		CurrentTime: now, TimeZone: "UTC", IncludesIncomplete: false, Candles: completed,
 	}, nil
 }
 

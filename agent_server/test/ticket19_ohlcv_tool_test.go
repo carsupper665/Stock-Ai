@@ -83,6 +83,9 @@ func TestTicket19OHLCVToolSchemaBackendMappingAndCorrelatedResult(t *testing.T) 
 			if schema == nil || schema["additionalProperties"] != false {
 				t.Errorf("get_ohlcv schema = %#v", schema)
 			}
+			if required, _ := schema["required"].([]any); len(required) != 2 || required[0] != "symbol" || required[1] != "interval" {
+				t.Errorf("get_ohlcv required = %#v", required)
+			}
 			fixture.mu.Lock()
 			fixture.accountToken = "account-token-after-reset"
 			fixture.mu.Unlock()
@@ -96,7 +99,8 @@ func TestTicket19OHLCVToolSchemaBackendMappingAndCorrelatedResult(t *testing.T) 
 		if last.Role != "tool" || last.ToolCallID != "call-ohlcv" || last.Content == nil ||
 			!strings.Contains(*last.Content, `"columns":["open_time_unix_ms","open","high","low","close","volume"]`) ||
 			!strings.Contains(*last.Content, `"rows":[[`) || strings.Contains(*last.Content, `"candles"`) ||
-			strings.Contains(*last.Content, `"close_time"`) || !strings.Contains(*last.Content, `"ok":true`) {
+			strings.Contains(*last.Content, `"close_time"`) || !strings.Contains(*last.Content, `"ok":true`) ||
+			!strings.Contains(*last.Content, `"current_time":"2026-09-13T11:30:00Z"`) {
 			t.Errorf("correlated OHLCV result = %+v", last)
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("candles checked", "candles checked", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
@@ -111,7 +115,8 @@ func TestTicket19OHLCVToolSchemaBackendMappingAndCorrelatedResult(t *testing.T) 
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
 			"market": "crypto", "symbol": "BTCUSDT", "interval": "1m", "start_time": start, "end_time": end,
-			"time_zone": "UTC", "includes_incomplete": false,
+			"current_time": "2026-09-13T11:30:00Z",
+			"time_zone":    "UTC", "includes_incomplete": false,
 			"candles": []any{map[string]any{"open_time": start, "close_time": "2026-09-13T10:00:59.999Z", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 5}},
 		})
 	})
@@ -132,6 +137,67 @@ func TestTicket19OHLCVToolSchemaBackendMappingAndCorrelatedResult(t *testing.T) 
 	}
 }
 
+func TestTicket19OHLCVOmittedTimeRangeRequestsLatestCandlesWithCurrentTime(t *testing.T) {
+	fixture := newRuntimeFixture()
+	var round atomic.Int32
+	fixture.generate = func(w http.ResponseWriter, request *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role       string  `json:"role"`
+				Content    *string `json:"content"`
+				ToolCallID string  `json:"tool_call_id"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode generate request: %v", err)
+		}
+		if round.Add(1) == 1 {
+			// 只送 symbol／interval／limit：工具層不補時間，「最新 N 根」由 Backend 決定。
+			writeToolCall(w, "latest-ohlcv", "get_ohlcv", map[string]any{
+				"symbol": "BTCUSDT", "interval": "5m", "limit": 3,
+			})
+			return
+		}
+		last := body.Messages[len(body.Messages)-1]
+		if last.Role != "tool" || last.ToolCallID != "latest-ohlcv" || last.Content == nil ||
+			!strings.Contains(*last.Content, `"ok":true`) ||
+			!strings.Contains(*last.Content, `"current_time":"2026-09-13T11:30:00Z"`) ||
+			!strings.Contains(*last.Content, `"rows":[[`) || strings.Contains(*last.Content, `"candles"`) {
+			t.Errorf("correlated OHLCV result = %+v", last)
+		}
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("latest candles checked", "latest candles checked", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+	}
+	var marketCalls atomic.Int32
+	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
+		marketCalls.Add(1)
+		query := request.URL.Query()
+		if request.URL.Path != "/v1/market/ohlcv" || query.Get("symbol") != "BTCUSDT" || query.Get("interval") != "5m" ||
+			query.Get("limit") != "3" || query.Has("start_time") || query.Has("end_time") {
+			t.Errorf("Backend OHLCV request = %s", request.URL.RequestURI())
+		}
+		writeFixtureJSON(w, http.StatusOK, map[string]any{
+			"market": "crypto", "symbol": "BTCUSDT", "interval": "5m",
+			"start_time": "2026-09-13T11:15:00Z", "end_time": "2026-09-13T11:30:00Z",
+			"current_time": "2026-09-13T11:30:00Z",
+			"time_zone":    "UTC", "includes_incomplete": false,
+			"candles": []any{
+				map[string]any{"open_time": "2026-09-13T11:15:00Z", "close_time": "2026-09-13T11:19:59.999Z", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 5},
+				map[string]any{"open_time": "2026-09-13T11:20:00Z", "close_time": "2026-09-13T11:24:59.999Z", "open": 101, "high": 104, "low": 100, "close": 103, "volume": 7},
+				map[string]any{"open_time": "2026-09-13T11:25:00Z", "close_time": "2026-09-13T11:29:59.999Z", "open": 103, "high": 105, "low": 102, "close": 104, "volume": 6},
+			},
+		})
+	})
+	session := createStoppedSession(t, runtime, nil)
+	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodPost, "/api/v1/sessions/"+session.ID+"/start", agentAdminToken, nil)
+	if status != http.StatusAccepted {
+		t.Fatalf("start status=%d body=%s", status, raw)
+	}
+	run := waitForRunStatus(t, runtime, session.ID, 1, "completed")
+	if run.ModelCalls != 2 || run.ToolCalls != 1 || marketCalls.Load() != 1 {
+		t.Fatalf("Run/calls = %+v market_calls=%d", run, marketCalls.Load())
+	}
+}
+
 func TestTicket19OHLCVInvalidArgumentsBackendErrorsAndTimeoutUseCommonToolFlow(t *testing.T) {
 	start := "2026-09-13T10:00:00Z"
 	end := "2026-09-13T11:00:00Z"
@@ -144,6 +210,7 @@ func TestTicket19OHLCVInvalidArgumentsBackendErrorsAndTimeoutUseCommonToolFlow(t
 		toolTimeout  time.Duration
 	}{
 		{name: "invalid range", arguments: map[string]any{"symbol": "BTCUSDT", "interval": "1m", "start_time": end, "end_time": start}, wantCode: "INVALID_TOOL_ARGUMENTS"},
+		{name: "invalid timestamp", arguments: map[string]any{"symbol": "BTCUSDT", "interval": "1m", "start_time": "not-a-time"}, wantCode: "INVALID_TOOL_ARGUMENTS"},
 		{name: "limit exceeds cap", arguments: map[string]any{"symbol": "BTCUSDT", "interval": "1m", "start_time": start, "end_time": end, "limit": 501}, wantCode: "INVALID_TOOL_ARGUMENTS"},
 		{name: "Backend error preserved", arguments: map[string]any{"symbol": "UNKNOWN", "interval": "1m", "start_time": start, "end_time": end}, wantCode: "symbol_not_found", wantMarketIO: true,
 			backend: func(w http.ResponseWriter, _ *http.Request) {

@@ -105,7 +105,8 @@ func TestTicket19OHLCVHTTPContractFiltersSortsAndCapsCompletedCandles(t *testing
 	var calls atomic.Int32
 	source := marketReadSource{ohlcv: func(_ context.Context, symbol, interval string, gotStart, gotEnd time.Time, limit int) ([]market.Candle, error) {
 		calls.Add(1)
-		if symbol != "BTCUSDT" || interval != "1m" || !gotStart.Equal(start) || !gotEnd.Equal(end) || limit != 2 {
+		// 明確給的未來 end 會收斂到 now，不再向來源查詢未來區間。
+		if symbol != "BTCUSDT" || interval != "1m" || !gotStart.Equal(start) || !gotEnd.Equal(now) || limit != 2 {
 			t.Errorf("source query = %s %s %s %s %d", symbol, interval, gotStart, gotEnd, limit)
 		}
 		return []market.Candle{
@@ -128,6 +129,7 @@ func TestTicket19OHLCVHTTPContractFiltersSortsAndCapsCompletedCandles(t *testing
 		Interval           string          `json:"interval"`
 		StartTime          time.Time       `json:"start_time"`
 		EndTime            time.Time       `json:"end_time"`
+		CurrentTime        time.Time       `json:"current_time"`
 		TimeZone           string          `json:"time_zone"`
 		IncludesIncomplete bool            `json:"includes_incomplete"`
 		Candles            []market.Candle `json:"candles"`
@@ -136,7 +138,8 @@ func TestTicket19OHLCVHTTPContractFiltersSortsAndCapsCompletedCandles(t *testing
 		t.Fatalf("decode response: %v", err)
 	}
 	if calls.Load() != 1 || body.Market != "crypto" || body.Symbol != "BTCUSDT" || body.Interval != "1m" ||
-		!body.StartTime.Equal(start) || !body.EndTime.Equal(end) || body.TimeZone != "UTC" || body.IncludesIncomplete {
+		!body.StartTime.Equal(start) || !body.EndTime.Equal(now) || !body.CurrentTime.Equal(now) ||
+		body.TimeZone != "UTC" || body.IncludesIncomplete {
 		t.Fatalf("metadata = %+v calls=%d", body, calls.Load())
 	}
 	if len(body.Candles) != 2 || !body.Candles[0].OpenTime.Equal(start) || !body.Candles[1].OpenTime.Equal(start.Add(2*time.Minute)) {
@@ -201,6 +204,85 @@ func TestTicket19OHLCVHTTPValidationEmptyAndSourceFailures(t *testing.T) {
 		if status != test.status || !bytes.Contains(raw, []byte(`"error":"`+test.code+`"`)) {
 			t.Fatalf("error %v status=%d body=%s", test.err, status, raw)
 		}
+	}
+}
+
+func TestTicket19OHLCVOmittedTimesDefaultToLatestCompletedCandles(t *testing.T) {
+	now := time.Date(2026, 9, 13, 10, 3, 30, 0, time.UTC)
+	source := marketReadSource{ohlcv: func(_ context.Context, symbol, interval string, gotStart, gotEnd time.Time, limit int) ([]market.Candle, error) {
+		// 兩者皆省略：end 收斂到 now，start 取 end 往前 limit 個 interval 並對齊邊界。
+		if symbol != "BTCUSDT" || interval != "1m" || !gotStart.Equal(now.Add(-2*time.Minute).Truncate(time.Minute)) ||
+			!gotEnd.Equal(now) || limit != 2 {
+			t.Errorf("source query = %s %s %s %s %d", symbol, interval, gotStart, gotEnd, limit)
+		}
+		return []market.Candle{
+			{OpenTime: now.Add(-3 * time.Minute), CloseTime: now.Add(-2*time.Minute - time.Millisecond), Open: 90, High: 91, Low: 89, Close: 90, Volume: 1},
+			{OpenTime: now.Add(-2 * time.Minute), CloseTime: now.Add(-time.Minute - time.Millisecond), Open: 100, High: 103, Low: 99, Close: 102, Volume: 10},
+			{OpenTime: now.Add(-time.Minute), CloseTime: now.Add(-time.Millisecond), Open: 102, High: 106, Low: 101, Close: 105, Volume: 12},
+			{OpenTime: now, CloseTime: now.Add(time.Minute - time.Millisecond), Open: 105, High: 110, Low: 104, Close: 108, Volume: 20},
+		}, nil
+	}}
+	handler := newMarketReadAPI(t, map[string]market.Source{market.Crypto: source}, now)
+	status, raw := marketRequest(t, handler, "/v1/market/ohlcv?symbol=BTCUSDT&interval=1m&limit=2")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body = %s", status, raw)
+	}
+	var body struct {
+		StartTime   time.Time       `json:"start_time"`
+		EndTime     time.Time       `json:"end_time"`
+		CurrentTime time.Time       `json:"current_time"`
+		Candles     []market.Candle `json:"candles"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	wantStart := now.Add(-2 * time.Minute).Truncate(time.Minute)
+	if !body.StartTime.Equal(wantStart) || !body.EndTime.Equal(now) || !body.CurrentTime.Equal(now) {
+		t.Fatalf("range = %s %s now=%s", body.StartTime, body.EndTime, body.CurrentTime)
+	}
+	if len(body.Candles) != 2 ||
+		!body.Candles[0].OpenTime.Equal(now.Add(-2*time.Minute)) || !body.Candles[1].OpenTime.Equal(now.Add(-time.Minute)) {
+		t.Fatalf("latest candles = %+v", body.Candles)
+	}
+}
+
+func TestTicket19OHLCVSingleOmittedTimeKeepsExplicitBoundAndClampsRest(t *testing.T) {
+	now := time.Date(2026, 9, 13, 10, 5, 0, 0, time.UTC)
+	endOnly := time.Date(2026, 9, 13, 10, 4, 0, 0, time.UTC)
+	source := marketReadSource{ohlcv: func(_ context.Context, _, _ string, gotStart, gotEnd time.Time, limit int) ([]market.Candle, error) {
+		if !gotStart.Equal(endOnly.Add(-3*time.Minute)) || !gotEnd.Equal(endOnly) || limit != 3 {
+			t.Errorf("end-only source query = %s %s %d", gotStart, gotEnd, limit)
+		}
+		return nil, nil
+	}}
+	handler := newMarketReadAPI(t, map[string]market.Source{market.Crypto: source}, now)
+	status, raw := marketRequest(t, handler, "/v1/market/ohlcv?symbol=BTCUSDT&interval=1m&end_time="+url.QueryEscape(endOnly.Format(time.RFC3339))+"&limit=3")
+	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"candles":[]`)) {
+		t.Fatalf("end-only status=%d body=%s", status, raw)
+	}
+
+	source = marketReadSource{ohlcv: func(_ context.Context, _, _ string, gotStart, gotEnd time.Time, limit int) ([]market.Candle, error) {
+		if !gotStart.Equal(now.Add(-time.Hour)) || !gotEnd.Equal(now) || limit != market.DefaultOHLCVLimit {
+			t.Errorf("start-only source query = %s %s %d", gotStart, gotEnd, limit)
+		}
+		return nil, nil
+	}}
+	handler = newMarketReadAPI(t, map[string]market.Source{market.Crypto: source}, now)
+	status, raw = marketRequest(t, handler, "/v1/market/ohlcv?symbol=BTCUSDT&interval=1h&start_time="+url.QueryEscape(now.Add(-time.Hour).Format(time.RFC3339)))
+	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"candles":[]`)) {
+		t.Fatalf("start-only status=%d body=%s", status, raw)
+	}
+
+	// start 落在未來（end 缺省收斂到 now）時是非法範圍，不觸碰來源。
+	var calls atomic.Int32
+	source = marketReadSource{ohlcv: func(context.Context, string, string, time.Time, time.Time, int) ([]market.Candle, error) {
+		calls.Add(1)
+		return nil, nil
+	}}
+	handler = newMarketReadAPI(t, map[string]market.Source{market.Crypto: source}, now)
+	status, raw = marketRequest(t, handler, "/v1/market/ohlcv?symbol=BTCUSDT&interval=1m&start_time="+url.QueryEscape(now.Add(time.Hour).Format(time.RFC3339)))
+	if status != http.StatusBadRequest || !bytes.Contains(raw, []byte(`"error":"invalid_request"`)) || calls.Load() != 0 {
+		t.Fatalf("future start status=%d calls=%d body=%s", status, calls.Load(), raw)
 	}
 }
 
