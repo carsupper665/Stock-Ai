@@ -940,8 +940,9 @@ Session／Run。Backend 只驗證欄位完整，帳號身分仍由 Token 決定�
   不會平到重開後的部位。
 * 舊資料 migration 後來源欄位為 NULL，對外顯示 `null`，不虛構 run_id；舊資料不補 Ledger。
 
-既有 view 只新增欄位：Order 多 `source`、`trigger`（省略表示手動）；Trade 多 `source`；
-Position 多 `stop_loss_source`、`take_profit_source`。
+既有 view 只新增欄位：Order 多 `source`、`trigger`（省略表示手動）、`position_id`
+（成交後仍存活的部位 id；完全平倉、未成交或掛單時省略，不落庫）；
+Trade 多 `source`；Position 多 `stop_loss_source`、`take_profit_source`。
 
 ## 21.3 Ledger
 

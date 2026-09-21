@@ -9,6 +9,7 @@ type orderView struct {
 	ID             string      `json:"id"`
 	Status         string      `json:"status"`
 	Type           string      `json:"type"`
+	PositionID     string      `json:"position_id"`
 	FilledQuantity float64     `json:"filled_quantity"`
 	AvgFillPrice   float64     `json:"avg_fill_price"`
 	Fee            float64     `json:"fee"`
@@ -59,6 +60,9 @@ func TestTicket22MarketOrderRecordsSourceOnOrderTradeAndLedgerFill(t *testing.T)
 	}](t, raw)
 	if status != http.StatusOK || len(positions.Positions) != 1 {
 		t.Fatalf("positions = %s", raw)
+	}
+	if order.PositionID != positions.Positions[0].ID {
+		t.Fatalf("place_order position_id = %q, position = %q", order.PositionID, positions.Positions[0].ID)
 	}
 
 	entries := backend.ledger(t, token, "")

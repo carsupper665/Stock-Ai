@@ -90,6 +90,8 @@ type Order struct {
 	Fee            float64
 	RealizedPnL    float64
 	RejectReason   string `gorm:"size:128"`
+	// PositionID 是成交後存活的部位；完全平倉時為空。只存在於回應，不落庫。
+	PositionID string `gorm:"-"`
 
 	// Source 是建立這張單的 Run；Trigger 標記由停損停利自動產生的平倉單。
 	Source  Source `gorm:"embedded;embeddedPrefix:source_"`

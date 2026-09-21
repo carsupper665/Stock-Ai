@@ -399,7 +399,7 @@ func ProjectBackendResult(method, path string, result map[string]json.RawMessage
 	case method == http.MethodGet && path == "/v1/market/info":
 		return ProjectMarketInfo(result)
 	case method == http.MethodPost && path == "/v1/orders":
-		return projectRequiredToolFields(result, []string{"id", "status"}, "id", "status", "filled_quantity", "avg_fill_price", "fee", "realized_pnl", "reject_reason")
+		return projectRequiredToolFields(result, []string{"id", "status"}, "id", "status", "position_id", "filled_quantity", "avg_fill_price", "fee", "realized_pnl", "reject_reason")
 	case method == http.MethodPost && strings.HasSuffix(path, "/cancel"):
 		return projectRequiredToolFields(result, []string{"id", "status"}, "id", "status")
 	case method == http.MethodPost && strings.HasSuffix(path, "/close"):

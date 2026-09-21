@@ -40,6 +40,7 @@ type orderView struct {
 	TakeProfit     float64     `json:"take_profit,omitempty"`
 	ReduceOnly     bool        `json:"reduce_only,omitempty"`
 	Status         string      `json:"status"`
+	PositionID     string      `json:"position_id,omitempty"`
 	RejectReason   string      `json:"reject_reason,omitempty"`
 	FilledQuantity float64     `json:"filled_quantity"`
 	AvgFillPrice   float64     `json:"avg_fill_price,omitempty"`
@@ -57,6 +58,7 @@ func viewOrder(o *database.Order) orderView {
 		Quantity: round(o.Quantity), Price: round(o.Price), Leverage: o.Leverage,
 		StopLoss: round(o.StopLoss), TakeProfit: round(o.TakeProfit), ReduceOnly: o.ReduceOnly,
 		Status: o.Status, RejectReason: o.RejectReason, FilledQuantity: round(o.FilledQuantity),
+		PositionID:   o.PositionID,
 		AvgFillPrice: round(o.AvgFillPrice), Fee: round(o.Fee), RealizedPnL: round(o.RealizedPnL),
 		Trigger: o.Trigger, Source: viewSource(o.Source),
 		CreatedAt: o.CreatedAt.UTC(),

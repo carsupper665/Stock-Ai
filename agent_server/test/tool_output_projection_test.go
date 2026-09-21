@@ -19,7 +19,7 @@ func TestToolBoundaryProjectsPositionAndOrderDecisionFields(t *testing.T) {
 			}}})
 		case "POST /v1/orders":
 			writeFixtureJSON(w, http.StatusCreated, map[string]any{
-				"id": "ord_1", "status": "filled", "filled_quantity": 0.25, "avg_fill_price": 61000,
+				"id": "ord_1", "status": "filled", "position_id": "pos_1", "filled_quantity": 0.25, "avg_fill_price": 61000,
 				"fee": 6.1, "realized_pnl": 0, "symbol": "BTCUSDT", "quantity": 0.25,
 				"source": map[string]any{"session_id": "private", "run_id": 9}, "internal_echo": "drop",
 			})
@@ -65,12 +65,12 @@ func TestToolBoundaryProjectsPositionAndOrderDecisionFields(t *testing.T) {
 	if err := json.Unmarshal(order.Result, &orderBody); err != nil {
 		t.Fatalf("decode compact order: %s (%v)", order.Result, err)
 	}
-	for _, field := range []string{"id", "status", "filled_quantity", "avg_fill_price", "fee", "realized_pnl"} {
+	for _, field := range []string{"id", "status", "position_id", "filled_quantity", "avg_fill_price", "fee", "realized_pnl"} {
 		if _, ok := orderBody[field]; !ok {
 			t.Fatalf("compact order missing %q: %s", field, order.Result)
 		}
 	}
-	if len(orderBody) != 6 {
+	if len(orderBody) != 7 {
 		t.Fatalf("order projection leaked Backend echo: %s", order.Result)
 	}
 }

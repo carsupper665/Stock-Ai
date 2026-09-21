@@ -98,6 +98,9 @@ func TestTicket23ClosePositionPartialAndFullTraceToClosingRun(t *testing.T) {
 		"symbol": "BTCUSDT", "product": "futures", "side": "buy", "type": "market", "quantity": 0.3, "leverage": 10, "source": agentSource("s_1", 1),
 	})
 	positionID := listPositions(t, backend, token).Positions[0].ID
+	if opened.PositionID != positionID {
+		t.Fatalf("place_order position_id = %q, position = %q", opened.PositionID, positionID)
+	}
 	backend.setPrice(t, 61000)
 
 	if status, raw := backend.request(t, http.MethodPost, "/v1/positions/"+positionID+"/close", otherToken, map[string]any{"quantity": 0.1}); status != http.StatusNotFound {
@@ -112,6 +115,9 @@ func TestTicket23ClosePositionPartialAndFullTraceToClosingRun(t *testing.T) {
 	if status != http.StatusOK || partial.Status != "filled" || partial.RealizedPnL != 100 || partial.Fee != 2.44 || partial.Trigger != "" ||
 		partial.Source == nil || partial.Source.RunID != 2 || partial.ID == opened.ID {
 		t.Fatalf("partial close = %d %s", status, raw)
+	}
+	if partial.PositionID != positionID {
+		t.Fatalf("partial close position_id = %q, position = %q", partial.PositionID, positionID)
 	}
 	positions := listPositions(t, backend, token)
 	if len(positions.Positions) != 1 || positions.Positions[0].ID != positionID || positions.Positions[0].Quantity != 0.2 || positions.Positions[0].EntryPrice != 60000 {
@@ -128,6 +134,9 @@ func TestTicket23ClosePositionPartialAndFullTraceToClosingRun(t *testing.T) {
 	full := decodeJSON[orderView](t, raw)
 	if status != http.StatusOK || full.Status != "filled" || full.RealizedPnL != 200 || full.Fee != 4.88 || full.Source.RunID != 3 {
 		t.Fatalf("full close = %d %s", status, raw)
+	}
+	if full.PositionID != "" {
+		t.Fatalf("full close position_id = %q, want omitted", full.PositionID)
 	}
 	if positions := listPositions(t, backend, token); len(positions.Positions) != 0 {
 		t.Fatalf("position remained after full close: %+v", positions)

@@ -72,6 +72,10 @@ func (s *Service) settle(ctx context.Context, tx *database.Store, order *databas
 	order.AvgFillPrice = price
 	order.Fee = fee
 	order.RealizedPnL = realized
+	// 回應用：成交後仍存活的部位；完全平倉時保持為空。
+	if updated != nil {
+		order.PositionID = updated.ID
+	}
 
 	tradeID, err := id.New("trd_")
 	if err != nil {
