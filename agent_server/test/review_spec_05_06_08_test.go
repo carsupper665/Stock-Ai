@@ -16,6 +16,9 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	server "stock-ai/agent-server/internal/server"
 )
 
 type drainingRuntimeHandler struct {
@@ -78,7 +81,7 @@ func TestSPEC05ServerQuiescesRuntimeBeforeWaitingForSlowHTTP(t *testing.T) {
 			close(application.release)
 		}
 	}()
-	server, err := common.NewServer(common.NewEventLoopWithClock(newManualClock()), nil,
+	server, err := server.NewServer(eventloop.NewEventLoopWithClock(newManualClock()), nil,
 		[]io.Closer{runtime}, nil, 2*time.Second, application)
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)

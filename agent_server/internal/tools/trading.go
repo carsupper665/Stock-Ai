@@ -372,6 +372,9 @@ func number(raw json.RawMessage, name string, positive bool) (json.RawMessage, e
 	if positive && value <= 0 {
 		return nil, fmt.Errorf("%s must be greater than 0", name)
 	}
+	if value < 0 {
+		return nil, fmt.Errorf("%s must not be negative", name)
+	}
 	return json.RawMessage(trimmed), nil
 }
 
@@ -380,44 +383,58 @@ func ProjectBackendResult(method, path string, result map[string]json.RawMessage
 	case method == http.MethodGet && path == "/v1/account":
 		return SelectFields(result, "id", "balance", "locked_margin", "available", "unrealized_pnl", "equity"), nil
 	case method == http.MethodGet && path == "/v1/positions":
-		return projectList(result, "positions", "id", "market", "symbol", "product", "side", "quantity", "entry_price", "mark_price", "leverage", "unrealized_pnl", "stop_loss", "take_profit")
+		return projectToolList(result, "positions", "id", "market", "symbol", "product", "side", "quantity", "entry_price", "mark_price", "leverage", "unrealized_pnl", "stop_loss", "take_profit")
 	case method == http.MethodGet && path == "/v1/orders":
-		return projectList(result, "orders", orderToolFields...)
+		return projectToolList(result, "orders", orderToolFields...)
+	case method == http.MethodGet && strings.HasPrefix(path, "/v1/orders/"):
+		return projectRequiredToolFields(result, []string{"id", "status"}, orderToolFields...)
 	case method == http.MethodGet && path == "/v1/trades":
-		return projectList(result, "trades", "id", "order_id", "symbol", "side", "quantity", "price", "fee", "created_at")
+		return projectToolList(result, "trades", "id", "order_id", "market", "symbol", "product", "side", "quantity", "price", "fee", "realized_pnl")
 	case method == http.MethodGet && path == "/v1/ledger":
-		return projectList(result, "events", "seq", "type", "symbol", "side", "quantity", "price", "fee", "run_id", "created_at")
-	case strings.HasPrefix(path, "/v1/orders/") && (method == http.MethodGet || method == http.MethodPost):
-		return projectRequiredFields(result, []string{"id", "status"}, orderToolFields...)
-	case strings.HasPrefix(path, "/v1/positions/") && (method == http.MethodPost || method == http.MethodDelete):
-		return projectRequiredFields(result, []string{"id", "status"}, "id", "symbol", "side", "quantity", "avg_close_price", "realized_pnl", "fee")
+		return projectToolList(result, "entries", "seq", "event", "order_id", "trade_id", "position_id", "trigger", "quantity", "price", "fee", "realized_pnl", "balance_delta", "balance_after", "stop_loss", "take_profit", "created_at")
+	case method == http.MethodGet && path == "/v1/market/price":
+		return SelectFields(result, "market", "symbol", "price", "updated_at"), nil
+	case method == http.MethodGet && path == "/v1/market/ohlcv":
+		return ProjectOHLCV(result)
+	case method == http.MethodGet && path == "/v1/market/info":
+		return ProjectMarketInfo(result)
+	case method == http.MethodPost && path == "/v1/orders":
+		return projectRequiredToolFields(result, []string{"id", "status"}, "id", "status", "filled_quantity", "avg_fill_price", "fee", "realized_pnl", "reject_reason")
+	case method == http.MethodPost && strings.HasSuffix(path, "/cancel"):
+		return projectRequiredToolFields(result, []string{"id", "status"}, "id", "status")
+	case method == http.MethodPost && strings.HasSuffix(path, "/close"):
+		return projectRequiredToolFields(result, []string{"id", "status"}, "id", "status", "filled_quantity", "avg_fill_price", "fee", "realized_pnl")
+	case method == http.MethodPatch && strings.HasPrefix(path, "/v1/positions/"):
+		return projectRequiredToolFields(result, []string{"id"}, "id", "stop_loss", "take_profit")
 	default:
-		return nil, fmt.Errorf("no projection for %s %s", method, path)
+		return result, nil
 	}
 }
 
 var orderToolFields = []string{
-	"id", "symbol", "side", "type", "quantity", "filled_quantity", "price", "avg_fill_price", "fee",
-	"status", "reject_reason", "created_at", "updated_at",
+	"id", "market", "symbol", "product", "side", "type", "quantity", "price", "leverage",
+	"stop_loss", "take_profit", "reduce_only", "status", "reject_reason", "filled_quantity",
+	"avg_fill_price", "fee", "realized_pnl", "trigger", "created_at",
 }
 
-func projectRequiredFields(source map[string]json.RawMessage, required []string, fields ...string) (any, error) {
+func projectRequiredToolFields(source map[string]json.RawMessage, required []string, fields ...string) (any, error) {
 	for _, field := range required {
-		if len(source[field]) == 0 {
+		var value string
+		if raw, ok := source[field]; !ok || json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value) == "" {
 			return nil, fmt.Errorf("%s is missing or invalid", field)
 		}
 	}
 	return SelectFields(source, fields...), nil
 }
 
-func projectList(result map[string]json.RawMessage, name string, fields ...string) (any, error) {
+func projectToolList(result map[string]json.RawMessage, name string, fields ...string) (any, error) {
 	var items []map[string]json.RawMessage
 	if raw, ok := result[name]; !ok || json.Unmarshal(raw, &items) != nil || items == nil {
-		return nil, fmt.Errorf("%s are missing or invalid", name)
+		return nil, fmt.Errorf("%s is missing or invalid", name)
 	}
 	projected := make([]map[string]json.RawMessage, 0, len(items))
 	for _, item := range items {
 		projected = append(projected, SelectFields(item, fields...))
 	}
-	return projected, nil
+	return map[string]any{name: projected}, nil
 }

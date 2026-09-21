@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"stock-ai/agent-server/internal/events"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
 )
@@ -238,7 +239,7 @@ func (r *AgentRuntime) stageHistoryRunIDsTx(tx *sql.Tx, sessionID string, runIDs
 	return r.stageHistoryStartsTx(tx, sessionID, starts)
 }
 
-func clearanceHistoryRunIDs(currentRunID int64, clearance sessionEventClearance) []int64 {
+func clearanceHistoryRunIDs(currentRunID int64, clearance events.Clearance) []int64 {
 	runIDs := []int64{currentRunID}
 	for _, event := range clearance.Events {
 		runIDs = append(runIDs, event.CreatedRunID)

@@ -7,50 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
-)
 
-const maxTriggersPerRun = 10
+	"stock-ai/agent-server/internal/events"
+)
 
 type eventRunLaunch struct {
 	session Session
 	runID   int64
 }
 
-// enqueueTriggerTx appends one trigger to the Session's ordered list. The AUTOINCREMENT id is
-// the Server-generated arrival sequence; it is never reused, so order survives crashes.
-func enqueueTriggerTx(tx *sql.Tx, sessionID string, payload json.RawMessage, now time.Time) error {
-	_, err := tx.Exec(`INSERT INTO pending_triggers (session_id, payload_json, created_at) VALUES (?, ?, ?)`,
-		sessionID, string(payload), formatEventTime(now))
-	return err
-}
-
-func pendingPayloadsTx(tx *sql.Tx, sessionID string, limit int) ([]json.RawMessage, error) {
-	query := `SELECT payload_json FROM pending_triggers WHERE session_id = ? ORDER BY id`
-	args := []any{sessionID}
-	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
-	}
-	rows, err := tx.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	payloads := make([]json.RawMessage, 0)
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		if !json.Valid([]byte(payload)) {
-			return nil, fmt.Errorf("invalid pending Trigger for Session %s", sessionID)
-		}
-		payloads = append(payloads, json.RawMessage(payload))
-	}
-	return payloads, rows.Err()
-}
-
-// startPendingRunTx consumes the next batch (at most maxTriggersPerRun, arrival order, no
+// startPendingRunTx consumes the next batch (at most events.MaxTriggersPerRun, arrival order, no
 // reordering) into a new running Run of a running Session. Run insert, current_run_id
 // increment, and queue deletion share the caller's transaction so a crash can neither lose
 // nor duplicate a trigger. It returns nil when the Session is not running or the queue is empty.
@@ -62,7 +28,7 @@ func (r *AgentRuntime) startPendingRunTx(tx *sql.Tx, sessionID string) (*eventRu
 	if err != nil {
 		return nil, err
 	}
-	payloads, err := pendingPayloadsTx(tx, sessionID, maxTriggersPerRun)
+	payloads, err := events.PendingPayloadsTx(tx, sessionID, events.MaxTriggersPerRun)
 	if err != nil || len(payloads) == 0 {
 		return nil, err
 	}

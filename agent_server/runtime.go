@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"stock-ai/agent-server/internal/events"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
 
@@ -214,7 +215,7 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 			retry_of_run_id INTEGER, retry_attempt INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (session_id, run_id)
 		)`,
-	}, eventSchema...), historySchema...), memorySchema...) {
+	}, events.Schema...), historySchema...), memorySchema...) {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("initialize agent database: %w", err)
@@ -2007,7 +2008,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 		targetStatus = "deleted"
 		clearOutcome = "cleared_by_delete"
 	}
-	clearance, err := r.clearSessionEventsTx(tx, sessionID, nowTime, clearOutcome)
+	clearance, err := events.ClearSessionTx(tx, sessionID, nowTime, clearOutcome)
 	if err != nil {
 		requestCanceled := requestCancellationCausedPersistenceError(request.Context(), err)
 		if !requestCanceled {
@@ -2141,7 +2142,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 	writeRuntimeJSON(w, status, map[string]any{"session": session, "cancellation_pending": pending})
 }
 
-func restartContextFor(tx *sql.Tx, sessionID string, runID int64, interrupting bool, clearance sessionEventClearance) (any, error) {
+func restartContextFor(tx *sql.Tx, sessionID string, runID int64, interrupting bool, clearance events.Clearance) (any, error) {
 	if runID == 0 {
 		return nil, nil
 	}

@@ -133,11 +133,6 @@ func validOHLCVInterval(interval string) bool {
 }
 
 func ProjectOHLCV(result map[string]json.RawMessage) (any, error) {
-	for _, field := range []string{"market", "symbol", "interval", "start_time", "end_time"} {
-		if len(result[field]) == 0 {
-			return nil, fmt.Errorf("%s is missing or invalid", field)
-		}
-	}
 	var candles []map[string]json.RawMessage
 	if raw, ok := result["candles"]; !ok || json.Unmarshal(raw, &candles) != nil || candles == nil {
 		return nil, errors.New("candles are missing or invalid")
@@ -184,7 +179,7 @@ func ProjectMarketInfo(result map[string]json.RawMessage) (any, error) {
 	}
 	var execution map[string]json.RawMessage
 	if raw, ok := result["backend_execution"]; !ok || json.Unmarshal(raw, &execution) != nil || execution == nil {
-		return nil, errors.New("backend_execution are missing or invalid")
+		return nil, errors.New("backend_execution is missing or invalid")
 	}
 	if value, ok := execution["source_rules_enforced"]; ok {
 		projected["source_rules_enforced"] = value

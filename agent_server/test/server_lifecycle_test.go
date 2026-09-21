@@ -13,15 +13,16 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	server "stock-ai/agent-server/internal/server"
 )
 
 func TestServerStartsHTTPAndCancelsBackgroundWorkOnShutdown(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	taskStarted := make(chan struct{})
 	taskCanceled := make(chan struct{})
-	server, err := common.NewServer(loop, []common.BackgroundTask{{
+	server, err := server.NewServer(loop, []server.BackgroundTask{{
 		Name:     "observable-background-work",
 		Interval: time.Minute,
 		Run: func(ctx context.Context) error {
@@ -150,8 +151,8 @@ func TestServerShutdownIsIdempotentAndClosesResourcesInOrder(t *testing.T) {
 			return nil
 		})
 	}
-	server, err := common.NewServer(
-		common.NewEventLoopWithClock(newManualClock()),
+	server, err := server.NewServer(
+		eventloop.NewEventLoopWithClock(newManualClock()),
 		nil,
 		[]io.Closer{resource("database"), resource("logs")},
 		nil,
@@ -183,13 +184,13 @@ func TestServerShutdownIsIdempotentAndClosesResourcesInOrder(t *testing.T) {
 }
 
 func TestNewServerRollsBackTasksAfterPartialInitializationFailure(t *testing.T) {
-	loop := common.NewEventLoopWithClock(newManualClock())
-	_, err := common.NewServer(loop, []common.BackgroundTask{
+	loop := eventloop.NewEventLoopWithClock(newManualClock())
+	_, err := server.NewServer(loop, []server.BackgroundTask{
 		{Name: "registered-first", Interval: time.Minute, Run: func(context.Context) error { return nil }},
 		{Name: "invalid", Interval: 0, Run: func(context.Context) error { return nil }},
 	}, nil, nil, time.Second)
-	if !errors.Is(err, common.ErrIntervalInvalid) {
-		t.Fatalf("NewServer() error = %v, want %v", err, common.ErrIntervalInvalid)
+	if !errors.Is(err, eventloop.ErrIntervalInvalid) {
+		t.Fatalf("NewServer() error = %v, want %v", err, eventloop.ErrIntervalInvalid)
 	}
 	if !loop.IsEmpty() {
 		t.Fatal("partially registered tasks remain after initialization failure")
@@ -198,11 +199,11 @@ func TestNewServerRollsBackTasksAfterPartialInitializationFailure(t *testing.T) 
 
 func TestServerShutdownTimeoutReportsWorkAndDefersResourceClose(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	resourceClosed := make(chan struct{})
-	server, err := common.NewServer(loop, []common.BackgroundTask{{
+	server, err := server.NewServer(loop, []server.BackgroundTask{{
 		Name:     "non-cooperative",
 		Interval: time.Minute,
 		Run: func(context.Context) error {
@@ -254,11 +255,11 @@ func TestServerShutdownTimeoutReportsWorkAndDefersResourceClose(t *testing.T) {
 
 func TestBackgroundTaskErrorAndPanicDoNotStopServer(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	wantError := errors.New("background failure")
 	errorRan := make(chan struct{})
 	panicRan := make(chan struct{})
-	server, err := common.NewServer(loop, []common.BackgroundTask{
+	server, err := server.NewServer(loop, []server.BackgroundTask{
 		{Name: "error", Interval: time.Minute, Run: func(context.Context) error {
 			close(errorRan)
 			return wantError

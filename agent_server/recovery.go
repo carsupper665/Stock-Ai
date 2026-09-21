@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"stock-ai/agent-server/internal/events"
 )
 
 const (
@@ -139,7 +141,7 @@ func (r *AgentRuntime) recoveryContext(sessionID string, runID int64) (map[strin
 		"recent_progress":  []restartProgressEntry{},
 		"progress_omitted": 0,
 		"triggers":         json.RawMessage("null"),
-		"active_events":    []Event{},
+		"active_events":    []events.Event{},
 		"pending_triggers": []json.RawMessage{},
 		"data_gaps": []string{
 			"Provider and Tool calls are never replayed after restart.",
@@ -164,7 +166,7 @@ func (r *AgentRuntime) recoveryContext(sessionID string, runID int64) (map[strin
 			contextBody["triggers"] = previous.Triggers
 		}
 	}
-	events, err := sessionEvents(tx, sessionID)
+	events, err := events.SessionEvents(tx, sessionID)
 	if err != nil {
 		return nil, err
 	}

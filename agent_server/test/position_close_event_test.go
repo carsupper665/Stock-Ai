@@ -10,6 +10,8 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+
+	events "stock-ai/agent-server/internal/events"
 )
 
 type positionCloseBackendState struct {
@@ -59,7 +61,7 @@ func (s *positionCloseBackendState) serve(w http.ResponseWriter, request *http.R
 	writeFixtureJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
 }
 
-func createPositionCloseEvent(t *testing.T, state *positionCloseBackendState) (*common.AgentRuntime, *scriptedGateway, common.Session, common.Event) {
+func createPositionCloseEvent(t *testing.T, state *positionCloseBackendState) (*common.AgentRuntime, *scriptedGateway, common.Session, events.Event) {
 	t.Helper()
 	backend := newTradingBackend(t, state.serve)
 	backend.addAccount(testAccountID, "position-token")

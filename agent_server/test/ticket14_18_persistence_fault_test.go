@@ -12,6 +12,9 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	server "stock-ai/agent-server/internal/server"
 )
 
 func TestTicket14To18PredispatchPersistenceFailurePerformsNoExternalIO(t *testing.T) {
@@ -266,11 +269,11 @@ func getSessionForTest(t *testing.T, runtime *common.AgentRuntime, sessionID str
 
 func serveRuntimeForFaultTest(t *testing.T, runtime *common.AgentRuntime) (string, func()) {
 	t.Helper()
-	loop, err := common.NewEventLoop()
+	loop, err := eventloop.NewEventLoop()
 	if err != nil {
 		t.Fatalf("NewEventLoop() error = %v", err)
 	}
-	server, err := common.NewServer(loop, nil, nil, nil, time.Second, runtime.Handler())
+	server, err := server.NewServer(loop, nil, nil, nil, time.Second, runtime.Handler())
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}

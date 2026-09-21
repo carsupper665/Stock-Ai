@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	events "stock-ai/agent-server/internal/events"
+	server "stock-ai/agent-server/internal/server"
 )
 
 func changeEventCall(id, symbol string, basePrice float64, direction string, pct float64) map[string]any {
@@ -136,8 +138,8 @@ func TestTicket31ResidentTaskExpiresEventsExactlyOnceWithTraceAndWithoutTouching
 	fixture.generate = script.handler(t)
 	databasePath := filepath.Join(t.TempDir(), "agent.db")
 	runtime := openEventRuntime(t, fixture, book, databasePath)
-	loop := common.NewEventLoopWithClock(clock)
-	server, err := common.NewServer(loop, newEventTasks(runtime, clock).all(), nil, nil, time.Second, runtime.Handler())
+	loop := eventloop.NewEventLoopWithClock(clock)
+	server, err := server.NewServer(loop, newEventTasks(runtime, clock).all(), nil, nil, time.Second, runtime.Handler())
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
@@ -149,8 +151,8 @@ func TestTicket31ResidentTaskExpiresEventsExactlyOnceWithTraceAndWithoutTouching
 		t.Fatalf("Start() error = %v", err)
 	}
 	t.Cleanup(func() { _ = server.Shutdown() })
-	session, events := armPriceEvents(t, script, runtime, nil)
-	above, timer, keep := events[0], events[1], events[2]
+	session, active := armPriceEvents(t, script, runtime, nil)
+	above, timer, keep := active[0], active[1], active[2]
 
 	// Rounds only ever observe whole-minute clock values, so the timer (due 1s before expiry)
 	// is first seen when it is already expired: the shared expiry rule wins over firing.
@@ -170,7 +172,7 @@ func TestTicket31ResidentTaskExpiresEventsExactlyOnceWithTraceAndWithoutTouching
 	if ids := startedRunIDs(t, runtime, session.ID); len(ids) != 1 {
 		t.Fatalf("expired events created Runs: %v", ids)
 	}
-	for _, expired := range []common.Event{above, timer} {
+	for _, expired := range []events.Event{above, timer} {
 		if outcomes := eventLogOutcomes(t, databasePath, expired.ID); len(outcomes) != 1 || outcomes[0] != "expired" {
 			t.Fatalf("event %s log = %v, want exactly one expired trace", expired.ID, outcomes)
 		}

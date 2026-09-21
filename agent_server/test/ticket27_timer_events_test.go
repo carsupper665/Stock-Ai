@@ -14,6 +14,9 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	server "stock-ai/agent-server/internal/server"
 )
 
 type runWithTriggers struct {
@@ -115,8 +118,8 @@ func TestTicket27ResidentEventTaskFiresTimerThroughServerEventLoop(t *testing.T)
 	)
 	fixture.generate = script.handler(t)
 	runtime, _, _ := fixture.open(t, "")
-	loop := common.NewEventLoopWithClock(clock)
-	server, err := common.NewServer(loop, newEventTasks(runtime, clock).all(), nil, nil, time.Second, runtime.Handler())
+	loop := eventloop.NewEventLoopWithClock(clock)
+	srv, err := server.NewServer(loop, newEventTasks(runtime, clock).all(), nil, nil, time.Second, runtime.Handler())
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
@@ -124,10 +127,10 @@ func TestTicket27ResidentEventTaskFiresTimerThroughServerEventLoop(t *testing.T)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}
-	if err := server.Start(listener); err != nil {
+	if err := srv.Start(listener); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	t.Cleanup(func() { _ = server.Shutdown() })
+	t.Cleanup(func() { _ = srv.Shutdown() })
 
 	session := createStoppedSession(t, runtime, nil)
 	startSessionForTest(t, runtime, session.ID)
@@ -142,7 +145,7 @@ func TestTicket27ResidentEventTaskFiresTimerThroughServerEventLoop(t *testing.T)
 		t.Fatalf("resident task context = %s", contextText(woke))
 	}
 	waitForRunStatus(t, runtime, session.ID, 2, "completed")
-	if err := server.Shutdown(); err != nil {
+	if err := srv.Shutdown(); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
 	}
 }
@@ -199,8 +202,8 @@ func TestTicket27LocalEventsProgressWhilePriceSamplingIsBlocked(t *testing.T) {
 	})
 	localTask := runtime.LocalEventTask(clock, 30*time.Second)
 	priceTask := runtime.PriceEventTask(clock, 30*time.Second)
-	loop := common.NewEventLoopWithClock(clock)
-	server, err := common.NewServer(loop, []common.BackgroundTask{localTask, priceTask}, nil, nil, time.Second, runtime.Handler())
+	loop := eventloop.NewEventLoopWithClock(clock)
+	srv, err := server.NewServer(loop, []server.BackgroundTask{localTask, priceTask}, nil, nil, time.Second, runtime.Handler())
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
@@ -208,10 +211,10 @@ func TestTicket27LocalEventsProgressWhilePriceSamplingIsBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}
-	if err := server.Start(listener); err != nil {
+	if err := srv.Start(listener); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	t.Cleanup(func() { _ = server.Shutdown() })
+	t.Cleanup(func() { _ = srv.Shutdown() })
 
 	clock.Advance(30 * time.Second)
 	waitTestSignal(t, priceStarted, "blocked price request")
@@ -250,14 +253,14 @@ func TestTicket27LocalEventsProgressWhilePriceSamplingIsBlocked(t *testing.T) {
 		t.Fatal("blocked price request ended before Server shutdown")
 	default:
 	}
-	if err := server.Shutdown(); err != nil {
+	if err := srv.Shutdown(); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
 	}
 	waitTestSignal(t, priceCanceled, "price request cancellation by shutdown")
 	waitContext, cancelWait := context.WithTimeout(context.Background(), time.Second)
 	defer cancelWait()
-	for _, task := range []common.BackgroundTask{localTask, priceTask} {
-		if err := loop.Wait(waitContext, task.Name); !errors.Is(err, common.ErrLoopStopped) {
+	for _, task := range []server.BackgroundTask{localTask, priceTask} {
+		if err := loop.Wait(waitContext, task.Name); !errors.Is(err, eventloop.ErrLoopStopped) {
 			t.Fatalf("Wait(%s) = %v, want ErrLoopStopped", task.Name, err)
 		}
 	}

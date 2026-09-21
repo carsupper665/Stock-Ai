@@ -12,6 +12,10 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	events "stock-ai/agent-server/internal/events"
+	server "stock-ai/agent-server/internal/server"
 )
 
 // priceBook is the Backend GET /v1/market/price fixture for Server-side sampling, which
@@ -379,16 +383,16 @@ func toolErrorCode(result map[string]any) string {
 	return code
 }
 
-func resultEvent(t *testing.T, result map[string]any) common.Event {
+func resultEvent(t *testing.T, result map[string]any) events.Event {
 	t.Helper()
 	if result["ok"] != true {
 		t.Fatalf("tool result is not ok: %v", result)
 	}
 	raw, _ := json.Marshal(result["result"])
-	return decodeBody[common.Event](t, raw)
+	return decodeBody[events.Event](t, raw)
 }
 
-func listEventsHTTP(t *testing.T, runtime *common.AgentRuntime, sessionID string) []common.Event {
+func listEventsHTTP(t *testing.T, runtime *common.AgentRuntime, sessionID string) []events.Event {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+sessionID+"/events", agentAdminToken, nil)
@@ -396,27 +400,27 @@ func listEventsHTTP(t *testing.T, runtime *common.AgentRuntime, sessionID string
 		t.Fatalf("GET events status = %d body = %s", status, raw)
 	}
 	return decodeBody[struct {
-		Events []common.Event `json:"events"`
+		Events []events.Event `json:"events"`
 	}](t, raw).Events
 }
 
 // eventTasks holds the two resident tasks exactly as cmd/agent-server registers them. One value
 // must be reused across rounds because the price task keeps the previous round's samples.
 type eventTasks struct {
-	local    common.BackgroundTask
-	price    common.BackgroundTask
-	position common.BackgroundTask
+	local    server.BackgroundTask
+	price    server.BackgroundTask
+	position server.BackgroundTask
 }
 
-func newEventTasks(runtime *common.AgentRuntime, clock common.Clock) eventTasks {
+func newEventTasks(runtime *common.AgentRuntime, clock eventloop.Clock) eventTasks {
 	return eventTasks{
 		local: runtime.LocalEventTask(clock, time.Second), price: runtime.PriceEventTask(clock, time.Second),
 		position: runtime.PositionEventTask(clock, time.Second),
 	}
 }
 
-func (tasks eventTasks) all() []common.BackgroundTask {
-	return []common.BackgroundTask{tasks.local, tasks.price, tasks.position}
+func (tasks eventTasks) all() []server.BackgroundTask {
+	return []server.BackgroundTask{tasks.local, tasks.price, tasks.position}
 }
 
 // runEventRound drives one local claim and then one sampling+claim, the deterministic order
@@ -430,7 +434,7 @@ func runEventRound(t *testing.T, tasks eventTasks) {
 	}
 }
 
-func waitForEventCount(t *testing.T, runtime *common.AgentRuntime, sessionID string, wanted int) []common.Event {
+func waitForEventCount(t *testing.T, runtime *common.AgentRuntime, sessionID string, wanted int) []events.Event {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
 	for {

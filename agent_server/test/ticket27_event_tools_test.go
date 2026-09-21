@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	events "stock-ai/agent-server/internal/events"
 )
 
 func TestTicket27CreateEventValidatesArgumentsLimitAndOwnership(t *testing.T) {
@@ -127,7 +127,7 @@ func TestTicket27ControlPanelCanListAndDeleteButNeverCreateEvents(t *testing.T) 
 	}
 	status, raw = runtimeRequest(t, runtime.Handler(), http.MethodDelete,
 		"/api/v1/sessions/"+session.ID+"/events/"+created.ID, agentAdminToken, nil)
-	deleted := decodeBody[common.Event](t, raw)
+	deleted := decodeBody[events.Event](t, raw)
 	if status != http.StatusOK || deleted.ID != created.ID || deleted.Type != "timer" {
 		t.Fatalf("user delete = %d %s", status, raw)
 	}

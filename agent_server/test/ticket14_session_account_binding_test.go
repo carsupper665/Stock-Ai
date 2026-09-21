@@ -11,6 +11,9 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	server "stock-ai/agent-server/internal/server"
 )
 
 func TestTicket14CreatesPersistsAndListsImmutableAccountBoundSessionWithoutSecrets(t *testing.T) {
@@ -56,11 +59,11 @@ func TestTicket14CreatesPersistsAndListsImmutableAccountBoundSessionWithoutSecre
 func TestTicket14ExistingServerMountsRuntimeRoutes(t *testing.T) {
 	fixture := newRuntimeFixture()
 	runtime, _, _ := fixture.open(t, "")
-	loop, err := common.NewEventLoop()
+	loop, err := eventloop.NewEventLoop()
 	if err != nil {
 		t.Fatalf("NewEventLoop() error = %v", err)
 	}
-	server, err := common.NewServer(loop, nil, nil, nil, time.Second, runtime.Handler())
+	server, err := server.NewServer(loop, nil, nil, nil, time.Second, runtime.Handler())
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"stock-ai/agent-server/internal/events"
 	"stock-ai/agent-server/internal/server"
 )
 
@@ -18,7 +19,7 @@ type sessionAggregate struct {
 	Session
 	CurrentRun          *Run              `json:"current_run"`
 	LastRun             any               `json:"last_run"`
-	ActiveEvents        []Event           `json:"active_events"`
+	ActiveEvents        []events.Event    `json:"active_events"`
 	ActiveEventCount    int               `json:"active_event_count"`
 	PendingTriggerCount int               `json:"pending_trigger_count"`
 	TotalRuns           int               `json:"total_runs"`
@@ -57,7 +58,7 @@ func (r *AgentRuntime) sessionAggregate(ctx context.Context, session Session) (s
 			result.CurrentRun = &last
 		}
 	}
-	result.ActiveEvents, err = sessionEvents(r.db, session.ID)
+	result.ActiveEvents, err = events.SessionEvents(r.db, session.ID)
 	if err != nil {
 		return result, err
 	}

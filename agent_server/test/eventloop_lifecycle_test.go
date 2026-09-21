@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	eventloop "stock-ai/agent-server/internal/eventloop"
 )
 
 type manualClock struct {
@@ -41,7 +41,7 @@ func (c *manualClock) Now() time.Time {
 	return c.now
 }
 
-func (c *manualClock) NewTimer(deadline time.Time) common.Timer {
+func (c *manualClock) NewTimer(deadline time.Time) eventloop.Timer {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	timer := &manualTimer{
@@ -135,7 +135,7 @@ func TestEventLoopStartReturnsAfterTimerIsArmed(t *testing.T) {
 	resetGate := make(chan struct{})
 	clock.resetGate = resetGate
 	clock.resetStarted = make(chan struct{})
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	if err := loop.RegisterEvent("pending", func(context.Context) error { return nil }, time.Minute, 1); err != nil {
 		t.Fatalf("RegisterEvent() error = %v", err)
 	}
@@ -171,7 +171,7 @@ func TestEventLoopStartReturnsAfterTimerIsArmed(t *testing.T) {
 func TestEventLoopRunsOneShotExactlyOnce(t *testing.T) {
 	clock := newManualClock()
 	startTime := clock.Now()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	runs := make(chan struct{}, 2)
 	checked := make(chan struct{})
 
@@ -219,23 +219,23 @@ func TestEventLoopRunsOneShotExactlyOnce(t *testing.T) {
 }
 
 func TestEventLoopRejectsInvalidRegistration(t *testing.T) {
-	loop := common.NewEventLoopWithClock(newManualClock())
+	loop := eventloop.NewEventLoopWithClock(newManualClock())
 	task := func(context.Context) error { return nil }
 
 	tests := []struct {
 		name     string
 		taskName string
-		task     common.TaskFunc
+		task     eventloop.TaskFunc
 		interval time.Duration
 		count    int
 		want     error
 	}{
-		{name: "blank name", taskName: "  ", task: task, interval: time.Second, count: 1, want: common.ErrEventNameRequired},
-		{name: "nil task", taskName: "task", interval: time.Second, count: 1, want: common.ErrTaskFuncNil},
-		{name: "zero interval", taskName: "task", task: task, count: 1, want: common.ErrIntervalInvalid},
-		{name: "negative interval", taskName: "task", task: task, interval: -time.Second, count: 1, want: common.ErrIntervalInvalid},
-		{name: "zero count", taskName: "task", task: task, interval: time.Second, want: common.ErrCountInvalid},
-		{name: "count below forever", taskName: "task", task: task, interval: time.Second, count: -2, want: common.ErrCountInvalid},
+		{name: "blank name", taskName: "  ", task: task, interval: time.Second, count: 1, want: eventloop.ErrEventNameRequired},
+		{name: "nil task", taskName: "task", interval: time.Second, count: 1, want: eventloop.ErrTaskFuncNil},
+		{name: "zero interval", taskName: "task", task: task, count: 1, want: eventloop.ErrIntervalInvalid},
+		{name: "negative interval", taskName: "task", task: task, interval: -time.Second, count: 1, want: eventloop.ErrIntervalInvalid},
+		{name: "zero count", taskName: "task", task: task, interval: time.Second, want: eventloop.ErrCountInvalid},
+		{name: "count below forever", taskName: "task", task: task, interval: time.Second, count: -2, want: eventloop.ErrCountInvalid},
 	}
 
 	for _, tt := range tests {
@@ -250,15 +250,15 @@ func TestEventLoopRejectsInvalidRegistration(t *testing.T) {
 	if err := loop.RegisterEvent("duplicate", task, time.Second, 1); err != nil {
 		t.Fatalf("first RegisterEvent() error = %v", err)
 	}
-	if err := loop.RegisterEvent("duplicate", task, time.Second, 1); !errors.Is(err, common.ErrAlreadyExist) {
-		t.Fatalf("duplicate RegisterEvent() error = %v, want %v", err, common.ErrAlreadyExist)
+	if err := loop.RegisterEvent("duplicate", task, time.Second, 1); !errors.Is(err, eventloop.ErrAlreadyExist) {
+		t.Fatalf("duplicate RegisterEvent() error = %v, want %v", err, eventloop.ErrAlreadyExist)
 	}
 }
 
 func TestEventLoopFiniteTaskDoesNotOverlapOrPileUp(t *testing.T) {
 	clock := newManualClock()
 	startTime := clock.Now()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	started := make(chan int, 4)
 	release := make(chan struct{})
 	checked := make(chan struct{})
@@ -320,7 +320,7 @@ func TestEventLoopFiniteTaskDoesNotOverlapOrPileUp(t *testing.T) {
 
 func TestEventLoopDeleteCompletesWaitAndAllowsNameReuse(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	task := func(context.Context) error { return nil }
 	if err := loop.RegisterEvent("replaceable", task, time.Minute, 1); err != nil {
 		t.Fatalf("RegisterEvent() error = %v", err)
@@ -331,8 +331,8 @@ func TestEventLoopDeleteCompletesWaitAndAllowsNameReuse(t *testing.T) {
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := loop.Wait(waitCtx, "replaceable"); !errors.Is(err, common.ErrEventDeleted) {
-		t.Fatalf("Wait() error = %v, want %v", err, common.ErrEventDeleted)
+	if err := loop.Wait(waitCtx, "replaceable"); !errors.Is(err, eventloop.ErrEventDeleted) {
+		t.Fatalf("Wait() error = %v, want %v", err, eventloop.ErrEventDeleted)
 	}
 	if err := loop.RegisterEvent("replaceable", task, time.Minute, 1); err != nil {
 		t.Fatalf("RegisterEvent() after deletion error = %v", err)
@@ -341,7 +341,7 @@ func TestEventLoopDeleteCompletesWaitAndAllowsNameReuse(t *testing.T) {
 
 func TestEventLoopStopCancelsCooperativeTaskAndCanRestart(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	started := make(chan struct{})
 	canceled := make(chan struct{})
 	if err := loop.RegisterEvent("background", func(ctx context.Context) error {
@@ -355,8 +355,8 @@ func TestEventLoopStopCancelsCooperativeTaskAndCanRestart(t *testing.T) {
 	if err := loop.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if err := loop.Start(); !errors.Is(err, common.ErrLoopRunning) {
-		t.Fatalf("second Start() error = %v, want %v", err, common.ErrLoopRunning)
+	if err := loop.Start(); !errors.Is(err, eventloop.ErrLoopRunning) {
+		t.Fatalf("second Start() error = %v, want %v", err, eventloop.ErrLoopRunning)
 	}
 	clock.Advance(time.Minute)
 	select {
@@ -377,8 +377,8 @@ func TestEventLoopStopCancelsCooperativeTaskAndCanRestart(t *testing.T) {
 	}
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), time.Second)
 	defer cancelWait()
-	if err := loop.Wait(waitCtx, "background"); !errors.Is(err, common.ErrLoopStopped) {
-		t.Fatalf("Wait() error = %v, want %v", err, common.ErrLoopStopped)
+	if err := loop.Wait(waitCtx, "background"); !errors.Is(err, eventloop.ErrLoopStopped) {
+		t.Fatalf("Wait() error = %v, want %v", err, eventloop.ErrLoopStopped)
 	}
 	if err := loop.Start(); err != nil {
 		t.Fatalf("Start() after completed Stop error = %v", err)
@@ -390,7 +390,7 @@ func TestEventLoopStopCancelsCooperativeTaskAndCanRestart(t *testing.T) {
 
 func TestEventLoopStopTimeoutKeepsLoopInStoppingState(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	if err := loop.RegisterEvent("non-cooperative", func(context.Context) error {
@@ -415,11 +415,11 @@ func TestEventLoopStopTimeoutKeepsLoopInStoppingState(t *testing.T) {
 	if err := loop.Stop(stopCtx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Stop() error = %v, want %v", err, context.Canceled)
 	}
-	if err := loop.Start(); !errors.Is(err, common.ErrLoopStopping) {
-		t.Fatalf("Start() while task exits error = %v, want %v", err, common.ErrLoopStopping)
+	if err := loop.Start(); !errors.Is(err, eventloop.ErrLoopStopping) {
+		t.Fatalf("Start() while task exits error = %v, want %v", err, eventloop.ErrLoopStopping)
 	}
-	if err := loop.RegisterEvent("too-late", func(context.Context) error { return nil }, time.Minute, 1); !errors.Is(err, common.ErrLoopStopping) {
-		t.Fatalf("RegisterEvent() while stopping error = %v, want %v", err, common.ErrLoopStopping)
+	if err := loop.RegisterEvent("too-late", func(context.Context) error { return nil }, time.Minute, 1); !errors.Is(err, eventloop.ErrLoopStopping) {
+		t.Fatalf("RegisterEvent() while stopping error = %v, want %v", err, eventloop.ErrLoopStopping)
 	}
 	close(release)
 	finishCtx, cancelFinish := context.WithTimeout(context.Background(), time.Second)
@@ -431,7 +431,7 @@ func TestEventLoopStopTimeoutKeepsLoopInStoppingState(t *testing.T) {
 
 func TestEventLoopErrorAndPanicDoNotStopOtherTasks(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	wantError := errors.New("task failed")
 	healthyRan := make(chan struct{})
 	if err := loop.RegisterEvent("error", func(context.Context) error { return wantError }, time.Minute, 1); err != nil {
@@ -476,7 +476,7 @@ func TestEventLoopErrorAndPanicDoNotStopOtherTasks(t *testing.T) {
 
 func TestEventLoopDeleteCancelsAlreadyDispatchedTask(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	started := make(chan struct{})
 	canceled := make(chan struct{})
 	if err := loop.RegisterEvent("delete-running", func(ctx context.Context) error {
@@ -502,8 +502,8 @@ func TestEventLoopDeleteCancelsAlreadyDispatchedTask(t *testing.T) {
 
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), time.Second)
 	defer cancelWait()
-	if err := loop.Wait(waitCtx, "delete-running"); !errors.Is(err, common.ErrEventDeleted) {
-		t.Fatalf("Wait() error = %v, want %v", err, common.ErrEventDeleted)
+	if err := loop.Wait(waitCtx, "delete-running"); !errors.Is(err, eventloop.ErrEventDeleted) {
+		t.Fatalf("Wait() error = %v, want %v", err, eventloop.ErrEventDeleted)
 	}
 	select {
 	case <-canceled:
@@ -518,7 +518,7 @@ func TestEventLoopDeleteCancelsAlreadyDispatchedTask(t *testing.T) {
 }
 
 func TestEventLoopStopBeforeStartCompletesPendingWait(t *testing.T) {
-	loop := common.NewEventLoopWithClock(newManualClock())
+	loop := eventloop.NewEventLoopWithClock(newManualClock())
 	if err := loop.RegisterEvent("pending", func(context.Context) error { return nil }, time.Minute, 1); err != nil {
 		t.Fatalf("RegisterEvent() error = %v", err)
 	}
@@ -529,14 +529,14 @@ func TestEventLoopStopBeforeStartCompletesPendingWait(t *testing.T) {
 	}
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), time.Second)
 	defer cancelWait()
-	if err := loop.Wait(waitCtx, "pending"); !errors.Is(err, common.ErrLoopStopped) {
-		t.Fatalf("Wait() error = %v, want %v", err, common.ErrLoopStopped)
+	if err := loop.Wait(waitCtx, "pending"); !errors.Is(err, eventloop.ErrLoopStopped) {
+		t.Fatalf("Wait() error = %v, want %v", err, eventloop.ErrLoopStopped)
 	}
 }
 
 func TestEventLoopCancelsInvocationContextAfterNaturalCompletion(t *testing.T) {
 	clock := newManualClock()
-	loop := common.NewEventLoopWithClock(clock)
+	loop := eventloop.NewEventLoopWithClock(clock)
 	invocationContext := make(chan context.Context, 1)
 	if err := loop.RegisterEvent("context-lifecycle", func(ctx context.Context) error {
 		invocationContext <- ctx

@@ -11,10 +11,14 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+
+	eventloop "stock-ai/agent-server/internal/eventloop"
+	events "stock-ai/agent-server/internal/events"
+	server "stock-ai/agent-server/internal/server"
 )
 
 // armPriceEvents starts a Session whose first Run creates the given events and completes.
-func armPriceEvents(t *testing.T, script *llmScript, runtime *common.AgentRuntime, overrides map[string]any) (common.Session, []common.Event) {
+func armPriceEvents(t *testing.T, script *llmScript, runtime *common.AgentRuntime, overrides map[string]any) (common.Session, []events.Event) {
 	t.Helper()
 	session := createStoppedSession(t, runtime, overrides)
 	startSessionForTest(t, runtime, session.ID)
@@ -26,11 +30,11 @@ func armPriceEvents(t *testing.T, script *llmScript, runtime *common.AgentRuntim
 	}
 	waitForRunStatus(t, runtime, session.ID, 1, "completed")
 	persisted := listEventsHTTP(t, runtime, session.ID)
-	byID := make(map[string]common.Event, len(persisted))
+	byID := make(map[string]events.Event, len(persisted))
 	for _, event := range persisted {
 		byID[event.ID] = event
 	}
-	events := make([]common.Event, 0, len(eventIDs))
+	events := make([]events.Event, 0, len(eventIDs))
 	for _, id := range eventIDs {
 		event, ok := byID[id]
 		if !ok {
@@ -571,8 +575,8 @@ func TestTicket29PriceEventTaskFiresThroughServerEventLoopWithTriggerFacts(t *te
 	fixture.generate = script.handler(t)
 	databasePath := filepath.Join(t.TempDir(), "agent.db")
 	runtime := openEventRuntime(t, fixture, book, databasePath)
-	loop := common.NewEventLoopWithClock(clock)
-	server, err := common.NewServer(loop, newEventTasks(runtime, clock).all(), nil, nil, time.Second, runtime.Handler())
+	loop := eventloop.NewEventLoopWithClock(clock)
+	server, err := server.NewServer(loop, newEventTasks(runtime, clock).all(), nil, nil, time.Second, runtime.Handler())
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
@@ -612,7 +616,7 @@ func TestTicket29PriceEventTaskFiresThroughServerEventLoopWithTriggerFacts(t *te
 	if count := book.requestCount("crypto", "BTCUSDT"); count != 1 {
 		t.Fatalf("Backend sampled %d times in one round, want 1", count)
 	}
-	for _, fired := range []common.Event{priceEvents[0], timerEvents[0]} {
+	for _, fired := range []events.Event{priceEvents[0], timerEvents[0]} {
 		if outcomes := eventLogOutcomes(t, databasePath, fired.ID); len(outcomes) != 1 || outcomes[0] != "fired" {
 			t.Fatalf("event %s log = %v, want exactly one fired trace", fired.ID, outcomes)
 		}
