@@ -331,9 +331,9 @@ func TestCodexGatewayMapsVersionAuthenticationOutputTimeoutAndCancellation(t *te
 		status                     int
 		timeout                    time.Duration
 	}{
-		{name: "version", fixture: "codex-fixture-wrong-version.exe", model: "gpt-5.4", status: http.StatusServiceUnavailable, code: "HARNESS_VERSION_MISMATCH", timeout: time.Second},
-		{name: "authentication", fixture: "codex-fixture.exe", model: "auth-failure", status: http.StatusBadGateway, code: "AUTHENTICATION_FAILED", timeout: time.Second},
-		{name: "invalid output", fixture: "codex-fixture.exe", model: "invalid-output", status: http.StatusBadGateway, code: "PROVIDER_RESPONSE_INVALID", timeout: time.Second},
+		{name: "version", fixture: "codex-fixture-wrong-version.exe", model: "gpt-5.4", status: http.StatusServiceUnavailable, code: "HARNESS_VERSION_MISMATCH", timeout: fixtureTimeout},
+		{name: "authentication", fixture: "codex-fixture.exe", model: "auth-failure", status: http.StatusBadGateway, code: "AUTHENTICATION_FAILED", timeout: fixtureTimeout},
+		{name: "invalid output", fixture: "codex-fixture.exe", model: "invalid-output", status: http.StatusBadGateway, code: "PROVIDER_RESPONSE_INVALID", timeout: fixtureTimeout},
 		{name: "timeout", fixture: "codex-fixture.exe", model: "hang", status: http.StatusGatewayTimeout, code: "PROVIDER_TIMEOUT", timeout: 100 * time.Millisecond},
 	}
 	for _, test := range tests {
