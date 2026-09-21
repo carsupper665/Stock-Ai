@@ -71,6 +71,33 @@ func TestHarnessPromptPlacesToolsBeforeMessagesForCachePrefix(t *testing.T) {
 	}
 }
 
+func TestHarnessGatewayDisclosesToolsInCLIPrompt(t *testing.T) {
+	for _, kind := range []string{"codex", "claude_code"} {
+		t.Run(kind, func(t *testing.T) {
+			fixture, key, variable := "codex-fixture.exe", "fixture-codex-key", "LLM_SERVER_CODEX_EXECUTABLE"
+			if kind == "claude_code" {
+				fixture, key, variable = "claude-fixture.exe", "fixture-claude-key", "LLM_SERVER_CLAUDE_EXECUTABLE"
+			}
+			t.Setenv(variable, copyHarnessFixture(t, fixture))
+			server := openTestServer(t, 5*time.Second)
+			defer server.Close()
+			body, _ := json.Marshal(map[string]any{"id": "tool-disclosure", "name": "tool disclosure", "type": kind, "base_url": "", "default_model": "tool-disclosure-report", "config": map[string]any{"auth_mode": "api_key"}})
+			if created := request(t, server.Handler(), http.MethodPost, "/v1/providers", adminToken, body); created.Code != http.StatusCreated {
+				t.Fatal(created.Code, created.Body)
+			}
+			body, _ = json.Marshal(map[string]string{"name": "fixture", "token": key})
+			if response := request(t, server.Handler(), http.MethodPost, "/v1/providers/tool-disclosure/tokens", adminToken, body); response.Code != http.StatusCreated {
+				t.Fatal(response.Code, response.Body)
+			}
+			response := request(t, server.Handler(), http.MethodPost, "/v1/generate", runtimeToken,
+				[]byte(`{"provider":"tool-disclosure","messages":[{"role":"user","content":"first"}],"tools":[{"name":"market.price","description":"price","input_schema":{"type":"object"}},{"name":"get_ohlcv","description":"candles","input_schema":{"type":"object"}}]}`))
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content":"tools=market.price,get_ohlcv"`) {
+				t.Fatalf("generate=%d %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
 func TestNativeAndCodexIgnoreContinuationAndUseFullMessages(t *testing.T) {
 	fullMessages := []map[string]any{
 		{"role": "user", "content": "first"},

@@ -161,6 +161,22 @@ func runClaudeFixture() int {
 		})
 		return 0
 	}
+	if strings.Contains(string(prompt), `"model":"tool-disclosure-report"`) {
+		request := fixtureClaudeRequest(prompt)
+		content := "tools=none"
+		if len(request.Tools) > 0 {
+			names := make([]string, 0, len(request.Tools))
+			for _, tool := range request.Tools {
+				names = append(names, tool.Name)
+			}
+			content = "tools=" + strings.Join(names, ",")
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"type": "result", "subtype": "success", "is_error": false,
+			"structured_output": map[string]any{"content": content, "tool_calls": []any{}, "finish_reason": "stop"},
+		})
+		return 0
+	}
 	output := map[string]any{
 		"type": "result", "subtype": "success", "is_error": false,
 		"structured_output": map[string]any{"content": "Grounded answer.", "tool_calls": []any{}, "finish_reason": "stop"},
@@ -180,6 +196,16 @@ func fixturePromptModel(prompt []byte) string {
 	}
 	_ = json.Unmarshal([]byte(parts[1]), &request)
 	return request.Model
+}
+
+func fixtureClaudeRequest(prompt []byte) webharness.WebHarnessRequest {
+	parts := strings.SplitN(string(prompt), "The normalized request follows:\n", 2)
+	if len(parts) != 2 {
+		return webharness.WebHarnessRequest{}
+	}
+	var request webharness.WebHarnessRequest
+	_ = json.Unmarshal([]byte(parts[1]), &request)
+	return request
 }
 
 type managedClaudeMarker struct {

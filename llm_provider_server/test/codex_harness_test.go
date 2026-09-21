@@ -275,6 +275,20 @@ func runCodexFixture() int {
 		fmt.Println(`{"type":"turn.completed","usage":{}}`)
 		return 0
 	}
+	if request.Model == "tool-disclosure-report" {
+		content := "tools=none"
+		if len(request.Tools) > 0 {
+			names := make([]string, 0, len(request.Tools))
+			for _, tool := range request.Tools {
+				names = append(names, tool.Name)
+			}
+			content = "tools=" + strings.Join(names, ",")
+		}
+		reported := fmt.Sprintf(`{"content":%q,"tool_calls":[],"finish_reason":"stop"}`, content)
+		fmt.Printf("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":%q}}\n", reported)
+		fmt.Println(`{"type":"turn.completed","usage":{}}`)
+		return 0
+	}
 	if request.Model == "continuation-full-context" {
 		content := fmt.Sprintf("messages=%d continuation_serialized=%t", len(request.Messages), bytes.Contains(prompt, []byte(`"continuation"`)))
 		reported := fmt.Sprintf(`{"content":%q,"tool_calls":[],"finish_reason":"stop"}`, content)

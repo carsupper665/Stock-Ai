@@ -630,6 +630,13 @@ web fetch
 
 are retained.
 
+Domain tools reach the CLI through the prompt: the harness serializes the request's
+`tools` into the invocation prompt as return-only schemas (the CLI never executes
+them and returns structured calls for the Go runtime). The stable instructions and
+tool schemas precede the conversation messages so CLI prompt caching can reuse the
+prefix. The Claude managed-session key includes the tool set, so a changed tool set
+starts a fresh CLI session instead of resuming a stale one.
+
 ## 20. Database
 
 V1 requires two tables.
