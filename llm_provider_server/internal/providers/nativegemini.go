@@ -1,4 +1,4 @@
-package gateway
+package providers
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 
 const geminiSupportedModel = "gemini-2.5-flash-lite"
 
-var geminiOptionNames = map[string]bool{
+var GeminiOptionNames = map[string]bool{
 	"frequencyPenalty": true,
 	"maxOutputTokens":  true,
 	"presencePenalty":  true,
@@ -23,21 +23,21 @@ var geminiOptionNames = map[string]bool{
 	"topP":             true,
 }
 
-func geminiCall(baseURL, model string, request generateRequest, options map[string]json.RawMessage, wireByRuntime map[string]string) (providerCall, error) {
+func GeminiCall(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (ProviderCall, error) {
 	if model != geminiSupportedModel {
-		return providerCall{}, providerError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini model is outside the Gateway's supported stateless protocol scope."}
+		return ProviderCall{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini model is outside the Gateway's supported stateless protocol scope."}
 	}
 	for name := range options {
-		if !geminiOptionNames[name] {
-			return providerCall{}, fmt.Errorf("Gemini option %s is not supported by the normalized Generate contract", name)
+		if !GeminiOptionNames[name] {
+			return ProviderCall{}, fmt.Errorf("Gemini option %s is not supported by the normalized Generate contract", name)
 		}
 	}
-	contents, err := geminiContents(request.Messages, wireByRuntime)
+	contents, err := geminiContents(request.Messages, WireByRuntime)
 	if err != nil {
-		return providerCall{}, err
+		return ProviderCall{}, err
 	}
 	if len(contents) == 0 {
-		return providerCall{}, errors.New("Gemini requires at least one non-system message")
+		return ProviderCall{}, errors.New("Gemini requires at least one non-system message")
 	}
 	body := map[string]any{"contents": contents}
 	if system := geminiSystem(request.Messages); len(system) != 0 {
@@ -47,7 +47,7 @@ func geminiCall(baseURL, model string, request generateRequest, options map[stri
 		declarations := make([]map[string]any, 0, len(request.Tools))
 		for _, tool := range request.Tools {
 			declarations = append(declarations, map[string]any{
-				"name": wireByRuntime[tool.Name], "description": tool.Description, "parameters": tool.InputSchema,
+				"name": WireByRuntime[tool.Name], "description": tool.Description, "parameters": tool.InputSchema,
 			})
 		}
 		body["tools"] = []map[string]any{{"functionDeclarations": declarations}}
@@ -57,14 +57,14 @@ func geminiCall(baseURL, model string, request generateRequest, options map[stri
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return providerCall{}, errors.New("Options contain an invalid value.")
+		return ProviderCall{}, errors.New("Options contain an invalid value.")
 	}
-	return providerCall{
-		url: strings.TrimRight(baseURL, "/") + "/models/" + model + ":generateContent", headers: map[string]string{}, body: encoded,
+	return ProviderCall{
+		URL: strings.TrimRight(baseURL, "/") + "/models/" + model + ":generateContent", Headers: map[string]string{}, Body: encoded,
 	}, nil
 }
 
-func geminiSystem(messages []message) []map[string]any {
+func geminiSystem(messages []Message) []map[string]any {
 	parts := make([]map[string]any, 0)
 	for _, message := range messages {
 		if message.Role == "system" {
@@ -74,7 +74,7 @@ func geminiSystem(messages []message) []map[string]any {
 	return parts
 }
 
-func geminiContents(messages []message, wireByRuntime map[string]string) ([]map[string]any, error) {
+func geminiContents(messages []Message, WireByRuntime map[string]string) ([]map[string]any, error) {
 	contents := make([]map[string]any, 0, len(messages))
 	callNames := make(map[string]string)
 	appendParts := func(role string, parts ...map[string]any) {
@@ -95,7 +95,7 @@ func geminiContents(messages []message, wireByRuntime map[string]string) ([]map[
 				parts = append(parts, map[string]any{"text": *message.Content})
 			}
 			for _, call := range message.ToolCalls {
-				wireName := wireByRuntime[call.Name]
+				wireName := WireByRuntime[call.Name]
 				callNames[call.ID] = wireName
 				parts = append(parts, map[string]any{"functionCall": map[string]any{
 					"id": call.ID, "name": wireName, "args": call.Arguments,
@@ -117,7 +117,7 @@ func geminiContents(messages []message, wireByRuntime map[string]string) ([]map[
 }
 
 func geminiToolResult(content *string) (map[string]json.RawMessage, error) {
-	if content == nil || !validJSONObject(json.RawMessage(*content)) {
+	if content == nil || !ValidJSONObject(json.RawMessage(*content)) {
 		return nil, errors.New("Gemini tool result content must contain one JSON object")
 	}
 	var result map[string]json.RawMessage
@@ -125,19 +125,19 @@ func geminiToolResult(content *string) (map[string]json.RawMessage, error) {
 	return result, nil
 }
 
-func normalizeGeminiResponse(upstream *http.Response, runtimeByWire map[string]string, historyIDs map[string]bool) (generateResponse, error) {
+func NormalizeGeminiResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
 	switch upstream.StatusCode {
 	case http.StatusBadRequest:
-		return generateResponse{}, providerError{http.StatusBadRequest, "REQUEST_INVALID", "Gemini rejected the generated request."}
+		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "Gemini rejected the generated request."}
 	case http.StatusNotFound:
-		return generateResponse{}, providerError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini does not provide the requested model to this credential."}
+		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini does not provide the requested model to this credential."}
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return generateResponse{}, upstreamStatusFailure(upstream)
+		return GenerateResponse{}, UpstreamStatusFailure(upstream)
 	}
-	body, err := readProviderBody(upstream.Body)
+	body, err := ReadProviderBody(upstream.Body)
 	if err != nil {
-		return generateResponse{}, err
+		return GenerateResponse{}, err
 	}
 	var response struct {
 		Candidates []struct {
@@ -160,44 +160,44 @@ func normalizeGeminiResponse(upstream *http.Response, runtimeByWire map[string]s
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	if decoder.Decode(&response) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
-		return generateResponse{}, errors.New("invalid Gemini response")
+		return GenerateResponse{}, errors.New("invalid Gemini response")
 	}
 	if response.Usage != nil && (negativeTokens(response.Usage.PromptTokens, response.Usage.CandidateTokens,
 		response.Usage.CachedTokens, response.Usage.TotalTokens, response.Usage.ThoughtsTokens) ||
 		(response.Usage.ThoughtsTokens != nil && *response.Usage.ThoughtsTokens != 0)) {
-		return generateResponse{}, errors.New("unsupported Gemini thought state")
+		return GenerateResponse{}, errors.New("unsupported Gemini thought state")
 	}
-	normalized := generateResponse{ToolCalls: []toolCall{}}
+	normalized := GenerateResponse{ToolCalls: []ToolCall{}}
 	if response.Usage != nil {
-		normalized.Usage = &usage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CandidateTokens,
+		normalized.Usage = &Usage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CandidateTokens,
 			CachedTokens: response.Usage.CachedTokens, TotalTokens: response.Usage.TotalTokens}
 	}
 	if len(response.Candidates) == 0 {
 		if response.PromptFeedback == nil || !geminiPromptBlockReason(response.PromptFeedback.BlockReason) {
-			return generateResponse{}, errors.New("invalid Gemini response")
+			return GenerateResponse{}, errors.New("invalid Gemini response")
 		}
 		normalized.FinishReason = "content_filter"
 		return normalized, nil
 	}
 	if len(response.Candidates) != 1 || (response.PromptFeedback != nil && response.PromptFeedback.BlockReason != "") {
-		return generateResponse{}, errors.New("invalid Gemini response")
+		return GenerateResponse{}, errors.New("invalid Gemini response")
 	}
 	candidate := response.Candidates[0]
 	var text strings.Builder
 	hasText := false
-	toolCalls := make([]toolCall, 0)
+	toolCalls := make([]ToolCall, 0)
 	seenIDs := make(map[string]bool, len(historyIDs))
 	for id := range historyIDs {
 		seenIDs[id] = true
 	}
 	if candidate.Content != nil {
 		if candidate.Content.Role != "model" {
-			return generateResponse{}, errors.New("invalid Gemini response")
+			return GenerateResponse{}, errors.New("invalid Gemini response")
 		}
 		for _, rawPart := range candidate.Content.Parts {
-			partText, call, err := normalizeGeminiPart(rawPart, runtimeByWire)
+			partText, call, err := normalizeGeminiPart(rawPart, RuntimeByWire)
 			if err != nil {
-				return generateResponse{}, err
+				return GenerateResponse{}, err
 			}
 			if partText != nil {
 				text.WriteString(*partText)
@@ -205,7 +205,7 @@ func normalizeGeminiResponse(upstream *http.Response, runtimeByWire map[string]s
 				continue
 			}
 			if seenIDs[call.ID] {
-				return generateResponse{}, errors.New("invalid Gemini response")
+				return GenerateResponse{}, errors.New("invalid Gemini response")
 			}
 			seenIDs[call.ID] = true
 			toolCalls = append(toolCalls, *call)
@@ -213,7 +213,7 @@ func normalizeGeminiResponse(upstream *http.Response, runtimeByWire map[string]s
 	}
 	finishReason, err := normalizeGeminiFinishReason(candidate.FinishReason, hasText, len(toolCalls) != 0)
 	if err != nil {
-		return generateResponse{}, err
+		return GenerateResponse{}, err
 	}
 	normalized.ToolCalls = toolCalls
 	normalized.FinishReason = finishReason
@@ -233,7 +233,7 @@ func geminiPromptBlockReason(reason string) bool {
 	}
 }
 
-func normalizeGeminiPart(raw json.RawMessage, runtimeByWire map[string]string) (*string, *toolCall, error) {
+func normalizeGeminiPart(raw json.RawMessage, RuntimeByWire map[string]string) (*string, *ToolCall, error) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil || len(fields) != 1 {
 		return nil, nil, errors.New("unsupported Gemini protocol state")
@@ -261,11 +261,11 @@ func normalizeGeminiPart(raw json.RawMessage, runtimeByWire map[string]string) (
 		return nil, nil, errors.New("invalid Gemini response")
 	}
 	runtimeName := function.Name
-	if original, exists := runtimeByWire[runtimeName]; exists {
+	if original, exists := RuntimeByWire[runtimeName]; exists {
 		runtimeName = original
 	}
-	call := toolCall{ID: function.ID, Name: runtimeName, Arguments: function.Args}
-	if validateToolCall(call) != nil {
+	call := ToolCall{ID: function.ID, Name: runtimeName, Arguments: function.Args}
+	if ValidateToolCall(call) != nil {
 		return nil, nil, errors.New("invalid Gemini response")
 	}
 	var arguments map[string]json.RawMessage

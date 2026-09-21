@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	gateway "stock-ai/llm-provider-server"
+	webharness "stock-ai/llm-provider-server/internal/webharness"
 )
 
 func TestMain(m *testing.M) {
@@ -38,12 +38,12 @@ func TestCodexHarnessPinsCapabilitiesAndNormalizesStructuredToolReturn(t *testin
 	t.Setenv("CLAUDE_CONFIG_DIR", attackerConfig)
 	t.Setenv("OPENAI_API_KEY", "attacker-key")
 	executable := copyHarnessFixture(t, "codex-fixture.exe")
-	harness := gateway.CodexWebHarness{Executable: executable}
+	harness := webharness.CodexWebHarness{Executable: executable}
 	content := "Check BTC using current public information."
-	response, err := harness.Generate(context.Background(), "fixture-codex-key", gateway.WebHarnessRequest{
+	response, err := harness.Generate(context.Background(), "fixture-codex-key", webharness.WebHarnessRequest{
 		Model:    "gpt-5.4",
-		Messages: []gateway.WebHarnessMessage{{Role: "user", Content: &content}},
-		Tools: []gateway.WebHarnessTool{{
+		Messages: []webharness.WebHarnessMessage{{Role: "user", Content: &content}},
+		Tools: []webharness.WebHarnessTool{{
 			Name: "market.price", Description: "Return the current market price.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}`),
 		}},
@@ -69,16 +69,16 @@ func TestCodexHarnessRejectsWrongVersionAndInvalidOutput(t *testing.T) {
 		model string
 		want  error
 	}{
-		{model: "wrong-version", want: gateway.ErrWebHarnessVersion},
-		{model: "invalid-output", want: gateway.ErrWebHarnessResponse},
+		{model: "wrong-version", want: webharness.ErrWebHarnessVersion},
+		{model: "invalid-output", want: webharness.ErrWebHarnessResponse},
 	} {
 		t.Run(test.model, func(t *testing.T) {
 			executable := copyHarnessFixture(t, "codex-fixture.exe")
 			if test.model == "wrong-version" {
 				executable = copyHarnessFixture(t, "codex-fixture-wrong-version.exe")
 			}
-			_, err := (gateway.CodexWebHarness{Executable: executable}).Generate(context.Background(), "fixture-codex-key",
-				gateway.WebHarnessRequest{Model: test.model, Messages: []gateway.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
+			_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(context.Background(), "fixture-codex-key",
+				webharness.WebHarnessRequest{Model: test.model, Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
 			if !isError(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
 			}
@@ -91,8 +91,8 @@ func TestCodexHarnessCancellationKillsTheInvocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err := (gateway.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
-		gateway.WebHarnessRequest{Model: "hang", Messages: []gateway.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
+	_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
+		webharness.WebHarnessRequest{Model: "hang", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
 	if !isError(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v, want deadline exceeded", err)
 	}
@@ -106,9 +106,9 @@ func TestCodexHarnessRejectsOversizedOutputWithoutWaitingForTimeout(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	started := time.Now()
-	_, err := (gateway.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
-		gateway.WebHarnessRequest{Model: "oversized-output", Messages: []gateway.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
-	if !isError(err, gateway.ErrWebHarnessResponse) {
+	_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
+		webharness.WebHarnessRequest{Model: "oversized-output", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
+	if !isError(err, webharness.ErrWebHarnessResponse) {
 		t.Fatalf("error = %v, want invalid response", err)
 	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
@@ -125,8 +125,8 @@ func TestCodexHarnessCancellationKillsDescendants(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		_, err := (gateway.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
-			gateway.WebHarnessRequest{Model: "spawn-descendant", Messages: []gateway.WebHarnessMessage{{Role: "user", Content: &marker}}})
+		_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
+			webharness.WebHarnessRequest{Model: "spawn-descendant", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: &marker}}})
 		result <- err
 	}()
 
@@ -288,8 +288,8 @@ func runCodexFixture() int {
 	return 0
 }
 
-func fixtureHarnessRequest(prompt []byte) gateway.WebHarnessRequest {
-	var request gateway.WebHarnessRequest
+func fixtureHarnessRequest(prompt []byte) webharness.WebHarnessRequest {
+	var request webharness.WebHarnessRequest
 	start := bytes.Index(prompt, []byte(`{"model"`))
 	if start >= 0 {
 		_ = json.Unmarshal(prompt[start:], &request)
@@ -341,7 +341,7 @@ func fixtureCodexEffort() string {
 	return "none"
 }
 
-func codexInvocationIsRestricted(request gateway.WebHarnessRequest) bool {
+func codexInvocationIsRestricted(request webharness.WebHarnessRequest) bool {
 	schemaPath := filepath.Join(mustWorkingDirectory(), "response-schema.json")
 	expected := []string{
 		"exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",

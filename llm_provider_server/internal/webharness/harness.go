@@ -1,4 +1,4 @@
-package gateway
+package webharness
 
 import (
 	"bytes"
@@ -8,20 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"stock-ai/llm-provider-server/internal/providers"
 	"strings"
 	"time"
 )
 
 const (
-	codexHarnessVersion      = "codex-cli 0.145.0"
-	claudeCodeHarnessVersion = "2.1.269 (Claude Code)"
+	CodexHarnessVersion      = "codex-cli 0.145.0"
+	ClaudeCodeHarnessVersion = "2.1.269 (Claude Code)"
 	maxHarnessOutput         = 1 << 20
 	maxHarnessErrorOutput    = 64 << 10
 )
@@ -109,7 +109,7 @@ func (h CodexWebHarness) Generate(ctx context.Context, credential string, reques
 		return WebHarnessResponse{}, err
 	}
 	defer os.RemoveAll(workingDirectory)
-	if err := verifyHarnessVersion(ctx, h.Executable, codexHarnessVersion, workingDirectory, harnessEnvironment(workingDirectory, "", "")); err != nil {
+	if err := verifyHarnessVersion(ctx, h.Executable, CodexHarnessVersion, workingDirectory, harnessEnvironment(workingDirectory, "", "")); err != nil {
 		return WebHarnessResponse{}, err
 	}
 	if err := copyHarnessLogin(h.AuthFile, filepath.Join(workingDirectory, "auth.json")); err != nil {
@@ -161,7 +161,7 @@ func (h ClaudeCodeWebHarness) Generate(ctx context.Context, credential string, r
 		return WebHarnessResponse{}, err
 	}
 	defer os.RemoveAll(workingDirectory)
-	if err := verifyHarnessVersion(ctx, h.Executable, claudeCodeHarnessVersion, workingDirectory, harnessEnvironment(workingDirectory, "", "")); err != nil {
+	if err := verifyHarnessVersion(ctx, h.Executable, ClaudeCodeHarnessVersion, workingDirectory, harnessEnvironment(workingDirectory, "", "")); err != nil {
 		return WebHarnessResponse{}, err
 	}
 	if err := copyHarnessLogin(h.AuthFile, filepath.Join(workingDirectory, ".credentials.json")); err != nil {
@@ -195,112 +195,17 @@ func (h ClaudeCodeWebHarness) Generate(ctx context.Context, credential string, r
 	return parseClaudeHarnessResponse(stdout, request.Messages)
 }
 
-func (s *Server) generateClaudeSession(ctx context.Context, key, credential string, loginSnapshot []byte, effort string, request WebHarnessRequest, continuation *webHarnessContinuation) (WebHarnessResponse, error) {
-	session, err := s.acquireClaudeSession(ctx, key, credential, loginSnapshot, request)
-	if err != nil {
-		return WebHarnessResponse{}, err
-	}
-	fallbackReason := ""
-	resumeMessages := []WebHarnessMessage(nil)
-	_, directoryErr := os.Stat(session.workingDirectory)
-	replace := false
-	if directoryErr != nil {
-		fallbackReason = "session_directory_missing"
-		replace = true
-	} else if len(session.delivered) == 0 {
-		if continuation != nil {
-			fallbackReason = "continuation_unavailable"
-		}
-	} else if continuation != nil {
-		if validClaudeContinuation(session, request.Messages, continuation) {
-			resumeMessages = continuation.messages
-		} else {
-			fallbackReason = "continuation_invalid"
-			replace = true
-		}
-	} else {
-		validPrefix := messagePrefix(request.Messages, session.delivered)
-		switch {
-		case !validPrefix:
-			fallbackReason = "history_prefix_changed"
-			replace = true
-		case len(request.Messages) == len(session.delivered):
-			fallbackReason = "no_new_messages"
-			replace = true
-		default:
-			resumeMessages = request.Messages[len(session.delivered):]
-		}
-	}
-	if fallbackReason != "" {
-		log.Printf("web_harness event=fallback harness=claude_code reason=%s", fallbackReason)
-	}
-	if replace {
-		fresh, replaceErr := s.reserveClaudeReplacement(ctx, session, credential, loginSnapshot, request)
-		s.releaseClaudeSession(session)
-		if replaceErr != nil {
-			return WebHarnessResponse{}, replaceErr
-		}
-		session = fresh
-	}
-	resume := len(resumeMessages) != 0
-	response, invokeErr := (ClaudeCodeWebHarness{Executable: s.claudeExecutable, Effort: effort}).generateInDirectory(
-		ctx, credential, request, session.workingDirectory, session.sessionID, resume, resumeMessages)
-	if invokeErr == nil {
-		acknowledgeClaudeSession(session, request.Messages, response)
-		response.SessionMode = "cold"
-		if resume {
-			response.SessionMode = "resume"
-		}
-		response.FallbackReason = fallbackReason
-		response.InvocationCount = 1
-		s.releaseClaudeSession(session)
-		return response, nil
-	}
-	if !resume || ctx.Err() != nil {
-		s.retireClaudeSession(session)
-		s.releaseClaudeSession(session)
-		if ctx.Err() != nil {
-			return WebHarnessResponse{}, ctx.Err()
-		}
-		return WebHarnessResponse{}, invokeErr
-	}
-	// A persisted CLI session can become unusable independently of the request.
-	// Reserve its one cold retry before releasing waiters so the UUID cannot be initialized twice.
-	log.Printf("web_harness event=fallback harness=claude_code reason=resume_failed category=%s", harnessErrorCategory(invokeErr))
-	cold, replaceErr := s.reserveClaudeReplacement(ctx, session, credential, loginSnapshot, request)
-	s.releaseClaudeSession(session)
-	if replaceErr != nil {
-		return WebHarnessResponse{}, replaceErr
-	}
-	response, coldErr := (ClaudeCodeWebHarness{Executable: s.claudeExecutable, Effort: effort}).generateInDirectory(
-		ctx, credential, request, cold.workingDirectory, cold.sessionID, false, nil)
-	if coldErr == nil {
-		acknowledgeClaudeSession(cold, request.Messages, response)
-		response.SessionMode = "cold"
-		response.FallbackReason = "resume_failed"
-		response.InvocationCount = 2
-		s.releaseClaudeSession(cold)
-		return response, nil
-	}
-	s.retireClaudeSession(cold)
-	s.releaseClaudeSession(cold)
-	if ctx.Err() != nil {
-		return WebHarnessResponse{}, ctx.Err()
-	}
-	return WebHarnessResponse{}, coldErr
-}
-
-func validClaudeContinuation(session *claudeHarnessSession, messages []WebHarnessMessage, continuation *webHarnessContinuation) bool {
-	if continuation.afterMessages != len(session.delivered) || len(continuation.messages) == 0 || session.generated == nil {
+func validClaudeContinuation(session *claudeHarnessSession, messages []WebHarnessMessage, continuation *Continuation) bool {
+	if continuation.AfterMessages != len(session.delivered) || len(continuation.Messages) == 0 || session.generated == nil {
 		return false
 	}
-	if len(messages) != continuation.afterMessages+1+len(continuation.messages) || !messagePrefix(messages, session.delivered) {
+	if len(messages) != continuation.AfterMessages+1+len(continuation.Messages) || !messagePrefix(messages, session.delivered) {
 		return false
 	}
-	if !reflect.DeepEqual(messages[continuation.afterMessages], *session.generated) {
+	if !reflect.DeepEqual(messages[continuation.AfterMessages], *session.generated) {
 		return false
 	}
-	return reflect.DeepEqual(messages[continuation.afterMessages+1:], continuation.messages)
+	return reflect.DeepEqual(messages[continuation.AfterMessages+1:], continuation.Messages)
 }
 
 func acknowledgeClaudeSession(session *claudeHarnessSession, messages []WebHarnessMessage, response WebHarnessResponse) {
@@ -313,156 +218,8 @@ func acknowledgeClaudeSession(session *claudeHarnessSession, messages []WebHarne
 	session.generated = &cloned[0]
 }
 
-func (s *Server) acquireClaudeSession(ctx context.Context, key, credential string, loginSnapshot []byte, request WebHarnessRequest) (*claudeHarnessSession, error) {
-	for {
-		s.harnessSessionMu.Lock()
-		session := s.harnessSessions[key]
-		if session == nil {
-			var err error
-			session, err = s.newClaudeHarnessSession(key, credential, loginSnapshot, request)
-			if err != nil {
-				s.harnessSessionMu.Unlock()
-				return nil, err
-			}
-			s.harnessSessions[key] = session
-		}
-		session.active++
-		s.harnessSessionMu.Unlock()
-		select {
-		case <-ctx.Done():
-			s.harnessSessionMu.Lock()
-			session.active--
-			remove := session.retired && session.active == 0
-			s.harnessSessionMu.Unlock()
-			if remove {
-				_ = os.RemoveAll(session.workingDirectory)
-			}
-			return nil, ctx.Err()
-		case <-session.gate:
-		}
-		s.harnessSessionMu.Lock()
-		current := s.harnessSessions[key] == session && !session.retired
-		s.harnessSessionMu.Unlock()
-		if current {
-			return session, nil
-		}
-		s.releaseClaudeSession(session)
-	}
-}
-
-func (s *Server) reserveClaudeReplacement(ctx context.Context, current *claudeHarnessSession, credential string, loginSnapshot []byte, request WebHarnessRequest) (*claudeHarnessSession, error) {
-	if err := ctx.Err(); err != nil {
-		s.retireClaudeSession(current)
-		return nil, err
-	}
-	s.harnessSessionMu.Lock()
-	if s.harnessSessions[current.key] != current {
-		s.harnessSessionMu.Unlock()
-		return nil, ErrWebHarnessUnavailable
-	}
-	replacement, err := s.newClaudeHarnessSession(current.key, credential, loginSnapshot, request)
-	if err != nil {
-		delete(s.harnessSessions, current.key)
-		current.retired = true
-		s.harnessSessionMu.Unlock()
-		return nil, err
-	}
-	<-replacement.gate
-	replacement.active = 1
-	current.retired = true
-	s.harnessSessions[current.key] = replacement
-	s.harnessSessionMu.Unlock()
-	return replacement, nil
-}
-
-func (s *Server) newClaudeHarnessSession(key, credential string, loginSnapshot []byte, request WebHarnessRequest) (*claudeHarnessSession, error) {
-	workingDirectory, err := prepareHarnessWithLogin(s.claudeExecutable, credential, len(loginSnapshot) != 0, request)
-	if err != nil {
-		return nil, err
-	}
-	if len(loginSnapshot) != 0 {
-		if err := os.WriteFile(filepath.Join(workingDirectory, ".credentials.json"), loginSnapshot, 0o600); err != nil {
-			_ = os.RemoveAll(workingDirectory)
-			return nil, ErrWebHarnessUnavailable
-		}
-	}
-	sessionID, err := newHarnessSessionID()
-	if err != nil {
-		_ = os.RemoveAll(workingDirectory)
-		return nil, ErrWebHarnessUnavailable
-	}
-	session := &claudeHarnessSession{key: key, workingDirectory: workingDirectory, sessionID: sessionID, gate: make(chan struct{}, 1), lastUsed: time.Now()}
-	session.gate <- struct{}{}
-	return session, nil
-}
-
-func (s *Server) releaseClaudeSession(session *claudeHarnessSession) {
-	s.harnessSessionMu.Lock()
-	session.active--
-	session.lastUsed = time.Now()
-	remove := session.retired && session.active == 0
-	s.harnessSessionMu.Unlock()
-	session.gate <- struct{}{}
-	if remove {
-		_ = os.RemoveAll(session.workingDirectory)
-	}
-}
-
-func (s *Server) retireClaudeSession(session *claudeHarnessSession) {
-	s.harnessSessionMu.Lock()
-	if s.harnessSessions[session.key] == session {
-		delete(s.harnessSessions, session.key)
-	}
-	session.retired = true
-	s.harnessSessionMu.Unlock()
-}
-
-func (s *Server) collectHarnessSessions() {
-	interval := time.Minute
-	if s.harnessSessionTTL < interval {
-		interval = s.harnessSessionTTL
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	defer close(s.harnessGCDone)
-	for {
-		select {
-		case <-s.harnessGCStop:
-			return
-		case now := <-ticker.C:
-			var directories []string
-			s.harnessSessionMu.Lock()
-			for key, session := range s.harnessSessions {
-				if session.active == 0 && now.Sub(session.lastUsed) >= s.harnessSessionTTL {
-					delete(s.harnessSessions, key)
-					session.retired = true
-					directories = append(directories, session.workingDirectory)
-				}
-			}
-			s.harnessSessionMu.Unlock()
-			for _, directory := range directories {
-				_ = os.RemoveAll(directory)
-			}
-		}
-	}
-}
-
-func (s *Server) removeAllHarnessSessions() {
-	s.harnessSessionMu.Lock()
-	directories := make([]string, 0, len(s.harnessSessions))
-	for key, session := range s.harnessSessions {
-		delete(s.harnessSessions, key)
-		session.retired = true
-		directories = append(directories, session.workingDirectory)
-	}
-	s.harnessSessionMu.Unlock()
-	for _, directory := range directories {
-		_ = os.RemoveAll(directory)
-	}
-}
-
 func (h ClaudeCodeWebHarness) generateInDirectory(ctx context.Context, credential string, request WebHarnessRequest, workingDirectory, sessionID string, resume bool, resumeMessages []WebHarnessMessage) (WebHarnessResponse, error) {
-	if err := verifyHarnessVersion(ctx, h.Executable, claudeCodeHarnessVersion, workingDirectory, harnessEnvironment(workingDirectory, "", "")); err != nil {
+	if err := verifyHarnessVersion(ctx, h.Executable, ClaudeCodeHarnessVersion, workingDirectory, harnessEnvironment(workingDirectory, "", "")); err != nil {
 		return WebHarnessResponse{}, err
 	}
 	environment := harnessEnvironment(workingDirectory, "ANTHROPIC_API_KEY", credential)
@@ -533,7 +290,7 @@ func newHarnessSessionID() (string, error) {
 }
 
 func prepareHarness(executable, credential, authFile string, request WebHarnessRequest) (string, error) {
-	return prepareHarnessWithLogin(executable, credential, harnessFileAvailable(authFile), request)
+	return prepareHarnessWithLogin(executable, credential, HarnessFileAvailable(authFile), request)
 }
 
 func prepareHarnessWithLogin(executable, credential string, loginAvailable bool, request WebHarnessRequest) (string, error) {
@@ -554,7 +311,7 @@ func copyHarnessLogin(source, destination string) error {
 	if source == "" {
 		return nil
 	}
-	data, err := readHarnessLogin(source)
+	data, err := ReadHarnessLogin(source)
 	if err != nil {
 		return err
 	}
@@ -564,14 +321,14 @@ func copyHarnessLogin(source, destination string) error {
 	return nil
 }
 
-func readHarnessLogin(source string) ([]byte, error) {
+func ReadHarnessLogin(source string) ([]byte, error) {
 	file, err := os.Open(source)
 	if err != nil {
 		return nil, ErrWebHarnessAuthentication
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, 1<<20+1))
-	if err != nil || len(data) > 1<<20 || !validJSONObject(data) {
+	if err != nil || len(data) > 1<<20 || !providers.ValidJSONObject(data) {
 		return nil, ErrWebHarnessAuthentication
 	}
 	return data, nil
@@ -820,7 +577,7 @@ func parseClaudeHarnessResponse(output []byte, history []WebHarnessMessage) (Web
 		// Claude Code reports Anthropic-shaped Usage, where input_tokens excludes both cache
 		// components; §32.4 requires cached_tokens to be a subset of input_tokens.
 		normalizedUsage = &WebHarnessUsage{
-			InputTokens:  sumTokens(result.Usage.InputTokens, result.Usage.CacheCreationInputTokens, result.Usage.CacheReadInputTokens),
+			InputTokens:  providers.SumTokens(result.Usage.InputTokens, result.Usage.CacheCreationInputTokens, result.Usage.CacheReadInputTokens),
 			OutputTokens: result.Usage.OutputTokens,
 			CachedTokens: result.Usage.CacheReadInputTokens,
 		}
@@ -890,7 +647,7 @@ func validateWebHarnessResponse(response *WebHarnessResponse, history []WebHarne
 	}
 	for index := range response.ToolCalls {
 		call := &response.ToolCalls[index]
-		if strings.TrimSpace(call.ID) == "" || !modelNamePattern.MatchString(call.Name) || !validJSONObject(call.Arguments) || seenIDs[call.ID] {
+		if strings.TrimSpace(call.ID) == "" || !providers.ModelNamePattern.MatchString(call.Name) || !providers.ValidJSONObject(call.Arguments) || seenIDs[call.ID] {
 			return ErrWebHarnessResponse
 		}
 		seenIDs[call.ID] = true
@@ -914,3 +671,33 @@ const webHarnessResponseSchema = `{
   "required":["content","tool_calls","finish_reason"],
   "additionalProperties":false
 }`
+
+type Continuation struct {
+	AfterMessages int
+	Messages      []WebHarnessMessage
+}
+
+func HarnessErrorCategory(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, ErrWebHarnessAuthentication):
+		return "authentication"
+	case errors.Is(err, ErrWebHarnessVersion):
+		return "version"
+	case errors.Is(err, ErrWebHarnessResponse):
+		return "response"
+	default:
+		return "unavailable"
+	}
+}
+
+func HarnessFileAvailable(file string) bool {
+	if !filepath.IsAbs(file) {
+		return false
+	}
+	info, err := os.Stat(file)
+	return err == nil && info.Mode().IsRegular()
+}

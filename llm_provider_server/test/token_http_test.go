@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	gateway "stock-ai/llm-provider-server"
+	gateway "stock-ai/llm-provider-server/internal/gateway"
 )
 
 func TestAdminCanCreateTokenAndGenerateWithCredential(t *testing.T) {

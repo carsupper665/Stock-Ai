@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	gateway "stock-ai/llm-provider-server"
+	gateway "stock-ai/llm-provider-server/internal/gateway"
 )
 
 func TestTokenLifecycleUsesStableEnabledSelectionAndNeverFallsBackAfterConfiguration(t *testing.T) {

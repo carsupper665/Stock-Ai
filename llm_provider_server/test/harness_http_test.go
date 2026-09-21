@@ -13,7 +13,8 @@ import (
 	"testing"
 	"time"
 
-	gateway "stock-ai/llm-provider-server"
+	gateway "stock-ai/llm-provider-server/internal/gateway"
+	webharness "stock-ai/llm-provider-server/internal/webharness"
 )
 
 func TestHarnessProvidersAreUsableThroughGatewayHTTP(t *testing.T) {
@@ -548,8 +549,8 @@ func TestClaudeContinuationUsesExactDeltaWithoutExtraColdOrAssistantDuplication(
 	continuationEnvelope, continuation := decodeManagedClaudeEnvelope(t, continuationResponse)
 
 	toolContent, callID := `{"ok":true}`, "managed-call"
-	assistantMessages := []gateway.WebHarnessMessage{{
-		Role: "assistant", ToolCalls: []gateway.WebHarnessToolCall{{ID: callID, Name: "fixture_tool", Arguments: json.RawMessage(`{}`)}},
+	assistantMessages := []webharness.WebHarnessMessage{{
+		Role: "assistant", ToolCalls: []webharness.WebHarnessToolCall{{ID: callID, Name: "fixture_tool", Arguments: json.RawMessage(`{}`)}},
 	}, {
 		Role: "tool", Content: &toolContent, ToolCallID: &callID,
 	}}

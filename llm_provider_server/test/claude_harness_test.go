@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	gateway "stock-ai/llm-provider-server"
+	webharness "stock-ai/llm-provider-server/internal/webharness"
 )
 
 func TestClaudeCodeHarnessUsesRestrictedToolAllowlistAndNormalizesText(t *testing.T) {
@@ -24,8 +24,8 @@ func TestClaudeCodeHarnessUsesRestrictedToolAllowlistAndNormalizesText(t *testin
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "attacker-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "attacker-token")
 	executable := copyHarnessFixture(t, "claude-fixture.exe")
-	response, err := (gateway.ClaudeCodeWebHarness{Executable: executable}).Generate(context.Background(), "fixture-claude-key",
-		gateway.WebHarnessRequest{Model: "claude-sonnet-4-6", Messages: []gateway.WebHarnessMessage{{Role: "user", Content: stringPointer("search the web")}}})
+	response, err := (webharness.ClaudeCodeWebHarness{Executable: executable}).Generate(context.Background(), "fixture-claude-key",
+		webharness.WebHarnessRequest{Model: "claude-sonnet-4-6", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("search the web")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,18 +46,18 @@ func TestClaudeCodeHarnessNormalizesAuthenticationFailureAndInvalidOutput(t *tes
 		model string
 		want  error
 	}{
-		{model: "auth-failure", want: gateway.ErrWebHarnessAuthentication},
-		{model: "invalid-output", want: gateway.ErrWebHarnessResponse},
-		{model: "invalid-diagnostics", want: gateway.ErrWebHarnessResponse},
-		{model: "wrong-version", want: gateway.ErrWebHarnessVersion},
+		{model: "auth-failure", want: webharness.ErrWebHarnessAuthentication},
+		{model: "invalid-output", want: webharness.ErrWebHarnessResponse},
+		{model: "invalid-diagnostics", want: webharness.ErrWebHarnessResponse},
+		{model: "wrong-version", want: webharness.ErrWebHarnessVersion},
 	} {
 		t.Run(test.model, func(t *testing.T) {
 			executable := copyHarnessFixture(t, "claude-fixture.exe")
 			if test.model == "wrong-version" {
 				executable = copyHarnessFixture(t, "claude-fixture-wrong-version.exe")
 			}
-			_, err := (gateway.ClaudeCodeWebHarness{Executable: executable}).Generate(context.Background(), "fixture-claude-key",
-				gateway.WebHarnessRequest{Model: test.model, Messages: []gateway.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
+			_, err := (webharness.ClaudeCodeWebHarness{Executable: executable}).Generate(context.Background(), "fixture-claude-key",
+				webharness.WebHarnessRequest{Model: test.model, Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
 			if !isError(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
 			}
@@ -70,8 +70,8 @@ func TestClaudeCodeHarnessCancellationKillsTheInvocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err := (gateway.ClaudeCodeWebHarness{Executable: executable}).Generate(ctx, "fixture-claude-key",
-		gateway.WebHarnessRequest{Model: "hang", Messages: []gateway.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
+	_, err := (webharness.ClaudeCodeWebHarness{Executable: executable}).Generate(ctx, "fixture-claude-key",
+		webharness.WebHarnessRequest{Model: "hang", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
 	if !isError(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v, want deadline exceeded", err)
 	}
@@ -82,8 +82,8 @@ func TestClaudeCodeHarnessCancellationKillsTheInvocation(t *testing.T) {
 
 func TestClaudeCodeHarnessWithoutConversationRemainsStateless(t *testing.T) {
 	executable := copyHarnessFixture(t, "claude-fixture.exe")
-	response, err := (gateway.ClaudeCodeWebHarness{Executable: executable}).Generate(context.Background(), "fixture-claude-key",
-		gateway.WebHarnessRequest{Model: "stateless-report", Messages: []gateway.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
+	response, err := (webharness.ClaudeCodeWebHarness{Executable: executable}).Generate(context.Background(), "fixture-claude-key",
+		webharness.WebHarnessRequest{Model: "stateless-report", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
 	if err != nil || response.Content == nil {
 		t.Fatalf("Generate() response=%+v error=%v", response, err)
 	}
@@ -204,7 +204,7 @@ func runManagedClaudeFixture(prompt []byte) int {
 		if os.WriteFile(markerPath, marker, 0600) != nil {
 			return 23
 		}
-		var request gateway.WebHarnessRequest
+		var request webharness.WebHarnessRequest
 		parts := strings.SplitN(string(prompt), "The normalized request follows:\n", 2)
 		if len(parts) != 2 || json.Unmarshal([]byte(parts[1]), &request) != nil || strings.Index(parts[1], `"tools"`) > strings.Index(parts[1], `"messages"`) {
 			return 24
@@ -230,7 +230,7 @@ func runManagedClaudeFixture(prompt []byte) int {
 	if !strings.HasPrefix(string(prompt), prefix) {
 		return 26
 	}
-	var messages []gateway.WebHarnessMessage
+	var messages []webharness.WebHarnessMessage
 	if json.Unmarshal(prompt[len(prefix):], &messages) != nil {
 		return 27
 	}
@@ -249,7 +249,7 @@ func runManagedClaudeFixture(prompt []byte) int {
 	return writeManagedClaudeResult(content, []any{}, "stop")
 }
 
-func countAssistantMessages(messages []gateway.WebHarnessMessage) int {
+func countAssistantMessages(messages []webharness.WebHarnessMessage) int {
 	count := 0
 	for _, message := range messages {
 		if message.Role == "assistant" {
@@ -259,7 +259,7 @@ func countAssistantMessages(messages []gateway.WebHarnessMessage) int {
 	return count
 }
 
-func managedFixtureAuth(messages []gateway.WebHarnessMessage, workingDirectory string) bool {
+func managedFixtureAuth(messages []webharness.WebHarnessMessage, workingDirectory string) bool {
 	expected := ""
 	barrier := ""
 	for _, message := range messages {

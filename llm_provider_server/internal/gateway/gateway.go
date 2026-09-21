@@ -6,7 +6,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
@@ -14,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sqlite "github.com/glebarez/go-sqlite"
 	"io"
 	"mime"
 	"net/http"
@@ -21,13 +21,12 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"stock-ai/llm-provider-server/internal/providers"
+	"stock-ai/llm-provider-server/internal/webharness"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
-	"unicode/utf8"
-
-	sqlite "github.com/glebarez/go-sqlite"
 )
 
 const (
@@ -35,45 +34,25 @@ const (
 	sqliteConstraintPrimaryID = 1555
 )
 
-var providerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 var tokenIDPattern = regexp.MustCompile(`^tok_[a-f0-9]{32}$`)
-var modelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
-var compatibleToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-var openAIOptionNames = map[string]bool{
-	"frequency_penalty": true, "logit_bias": true, "logprobs": true, "max_completion_tokens": true,
-	"max_tokens": true, "metadata": true, "parallel_tool_calls": true, "prediction": true,
-	"presence_penalty": true, "prompt_cache_key": true, "prompt_cache_options": true,
-	"prompt_cache_retention": true, "reasoning_effort": true, "response_format": true,
-	"safety_identifier": true, "seed": true, "service_tier": true, "stop": true, "store": true,
-	"temperature": true, "tool_choice": true, "top_logprobs": true, "top_p": true, "user": true,
-	"verbosity": true,
-}
 
 type Server struct {
-	db                *sql.DB
-	adminToken        string
-	runtimeToken      string
-	masterKey         []byte
-	modelCatalog      []modelMapping
-	catalogMu         sync.RWMutex
-	httpClient        *http.Client
-	handler           http.Handler
-	codexExecutable   string
-	claudeExecutable  string
-	codexAuthFile     string
-	claudeAuthFile    string
-	requestContext    context.Context
-	cancelRequests    context.CancelFunc
-	requestMu         sync.Mutex
-	requestWG         sync.WaitGroup
-	stopping          bool
-	closeOnce         sync.Once
-	closeErr          error
-	harnessSessions   map[string]*claudeHarnessSession
-	harnessSessionMu  sync.Mutex
-	harnessSessionTTL time.Duration
-	harnessGCStop     chan struct{}
-	harnessGCDone     chan struct{}
+	db             *sql.DB
+	adminToken     string
+	runtimeToken   string
+	masterKey      []byte
+	modelCatalog   []modelMapping
+	catalogMu      sync.RWMutex
+	httpClient     *http.Client
+	handler        http.Handler
+	requestContext context.Context
+	cancelRequests context.CancelFunc
+	requestMu      sync.Mutex
+	requestWG      sync.WaitGroup
+	stopping       bool
+	closeOnce      sync.Once
+	closeErr       error
+	claudeSessions *webharness.ClaudeSessions
 }
 
 type providerRequestSnapshot struct {
@@ -135,67 +114,6 @@ type patchProviderRequest struct {
 	Enabled      json.RawMessage `json:"enabled"`
 }
 
-type generateRequest struct {
-	Provider       string                     `json:"provider"`
-	Model          *string                    `json:"model"`
-	Messages       []message                  `json:"messages"`
-	Tools          []toolSchema               `json:"tools"`
-	Options        map[string]json.RawMessage `json:"options"`
-	ConversationID *string                    `json:"conversation_id,omitempty"`
-	Continuation   *generateContinuation      `json:"continuation,omitempty"`
-}
-
-type generateContinuation struct {
-	AfterMessages int       `json:"after_messages"`
-	Messages      []message `json:"messages"`
-}
-
-type message struct {
-	Role       string     `json:"role"`
-	Content    *string    `json:"content"`
-	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
-	ToolCallID *string    `json:"tool_call_id,omitempty"`
-}
-
-type toolSchema struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
-}
-
-type toolCall struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-}
-
-type toolAliases struct {
-	wireByRuntime map[string]string
-	runtimeByWire map[string]string
-}
-
-type providerCall struct {
-	url     string
-	headers map[string]string
-	body    []byte
-}
-
-// providerError is a Provider status already classified into the §22 envelope.
-type providerError struct {
-	status  int
-	code    string
-	message string
-}
-
-func (e providerError) Error() string { return e.message }
-
-type usage struct {
-	InputTokens  *int `json:"input_tokens"`
-	OutputTokens *int `json:"output_tokens"`
-	CachedTokens *int `json:"cached_tokens"`
-	TotalTokens  *int `json:"total_tokens"`
-}
-
 type modelMapping struct {
 	ModelName  string                                `json:"model_name"`
 	ProviderID string                                `json:"provider_id"`
@@ -213,19 +131,6 @@ type modelMappingConfig struct {
 	Options    map[string]json.RawMessage            `json:"options"`
 	Levels     map[string]map[string]json.RawMessage `json:"levels"`
 	Enabled    json.RawMessage                       `json:"enabled"`
-}
-
-type generateResponse struct {
-	Content         *string    `json:"content"`
-	Reasoning       *string    `json:"reasoning,omitempty"`
-	ToolCalls       []toolCall `json:"tool_calls"`
-	FinishReason    string     `json:"finish_reason"`
-	Usage           *usage     `json:"usage"`
-	NumTurns        *int       `json:"num_turns,omitempty"`
-	TotalCostUSD    *float64   `json:"total_cost_usd,omitempty"`
-	SessionMode     string     `json:"session_mode,omitempty"`
-	FallbackReason  string     `json:"fallback_reason,omitempty"`
-	InvocationCount int        `json:"invocation_count,omitempty"`
 }
 
 func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTimeout time.Duration) (*Server, error) {
@@ -301,10 +206,7 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 		db: db, adminToken: adminToken, runtimeToken: runtimeToken,
 		masterKey: masterKey, modelCatalog: modelCatalog,
 		requestContext: requestContext, cancelRequests: cancelRequests,
-		codexExecutable: harnessPath("LLM_SERVER_CODEX_EXECUTABLE"), claudeExecutable: harnessPath("LLM_SERVER_CLAUDE_EXECUTABLE"),
-		codexAuthFile: harnessPath("LLM_SERVER_CODEX_AUTH_FILE"), claudeAuthFile: harnessPath("LLM_SERVER_CLAUDE_AUTH_FILE"),
-		harnessSessions: make(map[string]*claudeHarnessSession), harnessSessionTTL: harnessSessionTTL,
-		harnessGCStop: make(chan struct{}), harnessGCDone: make(chan struct{}),
+		claudeSessions: webharness.NewClaudeSessions(harnessPath("LLM_SERVER_CLAUDE_EXECUTABLE"), harnessSessionTTL),
 		httpClient: &http.Client{
 			Timeout: providerTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -329,7 +231,6 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 		writeError(w, http.StatusNotFound, "REQUEST_INVALID", "Endpoint does not exist.")
 	})
 	server.handler = server.trackRequests(mux)
-	go server.collectHarnessSessions()
 	return server, nil
 }
 
@@ -342,12 +243,12 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	var request generateRequest
+	var request providers.GenerateRequest
 	if err := decodeJSON(w, r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
 		return
 	}
-	if err := validateGenerateRequest(&request); err != nil {
+	if err := providers.ValidateGenerateRequest(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
 		return
 	}
@@ -391,18 +292,18 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		s.generateHarness(w, r, provider, snapshot.Credential, *model, request, options)
 		return
 	}
-	aliases := newToolAliases(request)
-	var call providerCall
+	aliases := providers.NewToolAliases(request)
+	var call providers.ProviderCall
 	switch provider.Type {
 	case "anthropic":
-		call, err = anthropicCall(provider.BaseURL, *model, request, options, aliases.wireByRuntime)
+		call, err = providers.AnthropicCall(provider.BaseURL, *model, request, options, aliases.WireByRuntime)
 	case "gemini":
-		call, err = geminiCall(provider.BaseURL, *model, request, options, aliases.wireByRuntime)
+		call, err = providers.GeminiCall(provider.BaseURL, *model, request, options, aliases.WireByRuntime)
 	default:
-		call, err = compatibleCall(provider, *model, request, options, aliases.wireByRuntime)
+		call, err = providers.CompatibleCall(provider.Type, provider.BaseURL, *model, request, options, aliases.WireByRuntime)
 	}
 	if err != nil {
-		var failure providerError
+		var failure providers.ProviderError
 		if errors.As(err, &failure) {
 			writeProviderError(w, err)
 			return
@@ -418,26 +319,26 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case credential == "":
 	case provider.Type == "anthropic":
-		call.headers["x-api-key"] = credential
+		call.Headers["x-api-key"] = credential
 	case provider.Type == "gemini":
-		call.headers["x-goog-api-key"] = credential
+		call.Headers["x-goog-api-key"] = credential
 	default:
-		call.headers["Authorization"] = "Bearer " + credential
+		call.Headers["Authorization"] = "Bearer " + credential
 	}
 	response := s.callProvider(w, r, call)
 	if response == nil {
 		return
 	}
 	defer response.Body.Close()
-	var normalized generateResponse
+	var normalized providers.GenerateResponse
 	switch provider.Type {
 	case "anthropic":
-		normalized, err = normalizeAnthropicResponse(response, aliases.runtimeByWire, historicalToolCallIDs(request.Messages))
+		normalized, err = providers.NormalizeAnthropicResponse(response, aliases.RuntimeByWire, providers.HistoricalToolCallIDs(request.Messages))
 	case "gemini":
-		normalized, err = normalizeGeminiResponse(response, aliases.runtimeByWire, historicalToolCallIDs(request.Messages))
+		normalized, err = providers.NormalizeGeminiResponse(response, aliases.RuntimeByWire, providers.HistoricalToolCallIDs(request.Messages))
 	default:
-		normalized, err = normalizeCompatibleResponse(response, provider.Type == "openai", aliases.runtimeByWire,
-			historicalToolCallIDs(request.Messages))
+		normalized, err = providers.NormalizeCompatibleResponse(response, provider.Type == "openai", aliases.RuntimeByWire,
+			providers.HistoricalToolCallIDs(request.Messages))
 	}
 	if err != nil {
 		writeProviderError(w, err)
@@ -446,47 +347,19 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, normalized)
 }
 
-func compatibleCall(provider Provider, model string, request generateRequest, options map[string]json.RawMessage, wireByRuntime map[string]string) (providerCall, error) {
-	openAI := provider.Type == "openai"
-	if openAI {
-		var err error
-		options, err = normalizeOpenAIOptions(options, request.Tools, wireByRuntime)
-		if err != nil {
-			return providerCall{}, err
-		}
-	}
-	upstreamRequest := map[string]any{"model": model, "messages": compatibleMessages(request.Messages, wireByRuntime, openAI)}
-	if len(request.Tools) != 0 {
-		upstreamRequest["tools"] = compatibleTools(request.Tools, wireByRuntime)
-	}
-	for key, value := range options {
-		if key == "model" || key == "messages" || key == "tools" {
-			return providerCall{}, errors.New("options cannot replace model, messages, or tools.")
-		}
-		upstreamRequest[key] = value
-	}
-	body, err := json.Marshal(upstreamRequest)
-	if err != nil {
-		return providerCall{}, errors.New("Options contain an invalid value.")
-	}
-	return providerCall{url: strings.TrimRight(provider.BaseURL, "/") + "/chat/completions", headers: map[string]string{}, body: body}, nil
-}
-
-// callProvider performs the single upstream request. It writes the transport, credential, and
-// rate-limit errors shared by every Provider type and returns nil when it did.
-func (s *Server) callProvider(w http.ResponseWriter, r *http.Request, call providerCall) *http.Response {
-	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost, call.url, bytes.NewReader(call.body))
+func (s *Server) callProvider(w http.ResponseWriter, r *http.Request, call providers.ProviderCall) *http.Response {
+	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost, call.URL, bytes.NewReader(call.Body))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Unable to create provider request.")
 		return nil
 	}
 	upstream.Header.Set("Content-Type", "application/json")
-	for name, value := range call.headers {
+	for name, value := range call.Headers {
 		upstream.Header.Set(name, value)
 	}
 	response, err := s.httpClient.Do(upstream)
 	if err != nil {
-		if isTimeout(err) {
+		if providers.IsTimeout(err) {
 			writeError(w, http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out.")
 			return nil
 		}
@@ -506,49 +379,13 @@ func (s *Server) callProvider(w http.ResponseWriter, r *http.Request, call provi
 	return response
 }
 
-func upstreamStatusFailure(upstream *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(upstream.Body, maxUpstreamFailureBody))
-	message := fmt.Sprintf("Provider returned HTTP %d.", upstream.StatusCode)
-	if category := upstreamFailureCategory(body); category != "" {
-		message += " " + category
-	}
-	return providerError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", message}
-}
-
-func upstreamFailureCategory(body []byte) string {
-	var failure struct {
-		Error struct {
-			Code   string `json:"code"`
-			Type   string `json:"type"`
-			Status string `json:"status"`
-		} `json:"error"`
-		Code   string `json:"code"`
-		Type   string `json:"type"`
-		Status string `json:"status"`
-	}
-	if json.Unmarshal(body, &failure) != nil {
-		return ""
-	}
-	for _, value := range []string{failure.Error.Code, failure.Error.Type, failure.Error.Status, failure.Code, failure.Type, failure.Status} {
-		switch strings.ToLower(value) {
-		case "model_not_found", "model_not_found_error", "unknown_model":
-			return "Provider does not provide the requested model."
-		case "insufficient_quota", "quota_exceeded", "resource_exhausted", "billing_hard_limit_reached", "usage_limit_reached":
-			return "Provider quota is exhausted."
-		case "authentication_expired", "login_expired", "oauth_token_expired", "token_expired":
-			return "Provider login or credential has expired."
-		}
-	}
-	return ""
-}
-
 func writeProviderError(w http.ResponseWriter, err error) {
-	var failure providerError
+	var failure providers.ProviderError
 	if errors.As(err, &failure) {
-		writeError(w, failure.status, failure.code, failure.message)
+		writeError(w, failure.Status, failure.Code, failure.Message)
 		return
 	}
-	if isTimeout(err) {
+	if providers.IsTimeout(err) {
 		writeError(w, http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out.")
 		return
 	}
@@ -557,259 +394,6 @@ func writeProviderError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusBadGateway, "PROVIDER_RESPONSE_INVALID", "Provider returned an invalid response.")
-}
-
-func validateGenerateRequest(request *generateRequest) error {
-	request.Provider = strings.TrimSpace(request.Provider)
-	if !providerIDPattern.MatchString(request.Provider) {
-		return errors.New("provider must be a valid provider ID")
-	}
-	if len(request.Messages) == 0 {
-		return errors.New("messages must contain at least one message")
-	}
-	if request.ConversationID != nil {
-		if *request.ConversationID == "" || utf8.RuneCountInString(*request.ConversationID) > 128 || strings.IndexFunc(*request.ConversationID, unicode.IsControl) >= 0 {
-			return errors.New("conversation_id must be 1-128 characters with no control characters")
-		}
-	}
-	if request.Continuation != nil && request.Continuation.AfterMessages <= 0 {
-		return errors.New("continuation.after_messages must be positive")
-	}
-	pendingCalls := map[string]bool{}
-	seenCalls := map[string]bool{}
-	for _, message := range request.Messages {
-		switch message.Role {
-		case "system", "user":
-			if message.Content == nil || len(message.ToolCalls) != 0 || message.ToolCallID != nil {
-				return errors.New("system and user messages require string content and no tool fields")
-			}
-		case "assistant":
-			if message.ToolCallID != nil || (message.Content == nil && len(message.ToolCalls) == 0) {
-				return errors.New("assistant messages require content or tool_calls and no tool_call_id")
-			}
-			for _, call := range message.ToolCalls {
-				if err := validateToolCall(call); err != nil {
-					return err
-				}
-				if seenCalls[call.ID] {
-					return errors.New("tool call IDs must be unique")
-				}
-				seenCalls[call.ID] = true
-				pendingCalls[call.ID] = true
-			}
-		case "tool":
-			if len(message.ToolCalls) != 0 || message.ToolCallID == nil || strings.TrimSpace(*message.ToolCallID) == "" || !pendingCalls[*message.ToolCallID] {
-				return errors.New("tool messages must reference an unresolved assistant tool call")
-			}
-			delete(pendingCalls, *message.ToolCallID)
-		default:
-			return errors.New("message role must be system, user, assistant, or tool")
-		}
-	}
-	toolNames := map[string]bool{}
-	for _, tool := range request.Tools {
-		if !modelNamePattern.MatchString(tool.Name) || !validJSONObject(tool.InputSchema) || toolNames[tool.Name] {
-			return errors.New("tools require unique valid names and object input_schema values")
-		}
-		toolNames[tool.Name] = true
-	}
-	return nil
-}
-
-func validateToolCall(call toolCall) error {
-	if strings.TrimSpace(call.ID) == "" || !modelNamePattern.MatchString(call.Name) || !validJSONObject(call.Arguments) {
-		return errors.New("tool calls require an ID, valid name, and object arguments")
-	}
-	return nil
-}
-
-func validJSONObject(value json.RawMessage) bool {
-	if len(value) == 0 || isJSONNull(value) {
-		return false
-	}
-	var object map[string]json.RawMessage
-	decoder := json.NewDecoder(bytes.NewReader(value))
-	if decoder.Decode(&object) != nil || object == nil {
-		return false
-	}
-	return errors.Is(decoder.Decode(&struct{}{}), io.EOF)
-}
-
-func newToolAliases(request generateRequest) toolAliases {
-	names := map[string]bool{}
-	for _, tool := range request.Tools {
-		names[tool.Name] = true
-	}
-	for _, message := range request.Messages {
-		for _, call := range message.ToolCalls {
-			names[call.Name] = true
-		}
-	}
-	sortedNames := make([]string, 0, len(names))
-	for name := range names {
-		sortedNames = append(sortedNames, name)
-	}
-	sort.Strings(sortedNames)
-	aliases := toolAliases{wireByRuntime: map[string]string{}, runtimeByWire: map[string]string{}}
-	for _, name := range sortedNames {
-		if compatibleToolNamePattern.MatchString(name) {
-			aliases.wireByRuntime[name] = name
-			aliases.runtimeByWire[name] = name
-		}
-	}
-	for _, name := range sortedNames {
-		if _, exists := aliases.wireByRuntime[name]; exists {
-			continue
-		}
-		for attempt := 0; ; attempt++ {
-			wireName := compatibleToolAlias(name, attempt)
-			if _, collision := aliases.runtimeByWire[wireName]; collision {
-				continue
-			}
-			aliases.wireByRuntime[name] = wireName
-			aliases.runtimeByWire[wireName] = name
-			break
-		}
-	}
-	return aliases
-}
-
-func compatibleToolAlias(name string, attempt int) string {
-	var prefix strings.Builder
-	for _, character := range name {
-		if (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
-			(character >= '0' && character <= '9') || character == '_' || character == '-' {
-			prefix.WriteRune(character)
-		} else {
-			prefix.WriteByte('_')
-		}
-	}
-	seed := name
-	if attempt != 0 {
-		seed = fmt.Sprintf("%s\x00%d", name, attempt)
-	}
-	digest := sha256.Sum256([]byte(seed))
-	suffix := hex.EncodeToString(digest[:8])
-	base := prefix.String()
-	maxBaseLength := 64 - len(suffix) - 1
-	if len(base) > maxBaseLength {
-		base = base[:maxBaseLength]
-	}
-	if base == "" {
-		base = "tool"
-	}
-	return base + "_" + suffix
-}
-
-func historicalToolCallIDs(messages []message) map[string]bool {
-	ids := map[string]bool{}
-	for _, message := range messages {
-		for _, call := range message.ToolCalls {
-			ids[call.ID] = true
-		}
-	}
-	return ids
-}
-
-func compatibleMessages(messages []message, wireByRuntime map[string]string, openAI bool) []map[string]any {
-	converted := make([]map[string]any, 0, len(messages))
-	for _, message := range messages {
-		item := map[string]any{"role": message.Role, "content": message.Content}
-		if openAI && message.Role == "tool" && message.Content == nil {
-			item["content"] = ""
-		}
-		if message.ToolCallID != nil {
-			item["tool_call_id"] = *message.ToolCallID
-		}
-		if len(message.ToolCalls) != 0 {
-			calls := make([]map[string]any, 0, len(message.ToolCalls))
-			for _, call := range message.ToolCalls {
-				calls = append(calls, map[string]any{"id": call.ID, "type": "function", "function": map[string]any{
-					"name": wireByRuntime[call.Name], "arguments": string(call.Arguments),
-				}})
-			}
-			item["tool_calls"] = calls
-		}
-		converted = append(converted, item)
-	}
-	return converted
-}
-
-func compatibleTools(tools []toolSchema, wireByRuntime map[string]string) []map[string]any {
-	converted := make([]map[string]any, 0, len(tools))
-	for _, tool := range tools {
-		converted = append(converted, map[string]any{"type": "function", "function": map[string]any{
-			"name": wireByRuntime[tool.Name], "description": tool.Description, "parameters": tool.InputSchema,
-		}})
-	}
-	return converted
-}
-
-func normalizeOpenAIOptions(options map[string]json.RawMessage, tools []toolSchema, wireByRuntime map[string]string) (map[string]json.RawMessage, error) {
-	for name := range options {
-		if !openAIOptionNames[name] {
-			return nil, fmt.Errorf("OpenAI option %s is not supported by the normalized Generate contract", name)
-		}
-	}
-	choice, exists := options["tool_choice"]
-	if !exists {
-		return options, nil
-	}
-	var mode string
-	if json.Unmarshal(choice, &mode) == nil {
-		if mode != "none" && mode != "auto" && mode != "required" {
-			return nil, errors.New("OpenAI tool_choice must be none, auto, required, or a declared function")
-		}
-		return options, nil
-	}
-	var named struct {
-		Type     string `json:"type"`
-		Function *struct {
-			Name string `json:"name"`
-		} `json:"function"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(choice))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&named) != nil || named.Type != "function" || named.Function == nil ||
-		!errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
-		return nil, errors.New("OpenAI tool_choice must be none, auto, required, or a declared function")
-	}
-	declared := false
-	for _, tool := range tools {
-		declared = declared || tool.Name == named.Function.Name
-	}
-	if !declared {
-		return nil, errors.New("OpenAI tool_choice function must name a declared tool")
-	}
-	named.Function.Name = wireByRuntime[named.Function.Name]
-	normalizedChoice, err := json.Marshal(named)
-	if err != nil {
-		return nil, errors.New("OpenAI tool_choice is invalid")
-	}
-	normalized := make(map[string]json.RawMessage, len(options))
-	for key, value := range options {
-		normalized[key] = value
-	}
-	normalized["tool_choice"] = normalizedChoice
-	return normalized, nil
-}
-
-func isOpenAIModelNotFound(reader io.Reader) (bool, error) {
-	body, err := readProviderBody(reader)
-	if err != nil {
-		return false, err
-	}
-	var response struct {
-		Error struct {
-			Code  string `json:"code"`
-			Param string `json:"param"`
-		} `json:"error"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if decoder.Decode(&response) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
-		return false, nil
-	}
-	return response.Error.Code == "model_not_found" || response.Error.Param == "model", nil
 }
 
 func parseModelCatalog(value string) ([]modelMapping, error) {
@@ -833,7 +417,7 @@ func parseModelCatalog(value string) ([]modelMapping, error) {
 		entry.ModelName = strings.TrimSpace(entry.ModelName)
 		entry.ProviderID = strings.TrimSpace(entry.ProviderID)
 		entry.Model = strings.TrimSpace(entry.Model)
-		if !modelNamePattern.MatchString(entry.ModelName) || !providerIDPattern.MatchString(entry.ProviderID) || entry.Model == "" {
+		if !providers.ModelNamePattern.MatchString(entry.ModelName) || !providers.ProviderIDPattern.MatchString(entry.ProviderID) || entry.Model == "" {
 			return nil, errors.New("model_name, provider_id, and model must be valid nonempty values")
 		}
 		if byName[entry.ModelName] {
@@ -864,7 +448,7 @@ func parseModelCatalog(value string) ([]modelMapping, error) {
 			}
 		}
 		enabled := true
-		if len(entry.Enabled) != 0 && (isJSONNull(entry.Enabled) || json.Unmarshal(entry.Enabled, &enabled) != nil) {
+		if len(entry.Enabled) != 0 && (providers.IsJSONNull(entry.Enabled) || json.Unmarshal(entry.Enabled, &enabled) != nil) {
 			return nil, fmt.Errorf("model %q enabled must be a boolean", entry.ModelName)
 		}
 		models = append(models, modelMapping{ModelName: entry.ModelName, ProviderID: entry.ProviderID,
@@ -928,136 +512,6 @@ func (s *Server) resolveModelOptions(providerID, model string, requested map[str
 }
 
 // Only structured error identifiers are inspected; Provider prose is never returned.
-const maxUpstreamFailureBody = 8 << 10
-
-func normalizeCompatibleResponse(upstream *http.Response, openAI bool, runtimeByWire map[string]string, historyIDs map[string]bool) (generateResponse, error) {
-	if openAI && (upstream.StatusCode == http.StatusBadRequest || upstream.StatusCode == http.StatusNotFound) {
-		modelNotFound, err := isOpenAIModelNotFound(upstream.Body)
-		if err != nil {
-			if isTimeout(err) {
-				return generateResponse{}, err
-			}
-			return generateResponse{}, providerError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed."}
-		}
-		if modelNotFound {
-			return generateResponse{}, providerError{http.StatusBadRequest, "MODEL_NOT_FOUND", "OpenAI does not provide the requested model to this credential."}
-		}
-		if upstream.StatusCode == http.StatusBadRequest {
-			return generateResponse{}, providerError{http.StatusBadRequest, "REQUEST_INVALID", "OpenAI rejected the generated request."}
-		}
-	}
-	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return generateResponse{}, upstreamStatusFailure(upstream)
-	}
-	body, err := readProviderBody(upstream.Body)
-	if err != nil {
-		return generateResponse{}, err
-	}
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content          *string `json:"content"`
-				Reasoning        *string `json:"reasoning"`
-				ReasoningContent *string `json:"reasoning_content"`
-				Refusal          *string `json:"refusal"`
-				Role             string  `json:"role"`
-				ToolCalls        []struct {
-					ID       string `json:"id"`
-					Type     string `json:"type"`
-					Function struct {
-						Name      string  `json:"name"`
-						Arguments *string `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-		Usage *struct {
-			PromptTokens     *int `json:"prompt_tokens"`
-			CompletionTokens *int `json:"completion_tokens"`
-			TotalTokens      *int `json:"total_tokens"`
-			PromptDetails    *struct {
-				CachedTokens *int `json:"cached_tokens"`
-			} `json:"prompt_tokens_details"`
-		} `json:"usage"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := decoder.Decode(&response); err != nil || len(response.Choices) == 0 || response.Choices[0].FinishReason == "" {
-		return generateResponse{}, errors.New("invalid compatible response")
-	}
-	if openAI && (len(response.Choices) != 1 || response.Choices[0].Message.Role != "assistant") {
-		return generateResponse{}, errors.New("invalid OpenAI response")
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return generateResponse{}, errors.New("invalid compatible response")
-	}
-	if response.Usage != nil && ((response.Usage.PromptTokens != nil && *response.Usage.PromptTokens < 0) ||
-		(response.Usage.CompletionTokens != nil && *response.Usage.CompletionTokens < 0) ||
-		(response.Usage.TotalTokens != nil && *response.Usage.TotalTokens < 0) ||
-		(response.Usage.PromptDetails != nil && response.Usage.PromptDetails.CachedTokens != nil && *response.Usage.PromptDetails.CachedTokens < 0)) {
-		return generateResponse{}, errors.New("invalid compatible response")
-	}
-	choice := response.Choices[0]
-	content := choice.Message.Content
-	reasoning := choice.Message.ReasoningContent
-	if reasoning == nil {
-		reasoning = choice.Message.Reasoning
-	}
-	if openAI && content == nil && choice.Message.Refusal != nil {
-		content = choice.Message.Refusal
-	}
-	finishReason := choice.FinishReason
-	toolCalls := make([]toolCall, 0, len(choice.Message.ToolCalls))
-	if len(choice.Message.ToolCalls) != 0 {
-		if finishReason != "tool_calls" {
-			return generateResponse{}, errors.New("invalid compatible response")
-		}
-		finishReason = "tool_call"
-		seenIDs := make(map[string]bool, len(historyIDs)+len(choice.Message.ToolCalls))
-		for id := range historyIDs {
-			seenIDs[id] = true
-		}
-		for _, compatibleCall := range choice.Message.ToolCalls {
-			if compatibleCall.Type != "function" || compatibleCall.Function.Arguments == nil ||
-				!compatibleToolNamePattern.MatchString(compatibleCall.Function.Name) {
-				return generateResponse{}, errors.New("invalid compatible response")
-			}
-			arguments := json.RawMessage(*compatibleCall.Function.Arguments)
-			runtimeName := compatibleCall.Function.Name
-			if original, exists := runtimeByWire[runtimeName]; exists {
-				runtimeName = original
-			}
-			call := toolCall{ID: compatibleCall.ID, Name: runtimeName, Arguments: arguments}
-			if validateToolCall(call) != nil || seenIDs[call.ID] {
-				return generateResponse{}, errors.New("invalid compatible response")
-			}
-			seenIDs[call.ID] = true
-			var object map[string]json.RawMessage
-			_ = json.Unmarshal(arguments, &object)
-			canonical, _ := json.Marshal(object)
-			call.Arguments = canonical
-			toolCalls = append(toolCalls, call)
-		}
-	} else {
-		allowsNullContent := openAI && (finishReason == "length" || finishReason == "content_filter")
-		if (content == nil && !allowsNullContent) || finishReason == "tool_calls" ||
-			(finishReason != "stop" && finishReason != "length" && finishReason != "content_filter") {
-			return generateResponse{}, errors.New("invalid compatible response")
-		}
-	}
-	normalized := generateResponse{
-		Content: content, Reasoning: reasoning, ToolCalls: toolCalls, FinishReason: finishReason,
-	}
-	if response.Usage != nil {
-		normalized.Usage = &usage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CompletionTokens,
-			TotalTokens: response.Usage.TotalTokens}
-		if response.Usage.PromptDetails != nil {
-			normalized.Usage.CachedTokens = response.Usage.PromptDetails.CachedTokens
-		}
-	}
-	return normalized, nil
-}
-
 func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) trackRequests(next http.Handler) http.Handler {
@@ -1093,9 +547,7 @@ func (s *Server) Close() error {
 	s.BeginShutdown()
 	s.WaitForRequests()
 	s.closeOnce.Do(func() {
-		close(s.harnessGCStop)
-		<-s.harnessGCDone
-		s.removeAllHarnessSessions()
+		s.claudeSessions.Stop()
 		s.closeErr = s.db.Close()
 	})
 	return s.closeErr
@@ -1232,13 +684,13 @@ func (s *Server) providerByID(w http.ResponseWriter, r *http.Request) {
 	}
 	resource := strings.TrimPrefix(r.URL.Path, "/v1/providers/")
 	parts := strings.Split(resource, "/")
-	if len(parts) == 2 && parts[1] == "test" && providerIDPattern.MatchString(parts[0]) {
+	if len(parts) == 2 && parts[1] == "test" && providers.ProviderIDPattern.MatchString(parts[0]) {
 		s.testProvider(w, r, parts[0])
 		return
 	}
 	if len(parts) >= 2 && parts[1] == "tokens" {
 		id := parts[0]
-		if !providerIDPattern.MatchString(id) {
+		if !providers.ProviderIDPattern.MatchString(id) {
 			writeError(w, http.StatusNotFound, "PROVIDER_NOT_FOUND", "Provider does not exist.")
 			return
 		}
@@ -1259,7 +711,7 @@ func (s *Server) providerByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := resource
-	if !providerIDPattern.MatchString(id) {
+	if !providers.ProviderIDPattern.MatchString(id) {
 		writeError(w, http.StatusNotFound, "PROVIDER_NOT_FOUND", "Provider does not exist.")
 		return
 	}
@@ -1425,7 +877,7 @@ func (s *Server) patchProviderToken(w http.ResponseWriter, r *http.Request, prov
 	}
 	current.Enabled = enabled != 0
 	if len(patch.Name) != 0 {
-		if isJSONNull(patch.Name) || json.Unmarshal(patch.Name, &current.Name) != nil {
+		if providers.IsJSONNull(patch.Name) || json.Unmarshal(patch.Name, &current.Name) != nil {
 			writeError(w, http.StatusBadRequest, "REQUEST_INVALID", "name must be a string.")
 			return
 		}
@@ -1435,13 +887,13 @@ func (s *Server) patchProviderToken(w http.ResponseWriter, r *http.Request, prov
 			return
 		}
 	}
-	if len(patch.Enabled) != 0 && (isJSONNull(patch.Enabled) || json.Unmarshal(patch.Enabled, &current.Enabled) != nil) {
+	if len(patch.Enabled) != 0 && (providers.IsJSONNull(patch.Enabled) || json.Unmarshal(patch.Enabled, &current.Enabled) != nil) {
 		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", "enabled must be a boolean.")
 		return
 	}
 	if len(patch.Token) != 0 {
 		var secret string
-		if isJSONNull(patch.Token) || json.Unmarshal(patch.Token, &secret) != nil || !validTokenSecret(secret) {
+		if providers.IsJSONNull(patch.Token) || json.Unmarshal(patch.Token, &secret) != nil || !validTokenSecret(secret) {
 			writeError(w, http.StatusBadRequest, "REQUEST_INVALID", "token must be a nonempty string without whitespace or control characters.")
 			return
 		}
@@ -1761,7 +1213,7 @@ func applyProviderPatch(request *createProviderRequest, patch patchProviderReque
 		if len(field.raw) == 0 {
 			continue
 		}
-		if isJSONNull(field.raw) || json.Unmarshal(field.raw, field.value) != nil {
+		if providers.IsJSONNull(field.raw) || json.Unmarshal(field.raw, field.value) != nil {
 			return fmt.Errorf("%s must be a string", field.name)
 		}
 	}
@@ -1774,7 +1226,7 @@ func applyProviderPatch(request *createProviderRequest, patch patchProviderReque
 		request.Config = patch.Config
 	}
 	if len(patch.Enabled) != 0 {
-		if isJSONNull(patch.Enabled) || json.Unmarshal(patch.Enabled, request.Enabled) != nil {
+		if providers.IsJSONNull(patch.Enabled) || json.Unmarshal(patch.Enabled, request.Enabled) != nil {
 			return errors.New("enabled must be a boolean")
 		}
 	}
@@ -1799,7 +1251,7 @@ func newProvider(request createProviderRequest) (Provider, error) {
 	request.Name = strings.TrimSpace(request.Name)
 	request.Type = strings.TrimSpace(request.Type)
 	request.BaseURL = strings.TrimRight(strings.TrimSpace(request.BaseURL), "/")
-	if !providerIDPattern.MatchString(request.ID) {
+	if !providers.ProviderIDPattern.MatchString(request.ID) {
 		return Provider{}, errors.New("id must be 1-64 letters, numbers, underscores, or hyphens")
 	}
 	if request.Name == "" {
@@ -1822,7 +1274,7 @@ func newProvider(request createProviderRequest) (Provider, error) {
 			request.DefaultModel = nil
 		}
 	}
-	if len(request.Config) == 0 || isJSONNull(request.Config) {
+	if len(request.Config) == 0 || providers.IsJSONNull(request.Config) {
 		request.Config = json.RawMessage(`{}`)
 	}
 	var config map[string]any
@@ -1852,45 +1304,6 @@ func newProvider(request createProviderRequest) (Provider, error) {
 		CreatedAt: now, UpdatedAt: now}, nil
 }
 
-func isJSONNull(value json.RawMessage) bool {
-	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
-}
-
-func readProviderBody(reader io.Reader) ([]byte, error) {
-	body, err := io.ReadAll(io.LimitReader(reader, maxRequestBody+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > maxRequestBody {
-		return nil, errors.New("provider response exceeds 1 MiB")
-	}
-	return body, nil
-}
-
-// sumTokens adds the Usage components a Provider actually reported; it is null only when it reported none.
-func sumTokens(components ...*int) *int {
-	var total *int
-	for _, component := range components {
-		if component == nil {
-			continue
-		}
-		if total == nil {
-			total = new(int)
-		}
-		*total += *component
-	}
-	return total
-}
-
-func negativeTokens(counts ...*int) bool {
-	for _, count := range counts {
-		if count != nil && *count < 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
@@ -1913,11 +1326,6 @@ func authorized(r *http.Request, expected string) bool {
 		return false
 	}
 	return len(provided) == len(expected) && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
-}
-
-func isTimeout(err error) bool {
-	var timeoutError interface{ Timeout() bool }
-	return errors.As(err, &timeoutError) && timeoutError.Timeout()
 }
 
 func methodNotAllowed(w http.ResponseWriter, allowed string) {

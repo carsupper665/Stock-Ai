@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"stock-ai/llm-provider-server/internal/providers"
 	"strings"
 )
 
@@ -55,7 +56,7 @@ func (s *Server) manageModels(w http.ResponseWriter, request *http.Request) {
 	}
 	name := strings.TrimPrefix(request.URL.Path, "/v1/model-catalog")
 	name = strings.TrimPrefix(name, "/")
-	if name != "" && !modelNamePattern.MatchString(name) {
+	if name != "" && !providers.ModelNamePattern.MatchString(name) {
 		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", "Invalid model_name.")
 		return
 	}
