@@ -548,7 +548,9 @@ Do not create one class per vendor unless protocol behavior materially differs.
 
 ## 18. Model Handling
 
-V1 does not require Model CRUD.
+Model CRUD is provided by the live Admin catalog endpoints in
+[model-management.md](model-management.md) (2026-09-15 amendment); `/v1/models`
+remains Runtime-only.
 
 Each Provider may define:
 
@@ -792,7 +794,6 @@ Critic
 Reflection
 Automatic provider routing
 Automatic semantic retry
-Model CRUD
 ```
 
 ## 26. V1 Definition of Done
@@ -1326,11 +1327,13 @@ go vet ./...
 
 ### 32.1 Single Configuration Source
 
-`LLM_SERVER_MODEL_CATALOG` is the only model-mapping source. It is an optional JSON
-array read and validated once by `Open` before SQLite is opened. Missing or empty
-means an empty catalog. Updating it requires a Gateway restart; Provider CRUD does
-not rewrite mappings. There is no Model CRUD and the Gateway does not enumerate
-vendor APIs.
+`LLM_SERVER_MODEL_CATALOG` is the startup baseline of model mappings: an optional
+JSON array read and validated once by `Open` before SQLite is opened. Missing or
+empty means an empty catalog. Since the 2026-09-15 amendment, the live Admin
+endpoints in [model-management.md](model-management.md) are the source of truth:
+they persist the whole catalog in SQLite and override the environment catalog on
+later starts. Provider CRUD does not rewrite mappings. The Gateway does not
+enumerate vendor APIs.
 
 ```json
 [
