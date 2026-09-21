@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 
 	events "stock-ai/agent-server/internal/events"
 )
@@ -61,7 +61,7 @@ func (s *positionCloseBackendState) serve(w http.ResponseWriter, request *http.R
 	writeFixtureJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
 }
 
-func createPositionCloseEvent(t *testing.T, state *positionCloseBackendState) (*common.AgentRuntime, *scriptedGateway, common.Session, events.Event) {
+func createPositionCloseEvent(t *testing.T, state *positionCloseBackendState) (*agent.AgentRuntime, *scriptedGateway, agent.Session, events.Event) {
 	t.Helper()
 	backend := newTradingBackend(t, state.serve)
 	backend.addAccount(testAccountID, "position-token")
@@ -83,7 +83,7 @@ func createPositionCloseEvent(t *testing.T, state *positionCloseBackendState) (*
 	return runtime, gateway, session, events[0]
 }
 
-func positionCloseTrigger(t *testing.T, runtime *common.AgentRuntime, sessionID string) map[string]any {
+func positionCloseTrigger(t *testing.T, runtime *agent.AgentRuntime, sessionID string) map[string]any {
 	t.Helper()
 	run := waitForRunStatus(t, runtime, sessionID, 2, "completed")
 	var triggers []map[string]any

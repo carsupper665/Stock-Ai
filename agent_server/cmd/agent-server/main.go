@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 	"stock-ai/agent-server/internal/eventloop"
 	"stock-ai/agent-server/internal/server"
 )
@@ -40,7 +40,7 @@ func run(logger *log.Logger) (runErr error) {
 	}
 	defer listener.Close()
 
-	runtime, err := common.OpenAgentRuntime(config)
+	runtime, err := agent.OpenAgentRuntime(config)
 	if err != nil {
 		return err
 	}
@@ -89,32 +89,32 @@ func run(logger *log.Logger) (runErr error) {
 	}
 }
 
-func processConfig() (common.RuntimeConfig, string, time.Duration, error) {
+func processConfig() (agent.RuntimeConfig, string, time.Duration, error) {
 	defaultMaxLoop, err := envPositiveInt("AGENT_SERVER_DEFAULT_MAX_LOOP", 20)
 	if err != nil {
-		return common.RuntimeConfig{}, "", 0, err
+		return agent.RuntimeConfig{}, "", 0, err
 	}
 	defaultMaxToolCall, err := envPositiveInt("AGENT_SERVER_DEFAULT_MAX_TOOL_CALL", 40)
 	if err != nil {
-		return common.RuntimeConfig{}, "", 0, err
+		return agent.RuntimeConfig{}, "", 0, err
 	}
 	requestTimeout, err := envPositiveDuration("AGENT_SERVER_REQUEST_TIMEOUT", 30*time.Second)
 	if err != nil {
-		return common.RuntimeConfig{}, "", 0, err
+		return agent.RuntimeConfig{}, "", 0, err
 	}
 	toolTimeout, err := envPositiveDuration("AGENT_SERVER_TOOL_TIMEOUT", 10*time.Second)
 	if err != nil {
-		return common.RuntimeConfig{}, "", 0, err
+		return agent.RuntimeConfig{}, "", 0, err
 	}
 	stopTimeout, err := envPositiveDuration("AGENT_SERVER_STOP_TIMEOUT", 5*time.Second)
 	if err != nil {
-		return common.RuntimeConfig{}, "", 0, err
+		return agent.RuntimeConfig{}, "", 0, err
 	}
 	eventScanInterval, err := envPositiveDuration("AGENT_SERVER_EVENT_SCAN_INTERVAL", time.Second)
 	if err != nil {
-		return common.RuntimeConfig{}, "", 0, err
+		return agent.RuntimeConfig{}, "", 0, err
 	}
-	config := common.RuntimeConfig{
+	config := agent.RuntimeConfig{
 		DatabasePath:        envString("AGENT_SERVER_DB_PATH", "agent-server.db"),
 		HistoryDirectory:    envString("AGENT_SERVER_HISTORY_DIR", "agent-history"),
 		AdminToken:          os.Getenv("AGENT_SERVER_ADMIN_TOKEN"),

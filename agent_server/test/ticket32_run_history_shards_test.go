@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 type cancelAfterHistoryRunLookupContext struct {
@@ -268,7 +268,7 @@ func TestTicket32MultiShardHistoryFailureRestoresEarlierFilesInReverse(t *testin
 	}
 }
 
-func prepareRun21WithOldEvent(t *testing.T, databasePath string, fixture *runtimeFixture) (*common.AgentRuntime, string, chan struct{}) {
+func prepareRun21WithOldEvent(t *testing.T, databasePath string, fixture *runtimeFixture) (*agent.AgentRuntime, string, chan struct{}) {
 	t.Helper()
 	runtime, _, _ := fixture.open(t, databasePath)
 	session := createStoppedSession(t, runtime, nil)

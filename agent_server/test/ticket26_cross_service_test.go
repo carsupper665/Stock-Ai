@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity(t *testing.T) {
@@ -85,7 +85,7 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 	}
 	gateway := httptest.NewServer(http.HandlerFunc(fixture.serveGateway))
 	t.Cleanup(gateway.Close)
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: filepath.Join(t.TempDir(), "agent.db"), AdminToken: messageAgentToken,
 		BackendURL: backendURL, BackendUserToken: messageBackendToken,
 		GatewayURL: gateway.URL, GatewayRuntimeToken: messageGatewayToken,
@@ -102,7 +102,7 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 	if status != http.StatusCreated {
 		t.Fatalf("create actual Backend Session status=%d body=%s", status, raw)
 	}
-	var session common.Session
+	var session agent.Session
 	if err := json.Unmarshal(raw, &session); err != nil {
 		t.Fatalf("decode actual Backend Session: %v", err)
 	}

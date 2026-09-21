@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	server "stock-ai/agent-server/internal/server"
@@ -247,27 +247,27 @@ func waitForFaultMarker(t *testing.T, databasePath, name string) {
 	}
 }
 
-func getRunForTest(t *testing.T, runtime *common.AgentRuntime, sessionID string, runID int64) common.Run {
+func getRunForTest(t *testing.T, runtime *agent.AgentRuntime, sessionID string, runID int64) agent.Run {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+sessionID+"/runs/"+jsonNumber(runID), agentAdminToken, nil)
 	if status != http.StatusOK {
 		t.Fatalf("get Run status = %d body = %s", status, raw)
 	}
-	return decodeBody[common.Run](t, raw)
+	return decodeBody[agent.Run](t, raw)
 }
 
-func getSessionForTest(t *testing.T, runtime *common.AgentRuntime, sessionID string) common.Session {
+func getSessionForTest(t *testing.T, runtime *agent.AgentRuntime, sessionID string) agent.Session {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+sessionID, agentAdminToken, nil)
 	if status != http.StatusOK {
 		t.Fatalf("get Session status = %d body = %s", status, raw)
 	}
-	return decodeBody[common.Session](t, raw)
+	return decodeBody[agent.Session](t, raw)
 }
 
-func serveRuntimeForFaultTest(t *testing.T, runtime *common.AgentRuntime) (string, func()) {
+func serveRuntimeForFaultTest(t *testing.T, runtime *agent.AgentRuntime) (string, func()) {
 	t.Helper()
 	loop, err := eventloop.NewEventLoop()
 	if err != nil {

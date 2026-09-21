@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	server "stock-ai/agent-server/internal/server"
@@ -26,7 +26,7 @@ type runWithTriggers struct {
 	Triggers []map[string]any `json:"triggers"`
 }
 
-func getRunTriggers(t *testing.T, runtime *common.AgentRuntime, sessionID string, runID int64) runWithTriggers {
+func getRunTriggers(t *testing.T, runtime *agent.AgentRuntime, sessionID string, runID int64) runWithTriggers {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+sessionID+"/runs/"+jsonNumber(runID), agentAdminToken, nil)

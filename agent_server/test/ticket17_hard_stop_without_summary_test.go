@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 func TestTicket17HardStopCancelsWaitingModelAndPreservesInterruptedFactsWithoutSummary(t *testing.T) {
@@ -39,7 +39,7 @@ func TestTicket17HardStopCancelsWaitingModelAndPreservesInterruptedFactsWithoutS
 	}
 	status, raw = runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+session.ID, agentAdminToken, nil)
-	stopped := decodeBody[common.Session](t, raw)
+	stopped := decodeBody[agent.Session](t, raw)
 	if status != http.StatusOK || stopped.Status != "stopped" || !strings.Contains(string(stopped.RestartContext), `"status":"interrupted"`) {
 		t.Fatalf("stopped Session = %d %s", status, raw)
 	}

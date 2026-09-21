@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 func TestTicket18RestartCreatesNewRunWithInterruptedFactsAndDoesNotReplayWork(t *testing.T) {
@@ -46,7 +46,7 @@ func TestTicket18RestartCreatesNewRunWithInterruptedFactsAndDoesNotReplayWork(t 
 
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodPost,
 		"/api/v1/sessions/"+session.ID+"/start", agentAdminToken, nil)
-	started := decodeBody[common.Run](t, raw)
+	started := decodeBody[agent.Run](t, raw)
 	if status != http.StatusAccepted || started.RunID != 2 || started.Trigger != "session_restart" {
 		t.Fatalf("restart response = %d %s", status, raw)
 	}
@@ -88,7 +88,7 @@ func TestTicket18SoftDeletePreservesAuditAndExcludesSessionFromListAcrossRestart
 	}
 	status, raw = runtimeRequest(t, runtime.Handler(), http.MethodGet, "/api/v1/sessions", agentAdminToken, nil)
 	listed := decodeBody[struct {
-		Sessions []common.Session `json:"sessions"`
+		Sessions []agent.Session `json:"sessions"`
 	}](t, raw)
 	if status != http.StatusOK || len(listed.Sessions) != 0 {
 		t.Fatalf("deleted Session list = %d %s", status, raw)
@@ -112,7 +112,7 @@ func TestTicket18SoftDeletePreservesAuditAndExcludesSessionFromListAcrossRestart
 	runtime, _, _ = fixture.open(t, databasePath)
 	status, raw = runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+session.ID, agentAdminToken, nil)
-	persisted := decodeBody[common.Session](t, raw)
+	persisted := decodeBody[agent.Session](t, raw)
 	if status != http.StatusOK || persisted.Status != "deleted" || persisted.DeletedAt == nil || persisted.AccountID != testAccountID {
 		t.Fatalf("persisted deleted Session = %d %s", status, raw)
 	}
@@ -192,7 +192,7 @@ func TestTicket18ConcurrentRestartAndDeleteAlwaysEndsDeletedWithoutTerminalOverw
 	close(release)
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+session.ID, agentAdminToken, nil)
-	deleted := decodeBody[common.Session](t, raw)
+	deleted := decodeBody[agent.Session](t, raw)
 	if status != http.StatusOK || deleted.Status != "deleted" {
 		t.Fatalf("final Session = %d %s", status, raw)
 	}

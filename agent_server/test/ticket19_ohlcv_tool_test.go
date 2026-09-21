@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
-func openMarketReadRuntime(t *testing.T, fixture *runtimeFixture, marketHandler http.HandlerFunc) *common.AgentRuntime {
+func openMarketReadRuntime(t *testing.T, fixture *runtimeFixture, marketHandler http.HandlerFunc) *agent.AgentRuntime {
 	t.Helper()
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		fixture.mu.Lock()
@@ -39,7 +39,7 @@ func openMarketReadRuntime(t *testing.T, fixture *runtimeFixture, marketHandler 
 	gateway := httptest.NewServer(http.HandlerFunc(fixture.serveGateway))
 	t.Cleanup(backend.Close)
 	t.Cleanup(gateway.Close)
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: filepath.Join(t.TempDir(), "agent.db"), AdminToken: agentAdminToken,
 		BackendURL: backend.URL, BackendUserToken: backendUserToken,
 		GatewayURL: gateway.URL, GatewayRuntimeToken: gatewayToken,

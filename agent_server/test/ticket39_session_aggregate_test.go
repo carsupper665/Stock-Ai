@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 type ticket39Backend struct {
@@ -229,7 +229,7 @@ func TestTicket39SessionListHasFixedPaginationAndExplicitDeletedVisibility(t *te
 	}
 }
 
-func openTicket39Runtime(t *testing.T) (*common.AgentRuntime, *ticket39Backend, string) {
+func openTicket39Runtime(t *testing.T) (*agent.AgentRuntime, *ticket39Backend, string) {
 	t.Helper()
 	backendFixture := &ticket39Backend{}
 	backend := httptest.NewServer(http.HandlerFunc(backendFixture.serve))
@@ -246,7 +246,7 @@ func openTicket39Runtime(t *testing.T) (*common.AgentRuntime, *ticket39Backend, 
 	t.Cleanup(backend.Close)
 	t.Cleanup(gateway.Close)
 	databasePath := filepath.Join(t.TempDir(), "agent.db")
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: databasePath, AdminToken: agentAdminToken,
 		BackendURL: backend.URL, BackendUserToken: backendUserToken,
 		GatewayURL: gateway.URL, GatewayRuntimeToken: gatewayToken,

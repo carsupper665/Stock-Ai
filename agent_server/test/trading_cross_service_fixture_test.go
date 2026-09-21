@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 // settablePriceSource answers the Binance ticker endpoint the actual Backend polls, so
@@ -191,13 +191,13 @@ type ledgerEntryResult struct {
 
 // openTradingCrossRuntime opens an Agent runtime on dbPath against the actual Backend so a
 // test can close it and reopen the same persisted Sessions, as a Server restart would.
-func openTradingCrossRuntime(t *testing.T, backendURL string, gateway *scriptedGateway, dbPath string) *common.AgentRuntime {
+func openTradingCrossRuntime(t *testing.T, backendURL string, gateway *scriptedGateway, dbPath string) *agent.AgentRuntime {
 	t.Helper()
 	fixture := newRuntimeFixture()
 	fixture.generate = gateway.generate
 	gatewayServer := httptest.NewServer(http.HandlerFunc(fixture.serveGateway))
 	t.Cleanup(gatewayServer.Close)
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: dbPath, AdminToken: agentAdminToken,
 		BackendURL: backendURL, BackendUserToken: crossBackendUserToken, GatewayURL: gatewayServer.URL, GatewayRuntimeToken: gatewayToken,
 		DefaultPrompt: "trading mission", DefaultMaxLoop: 8, DefaultMaxToolCall: 4,

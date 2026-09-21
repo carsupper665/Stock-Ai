@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 func TestTicket15ConcurrentStartCreatesOnePersistentFirstRunThroughGatewayHTTP(t *testing.T) {
@@ -68,7 +68,7 @@ func TestTicket15ConcurrentStartCreatesOnePersistentFirstRunThroughGatewayHTTP(t
 	}
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+session.ID+"/runs/current", agentAdminToken, nil)
-	current := decodeBody[common.Run](t, raw)
+	current := decodeBody[agent.Run](t, raw)
 	if status != http.StatusOK || current.RunID != 1 || current.Status != "running" || current.Trigger != "session_start" {
 		t.Fatalf("current Run = %d %s", status, raw)
 	}
@@ -97,7 +97,7 @@ func TestTicket15ConcurrentStartCreatesOnePersistentFirstRunThroughGatewayHTTP(t
 	status, raw = runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+session.ID+"/runs?page=1", agentAdminToken, nil)
 	listed := decodeBody[struct {
-		Runs []common.Run `json:"runs"`
+		Runs []agent.Run `json:"runs"`
 	}](t, raw)
 	if status != http.StatusOK || len(listed.Runs) != 1 || listed.Runs[0].RunID != 1 {
 		t.Fatalf("Run list = %d %s", status, raw)
@@ -160,7 +160,7 @@ func TestTicket15DifferentSessionsRunIndependently(t *testing.T) {
 	runtime, _, _ := fixture.open(t, "")
 	first := createStoppedSession(t, runtime, nil)
 	second := createStoppedSession(t, runtime, map[string]any{"account_id": "acc_second", "name": "second"})
-	for _, session := range []common.Session{first, second} {
+	for _, session := range []agent.Session{first, second} {
 		if status, _ := runtimeRequest(t, runtime.Handler(), http.MethodPost,
 			"/api/v1/sessions/"+session.ID+"/start", agentAdminToken, nil); status != http.StatusAccepted {
 			t.Fatalf("start %s status = %d", session.ID, status)
@@ -171,7 +171,7 @@ func TestTicket15DifferentSessionsRunIndependently(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("different Sessions did not enter Gateway independently")
 	}
-	for _, session := range []common.Session{first, second} {
+	for _, session := range []agent.Session{first, second} {
 		status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 			"/api/v1/sessions/"+session.ID+"/runs/current", agentAdminToken, nil)
 		if status != http.StatusOK || !strings.Contains(string(raw), `"status":"running"`) {
@@ -179,7 +179,7 @@ func TestTicket15DifferentSessionsRunIndependently(t *testing.T) {
 		}
 	}
 	close(release)
-	for _, session := range []common.Session{first, second} {
+	for _, session := range []agent.Session{first, second} {
 		waitForRunStatus(t, runtime, session.ID, 1, "completed")
 	}
 }
@@ -200,7 +200,7 @@ func TestTicket15CompletedRunPersistsAcrossRuntimeRestart(t *testing.T) {
 	runtime, _, _ = fixture.open(t, databasePath)
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+session.ID+"/runs/1", agentAdminToken, nil)
-	persisted := decodeBody[common.Run](t, raw)
+	persisted := decodeBody[agent.Run](t, raw)
 	if status != http.StatusOK || persisted.Status != "completed" || persisted.Summary == nil {
 		t.Fatalf("persisted Run = %d %s", status, raw)
 	}

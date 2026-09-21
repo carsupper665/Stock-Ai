@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	events "stock-ai/agent-server/internal/events"
@@ -18,7 +18,7 @@ import (
 )
 
 // armPriceEvents starts a Session whose first Run creates the given events and completes.
-func armPriceEvents(t *testing.T, script *llmScript, runtime *common.AgentRuntime, overrides map[string]any) (common.Session, []events.Event) {
+func armPriceEvents(t *testing.T, script *llmScript, runtime *agent.AgentRuntime, overrides map[string]any) (agent.Session, []events.Event) {
 	t.Helper()
 	session := createStoppedSession(t, runtime, overrides)
 	startSessionForTest(t, runtime, session.ID)

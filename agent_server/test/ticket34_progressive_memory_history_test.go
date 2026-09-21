@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 func TestTicket34MemoryToolsRejectExpiredCrossSessionAndEmptySearch(t *testing.T) {
@@ -388,7 +388,7 @@ func assertLastToolError(t *testing.T, request *http.Request, code string) {
 	}
 }
 
-func startRunForHistoryTest(t *testing.T, runtime *common.AgentRuntime, sessionID string, runID int64) {
+func startRunForHistoryTest(t *testing.T, runtime *agent.AgentRuntime, sessionID string, runID int64) {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodPost, "/api/v1/sessions/"+sessionID+"/start", agentAdminToken, nil)
 	if status != http.StatusAccepted {

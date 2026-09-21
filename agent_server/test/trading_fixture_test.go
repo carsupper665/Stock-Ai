@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 // tradingBackend is a local Backend HTTP fixture with one Account Token per Account.
@@ -222,14 +222,14 @@ func decodeToolResult(t *testing.T, raw string) toolOK {
 	return result
 }
 
-func openTradingRuntime(t *testing.T, backend *tradingBackend, gateway *scriptedGateway, toolTimeout time.Duration) *common.AgentRuntime {
+func openTradingRuntime(t *testing.T, backend *tradingBackend, gateway *scriptedGateway, toolTimeout time.Duration) *agent.AgentRuntime {
 	t.Helper()
 	fixture := newRuntimeFixture()
 	fixture.generate = gateway.generate
 	return openCrossServiceRuntime(t, backend.server.URL, backendUserToken, fixture, toolTimeout)
 }
 
-func startSessionRun(t *testing.T, runtime *common.AgentRuntime, session common.Session) {
+func startSessionRun(t *testing.T, runtime *agent.AgentRuntime, session agent.Session) {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodPost, "/api/v1/sessions/"+session.ID+"/start", agentAdminToken, nil)
 	if status != http.StatusAccepted {

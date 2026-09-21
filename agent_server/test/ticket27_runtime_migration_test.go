@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 func TestTicket27OpenRuntimeMigratesLegacyRunsWithoutDataLoss(t *testing.T) {
@@ -50,14 +50,14 @@ func TestTicket27OpenRuntimeMigratesLegacyRunsWithoutDataLoss(t *testing.T) {
 		t.Fatalf("close legacy database: %v", err)
 	}
 
-	var opened []*common.AgentRuntime
+	var opened []*agent.AgentRuntime
 	t.Cleanup(func() {
 		for _, runtime := range opened {
 			_ = runtime.Close()
 		}
 	})
-	open := func() *common.AgentRuntime {
-		runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	open := func() *agent.AgentRuntime {
+		runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 			DatabasePath: databasePath, AdminToken: agentAdminToken,
 			BackendURL: "http://127.0.0.1", BackendUserToken: backendUserToken,
 			GatewayURL: "http://127.0.0.1", GatewayRuntimeToken: gatewayToken,
@@ -70,13 +70,13 @@ func TestTicket27OpenRuntimeMigratesLegacyRunsWithoutDataLoss(t *testing.T) {
 		opened = append(opened, runtime)
 		return runtime
 	}
-	assertLegacyRun := func(runtime *common.AgentRuntime) {
+	assertLegacyRun := func(runtime *agent.AgentRuntime) {
 		status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 			"/api/v1/sessions/s_legacy", agentAdminToken, nil)
 		if status != http.StatusOK {
 			t.Fatalf("legacy Session status = %d body = %s", status, raw)
 		}
-		session := decodeBody[common.Session](t, raw)
+		session := decodeBody[agent.Session](t, raw)
 		if session.Name != "legacy session" || session.AccountID != "acc_legacy" || session.CurrentRunID != 1 {
 			t.Fatalf("legacy Session changed by migration: %+v", session)
 		}
@@ -85,7 +85,7 @@ func TestTicket27OpenRuntimeMigratesLegacyRunsWithoutDataLoss(t *testing.T) {
 		if status != http.StatusOK {
 			t.Fatalf("legacy Run status = %d body = %s", status, raw)
 		}
-		run := decodeBody[common.Run](t, raw)
+		run := decodeBody[agent.Run](t, raw)
 		if run.Status != "completed" || run.Trigger != "session_start" || string(run.Triggers) != "null" ||
 			run.Summary == nil || *run.Summary != "legacy summary" || run.Output == nil || *run.Output != "legacy output" {
 			t.Fatalf("legacy Run changed by migration: %+v", run)

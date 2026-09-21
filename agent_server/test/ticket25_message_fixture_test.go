@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 const (
@@ -40,7 +40,7 @@ func newMessageToolFixture() *messageToolFixture {
 	return &messageToolFixture{accountToken: "ticket-25-account-v1", accountStatus: "active"}
 }
 
-func (f *messageToolFixture) open(t *testing.T) *common.AgentRuntime {
+func (f *messageToolFixture) open(t *testing.T) *agent.AgentRuntime {
 	t.Helper()
 	backend := httptest.NewServer(http.HandlerFunc(f.serveBackend))
 	gateway := httptest.NewServer(http.HandlerFunc(f.serveGateway))
@@ -50,7 +50,7 @@ func (f *messageToolFixture) open(t *testing.T) *common.AgentRuntime {
 	if timeout <= 0 {
 		timeout = time.Second
 	}
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: filepath.Join(t.TempDir(), "agent.db"), AdminToken: messageAgentToken,
 		BackendURL: backend.URL, BackendUserToken: messageBackendToken,
 		GatewayURL: gateway.URL, GatewayRuntimeToken: messageGatewayToken,
@@ -167,11 +167,11 @@ func messageToolResult(t *testing.T, request *http.Request, callID string) map[s
 	return result
 }
 
-func startMessageRun(t *testing.T, runtime *common.AgentRuntime) (common.Session, common.Run) {
+func startMessageRun(t *testing.T, runtime *agent.AgentRuntime) (agent.Session, agent.Run) {
 	return startMessageRunForAccount(t, runtime, messageAccountID)
 }
 
-func startMessageRunForAccount(t *testing.T, runtime *common.AgentRuntime, accountID string) (common.Session, common.Run) {
+func startMessageRunForAccount(t *testing.T, runtime *agent.AgentRuntime, accountID string) (agent.Session, agent.Run) {
 	t.Helper()
 	status, body := messageRuntimeRequest(t, runtime.Handler(), http.MethodPost, "/api/v1/sessions", map[string]any{
 		"name": "message fixture", "account_id": accountID, "model_name": "message-model",
@@ -179,7 +179,7 @@ func startMessageRunForAccount(t *testing.T, runtime *common.AgentRuntime, accou
 	if status != http.StatusCreated {
 		t.Fatalf("create Session status=%d body=%s", status, body)
 	}
-	var session common.Session
+	var session agent.Session
 	if err := json.Unmarshal(body, &session); err != nil {
 		t.Fatalf("decode Session: %v", err)
 	}
@@ -190,14 +190,14 @@ func startMessageRunForAccount(t *testing.T, runtime *common.AgentRuntime, accou
 	return session, waitForMessageRun(t, runtime, session.ID)
 }
 
-func waitForMessageRun(t *testing.T, runtime *common.AgentRuntime, sessionID string) common.Run {
+func waitForMessageRun(t *testing.T, runtime *agent.AgentRuntime, sessionID string) agent.Run {
 	t.Helper()
 	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	for {
 		status, body := messageRuntimeRequest(t, runtime.Handler(), http.MethodGet, "/api/v1/sessions/"+sessionID+"/runs/1", nil)
 		if status == http.StatusOK {
-			var run common.Run
+			var run agent.Run
 			if err := json.Unmarshal(body, &run); err == nil && run.Status != "running" {
 				return run
 			}

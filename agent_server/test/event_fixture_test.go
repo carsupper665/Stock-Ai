@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	events "stock-ai/agent-server/internal/events"
@@ -105,7 +105,7 @@ func (b *priceBook) serve(w http.ResponseWriter, request *http.Request) {
 }
 
 // openEventRuntime mirrors runtimeFixture.open but routes Server-side price sampling to book.
-func openEventRuntime(t *testing.T, fixture *runtimeFixture, book *priceBook, databasePath string) *common.AgentRuntime {
+func openEventRuntime(t *testing.T, fixture *runtimeFixture, book *priceBook, databasePath string) *agent.AgentRuntime {
 	t.Helper()
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/v1/market/price" {
@@ -120,7 +120,7 @@ func openEventRuntime(t *testing.T, fixture *runtimeFixture, book *priceBook, da
 	if databasePath == "" {
 		databasePath = filepath.Join(t.TempDir(), "agent.db")
 	}
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: databasePath, AdminToken: agentAdminToken,
 		BackendURL: backend.URL, BackendUserToken: backendUserToken,
 		GatewayURL: gateway.URL, GatewayRuntimeToken: gatewayToken,
@@ -137,7 +137,7 @@ func openEventRuntime(t *testing.T, fixture *runtimeFixture, book *priceBook, da
 // completeRecoveryRun consumes the server_recovery Run that Ticket 36 starts for every running
 // Session when the Runtime reopens, so the next Gateway request is the wake-up under test. It
 // returns the recovery Run's decoded Generate request for assertions on recovery_context.
-func completeRecoveryRun(t *testing.T, script *llmScript, runtime *common.AgentRuntime, sessionID string, runID int64) map[string]any {
+func completeRecoveryRun(t *testing.T, script *llmScript, runtime *agent.AgentRuntime, sessionID string, runID int64) map[string]any {
 	t.Helper()
 	request := script.next(t, "server_recovery Run")
 	if runContext(t, request)["trigger"] != "server_recovery" {
@@ -392,7 +392,7 @@ func resultEvent(t *testing.T, result map[string]any) events.Event {
 	return decodeBody[events.Event](t, raw)
 }
 
-func listEventsHTTP(t *testing.T, runtime *common.AgentRuntime, sessionID string) []events.Event {
+func listEventsHTTP(t *testing.T, runtime *agent.AgentRuntime, sessionID string) []events.Event {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+sessionID+"/events", agentAdminToken, nil)
@@ -412,7 +412,7 @@ type eventTasks struct {
 	position server.BackgroundTask
 }
 
-func newEventTasks(runtime *common.AgentRuntime, clock eventloop.Clock) eventTasks {
+func newEventTasks(runtime *agent.AgentRuntime, clock eventloop.Clock) eventTasks {
 	return eventTasks{
 		local: runtime.LocalEventTask(clock, time.Second), price: runtime.PriceEventTask(clock, time.Second),
 		position: runtime.PositionEventTask(clock, time.Second),
@@ -434,7 +434,7 @@ func runEventRound(t *testing.T, tasks eventTasks) {
 	}
 }
 
-func waitForEventCount(t *testing.T, runtime *common.AgentRuntime, sessionID string, wanted int) []events.Event {
+func waitForEventCount(t *testing.T, runtime *agent.AgentRuntime, sessionID string, wanted int) []events.Event {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
 	for {
@@ -460,7 +460,7 @@ func eventTime(t *testing.T, value string) time.Time {
 	return parsed
 }
 
-func startedRunIDs(t *testing.T, runtime *common.AgentRuntime, sessionID string) []int64 {
+func startedRunIDs(t *testing.T, runtime *agent.AgentRuntime, sessionID string) []int64 {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 		"/api/v1/sessions/"+sessionID+"/runs", agentAdminToken, nil)
@@ -468,7 +468,7 @@ func startedRunIDs(t *testing.T, runtime *common.AgentRuntime, sessionID string)
 		t.Fatalf("list Runs status = %d body = %s", status, raw)
 	}
 	runs := decodeBody[struct {
-		Runs []common.Run `json:"runs"`
+		Runs []agent.Run `json:"runs"`
 	}](t, raw).Runs
 	ids := make([]int64, 0, len(runs))
 	for _, run := range runs {

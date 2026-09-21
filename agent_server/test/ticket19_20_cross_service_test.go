@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 const crossBackendUserToken = "ticket-19-20-backend-user"
@@ -326,11 +326,11 @@ func TestTicket20CrossServiceMarketInfoPreservesFactsAndRejectsBadBackendAuth(t 
 	}
 }
 
-func openCrossServiceRuntime(t *testing.T, backendURL, backendToken string, fixture *runtimeFixture, toolTimeout time.Duration) *common.AgentRuntime {
+func openCrossServiceRuntime(t *testing.T, backendURL, backendToken string, fixture *runtimeFixture, toolTimeout time.Duration) *agent.AgentRuntime {
 	t.Helper()
 	gateway := httptest.NewServer(http.HandlerFunc(fixture.serveGateway))
 	t.Cleanup(gateway.Close)
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: filepath.Join(t.TempDir(), "agent.db"), AdminToken: agentAdminToken,
 		BackendURL: backendURL, BackendUserToken: backendToken, GatewayURL: gateway.URL, GatewayRuntimeToken: gatewayToken,
 		DefaultPrompt: "cross-service mission", DefaultMaxLoop: 4, DefaultMaxToolCall: 3,

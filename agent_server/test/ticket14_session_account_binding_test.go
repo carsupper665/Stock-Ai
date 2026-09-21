@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	server "stock-ai/agent-server/internal/server"
@@ -38,8 +38,8 @@ func TestTicket14CreatesPersistsAndListsImmutableAccountBoundSessionWithoutSecre
 
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet, "/api/v1/sessions?page=1", agentAdminToken, nil)
 	listed := decodeBody[struct {
-		Sessions []common.Session `json:"sessions"`
-		PageSize int              `json:"page_size"`
+		Sessions []agent.Session `json:"sessions"`
+		PageSize int             `json:"page_size"`
 	}](t, raw)
 	if status != http.StatusOK || listed.PageSize != 100 || len(listed.Sessions) != 1 || listed.Sessions[0].ID != session.ID {
 		t.Fatalf("list response = %d %s", status, raw)
@@ -50,7 +50,7 @@ func TestTicket14CreatesPersistsAndListsImmutableAccountBoundSessionWithoutSecre
 	}
 	runtime, _, _ = fixture.open(t, databasePath)
 	status, raw = runtimeRequest(t, runtime.Handler(), http.MethodGet, "/api/v1/sessions/"+session.ID, agentAdminToken, nil)
-	persisted := decodeBody[common.Session](t, raw)
+	persisted := decodeBody[agent.Session](t, raw)
 	if status != http.StatusOK || persisted.AccountID != testAccountID || persisted.ModelLevel == nil || *persisted.ModelLevel != "high" {
 		t.Fatalf("persisted Session = %d %s", status, raw)
 	}

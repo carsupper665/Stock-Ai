@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 type crossOrderResult struct {
@@ -19,7 +19,7 @@ type crossOrderResult struct {
 	Source       *backendSource `json:"source"`
 }
 
-func restartSessionRun(t *testing.T, runtime *common.AgentRuntime, sessionID string) {
+func restartSessionRun(t *testing.T, runtime *agent.AgentRuntime, sessionID string) {
 	t.Helper()
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodPost, "/api/v1/sessions/"+sessionID+"/stop", agentAdminToken, nil)
 	if status != http.StatusOK {

@@ -15,14 +15,14 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	server "stock-ai/agent-server/internal/server"
 )
 
 type drainingRuntimeHandler struct {
-	runtime *common.AgentRuntime
+	runtime *agent.AgentRuntime
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once

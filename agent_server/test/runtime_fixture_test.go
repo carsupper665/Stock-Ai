@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 const (
@@ -54,7 +54,7 @@ func newRuntimeFixture() *runtimeFixture {
 	}
 }
 
-func (f *runtimeFixture) open(t *testing.T, databasePath string) (*common.AgentRuntime, *httptest.Server, *httptest.Server) {
+func (f *runtimeFixture) open(t *testing.T, databasePath string) (*agent.AgentRuntime, *httptest.Server, *httptest.Server) {
 	t.Helper()
 	backend := httptest.NewServer(http.HandlerFunc(f.serveBackend))
 	gateway := httptest.NewServer(http.HandlerFunc(f.serveGateway))
@@ -63,7 +63,7 @@ func (f *runtimeFixture) open(t *testing.T, databasePath string) (*common.AgentR
 	if databasePath == "" {
 		databasePath = filepath.Join(t.TempDir(), "agent.db")
 	}
-	runtime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	runtime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: databasePath, AdminToken: agentAdminToken,
 		BackendURL: backend.URL, BackendUserToken: backendUserToken,
 		GatewayURL: gateway.URL, GatewayRuntimeToken: gatewayToken,
@@ -269,7 +269,7 @@ func decodeBody[T any](t *testing.T, body []byte) T {
 	return value
 }
 
-func createStoppedSession(t *testing.T, runtime *common.AgentRuntime, overrides map[string]any) common.Session {
+func createStoppedSession(t *testing.T, runtime *agent.AgentRuntime, overrides map[string]any) agent.Session {
 	t.Helper()
 	body := map[string]any{"name": "fixture session", "account_id": testAccountID, "model_name": "fixture-model"}
 	for key, value := range overrides {
@@ -279,10 +279,10 @@ func createStoppedSession(t *testing.T, runtime *common.AgentRuntime, overrides 
 	if status != http.StatusCreated {
 		t.Fatalf("create Session status = %d body = %s", status, raw)
 	}
-	return decodeBody[common.Session](t, raw)
+	return decodeBody[agent.Session](t, raw)
 }
 
-func waitForRunStatus(t *testing.T, runtime *common.AgentRuntime, sessionID string, runID int64, wanted ...string) common.Run {
+func waitForRunStatus(t *testing.T, runtime *agent.AgentRuntime, sessionID string, runID int64, wanted ...string) agent.Run {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
 	allowed := make(map[string]bool, len(wanted))
@@ -293,7 +293,7 @@ func waitForRunStatus(t *testing.T, runtime *common.AgentRuntime, sessionID stri
 		status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet,
 			"/api/v1/sessions/"+sessionID+"/runs/"+jsonNumber(runID), agentAdminToken, nil)
 		if status == http.StatusOK {
-			run := decodeBody[common.Run](t, raw)
+			run := decodeBody[agent.Run](t, raw)
 			if allowed[run.Status] {
 				return run
 			}

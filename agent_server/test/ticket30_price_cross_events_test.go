@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 type crossState struct {
@@ -14,7 +14,7 @@ type crossState struct {
 	UpdatedAt string  `json:"updated_at"`
 }
 
-func eventState(t *testing.T, runtime *common.AgentRuntime, sessionID, eventID string) *crossState {
+func eventState(t *testing.T, runtime *agent.AgentRuntime, sessionID, eventID string) *crossState {
 	t.Helper()
 	for _, event := range listEventsHTTP(t, runtime, sessionID) {
 		if event.ID != eventID {

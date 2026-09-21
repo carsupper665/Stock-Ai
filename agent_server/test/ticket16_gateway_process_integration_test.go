@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	common "stock-ai/agent-server"
+	agent "stock-ai/agent-server"
 )
 
 func TestTicket16ToolLoopThroughRealGatewayProcess(t *testing.T) {
@@ -112,7 +112,7 @@ func TestTicket16ToolLoopThroughRealGatewayProcess(t *testing.T) {
 	fixture := newRuntimeFixture()
 	backend := httptest.NewServer(http.HandlerFunc(fixture.serveBackend))
 	defer backend.Close()
-	agentRuntime, err := common.OpenAgentRuntime(common.RuntimeConfig{
+	agentRuntime, err := agent.OpenAgentRuntime(agent.RuntimeConfig{
 		DatabasePath: filepath.Join(t.TempDir(), "agent.db"), AdminToken: agentAdminToken,
 		BackendURL: backend.URL, BackendUserToken: backendUserToken,
 		GatewayURL: gatewayURL, GatewayRuntimeToken: gatewayRuntimeToken,
