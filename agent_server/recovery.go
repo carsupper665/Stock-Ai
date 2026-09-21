@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"stock-ai/agent-server/internal/events"
+	"stock-ai/agent-server/internal/history"
 )
 
 const (
@@ -36,9 +37,9 @@ func (r *AgentRuntime) recoverPersistedRuntime() error {
 	if err == nil {
 		launches, err = createRecoveryRunsTx(tx, now)
 	}
-	var stage *historyStage
+	var stage *history.Stage
 	if err == nil {
-		stage, err = r.stageHistoryTargetsTx(tx, interrupted)
+		stage, err = history.StageTargets(tx, &r.historyMu, r.config.HistoryDirectory, interrupted)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -46,11 +47,11 @@ func (r *AgentRuntime) recoverPersistedRuntime() error {
 	if err != nil {
 		_ = tx.Rollback()
 		if stage != nil {
-			err = errors.Join(err, stage.finish(false))
+			err = errors.Join(err, stage.Finish(false))
 		}
 		return err
 	}
-	if err := stage.finish(true); err != nil {
+	if err := stage.Finish(true); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -61,21 +62,21 @@ func (r *AgentRuntime) recoverPersistedRuntime() error {
 	return nil
 }
 
-func runningRunTargetsTx(tx *sql.Tx) ([]historyTarget, error) {
+func runningRunTargetsTx(tx *sql.Tx) ([]history.Target, error) {
 	rows, err := tx.Query(`SELECT session_id, run_id FROM runs WHERE status='running' ORDER BY session_id, run_id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	targets := make([]historyTarget, 0)
+	targets := make([]history.Target, 0)
 	for rows.Next() {
 		var sessionID string
 		var runID int64
 		if err := rows.Scan(&sessionID, &runID); err != nil {
 			return nil, err
 		}
-		start, _ := historyRange(runID)
-		targets = append(targets, historyTarget{sessionID: sessionID, start: start})
+		start, _ := history.Range(runID)
+		targets = append(targets, history.Target{SessionID: sessionID, Start: start})
 	}
 	return targets, rows.Err()
 }

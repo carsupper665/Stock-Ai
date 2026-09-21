@@ -203,6 +203,13 @@ func nullablePointer(value string) *string {
 	return &value
 }
 
+type gatewayUsage struct {
+	InputTokens  *int64 `json:"input_tokens"`
+	OutputTokens *int64 `json:"output_tokens"`
+	CachedTokens *int64 `json:"cached_tokens"`
+	TotalTokens  *int64 `json:"total_tokens"`
+}
+
 func addUsageAttempt(summary *usageSummary, usage *gatewayUsage) error {
 	summary.ModelCalls++
 	var input, output, cached, total *int64

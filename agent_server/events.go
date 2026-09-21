@@ -10,6 +10,7 @@ import (
 
 	"stock-ai/agent-server/internal/eventloop"
 	"stock-ai/agent-server/internal/events"
+	"stock-ai/agent-server/internal/history"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
 )
@@ -75,27 +76,27 @@ func (r *AgentRuntime) eventToolTransaction(sessionID string, runID int64, mutat
 	var result json.RawMessage
 	var logID int64
 	if err == nil {
-		logID, err = latestEventLogIDTx(tx)
+		logID, err = history.LatestEventLogIDTx(tx)
 	}
 	if err == nil {
 		result, err = mutate(tx)
 	}
-	var stage *historyStage
+	var stage *history.Stage
 	if err == nil {
-		stage, err = r.stageEventHistorySinceTx(tx, logID)
+		stage, err = history.StageEventSince(tx, &r.historyMu, r.config.HistoryDirectory, logID)
 	}
 	if err != nil {
 		_ = tx.Rollback()
-		err = errors.Join(err, stage.finish(false))
+		err = errors.Join(err, stage.Finish(false))
 		r.latchPersistenceFaultLocked(err)
 		return unavailable("not_executed")
 	}
 	if err := tx.Commit(); err != nil {
 		_ = tx.Rollback()
-		r.latchPersistenceFaultLocked(errors.Join(err, stage.finish(false)))
+		r.latchPersistenceFaultLocked(errors.Join(err, stage.Finish(false)))
 		return unavailable("unknown")
 	}
-	if err := stage.finish(true); err != nil {
+	if err := stage.Finish(true); err != nil {
 		r.latchPersistenceFaultLocked(err)
 		return unavailable("unknown")
 	}
@@ -196,23 +197,23 @@ func (r *AgentRuntime) deleteEventByUser(ctx context.Context, sessionID, eventID
 	}
 	var logID int64
 	if err == nil {
-		logID, err = latestEventLogIDTx(tx)
+		logID, err = history.LatestEventLogIDTx(tx)
 	}
 	if err == nil {
 		err = events.RemoveRecordTx(tx, record, "deleted_by_user", nil, nil, time.Now())
 	}
-	var stage *historyStage
+	var stage *history.Stage
 	if err == nil {
-		stage, err = r.stageEventHistorySinceTx(tx, logID)
+		stage, err = history.StageEventSince(tx, &r.historyMu, r.config.HistoryDirectory, logID)
 	}
 	if err == nil {
 		err = tx.Commit()
 	}
 	if err != nil {
 		_ = tx.Rollback()
-		return r.mutationFailureLocked(ctx, nil, errors.Join(err, stage.finish(false)))
+		return r.mutationFailureLocked(ctx, nil, errors.Join(err, stage.Finish(false)))
 	}
-	if err := stage.finish(true); err != nil {
+	if err := stage.Finish(true); err != nil {
 		return r.mutationFailureLocked(ctx, nil, err)
 	}
 	return http.StatusOK, "", "", record.Event
@@ -290,23 +291,23 @@ func (r *AgentRuntime) dispatchEventRound(ctx context.Context, claim func(*sql.T
 	if err != nil {
 		return r.roundFailureLocked(ctx, nil, err)
 	}
-	logID, err := latestEventLogIDTx(tx)
+	logID, err := history.LatestEventLogIDTx(tx)
 	var launches []*eventRunLaunch
 	if err == nil {
 		launches, err = r.admitFiredSessionsTx(tx, claim)
 	}
-	var stage *historyStage
+	var stage *history.Stage
 	if err == nil {
-		stage, err = r.stageEventHistorySinceTx(tx, logID)
+		stage, err = history.StageEventSince(tx, &r.historyMu, r.config.HistoryDirectory, logID)
 	}
 	if err == nil {
 		err = tx.Commit()
 	}
 	if err != nil {
 		_ = tx.Rollback()
-		return r.roundFailureLocked(ctx, nil, errors.Join(err, stage.finish(false)))
+		return r.roundFailureLocked(ctx, nil, errors.Join(err, stage.Finish(false)))
 	}
-	if err := stage.finish(true); err != nil {
+	if err := stage.Finish(true); err != nil {
 		return r.roundFailureLocked(ctx, nil, err)
 	}
 	for _, launch := range launches {

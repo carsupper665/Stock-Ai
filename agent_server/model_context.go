@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"stock-ai/agent-server/internal/history"
 	"stock-ai/agent-server/internal/tools"
 )
 
@@ -151,10 +152,10 @@ func replaceMessageContent(message *gatewayMessage, replacement string) bool {
 func compactToolContent(name, content string, mutation bool) string {
 	raw := json.RawMessage(content)
 	if name == "get_ohlcv" {
-		return string(filterToolResultForHistory(name, raw))
+		return string(history.FilterToolResult(name, raw))
 	}
 	if name == "get_run_history" {
-		return string(filterToolResultForHistory(name, raw))
+		return string(history.FilterToolResult(name, raw))
 	}
 	var value any
 	if json.Unmarshal(raw, &value) != nil {

@@ -1,17 +1,15 @@
 package common
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
+	"stock-ai/agent-server/internal/history"
 	"stock-ai/agent-server/internal/memory"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
@@ -85,16 +83,16 @@ func (r *AgentRuntime) completeFinalizedRun(sessionID string, runID int64, final
 		_ = tx.Rollback()
 		return false, err
 	}
-	stage, err := r.stageRunHistoryTx(tx, sessionID, runID)
+	stage, err := history.StageRun(tx, &r.historyMu, r.config.HistoryDirectory, sessionID, runID)
 	if err != nil {
 		_ = tx.Rollback()
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		_ = tx.Rollback()
-		return false, errors.Join(err, stage.finish(false))
+		return false, errors.Join(err, stage.Finish(false))
 	}
-	if err := stage.finish(true); err != nil {
+	if err := stage.Finish(true); err != nil {
 		return false, err
 	}
 	r.logOperational("run_terminal", sessionID, runID, "completed")
@@ -134,11 +132,11 @@ func (r *AgentRuntime) executeMemoryTool(ctx context.Context, sessionID string, 
 			"summary": mem.Summary, "content": mem.Content, "importance": mem.Importance,
 		}), true
 	case "get_run_history":
-		runID, err := runHistoryToolArgument(call.Arguments)
+		runID, err := history.ToolArgument(call.Arguments)
 		if err != nil {
 			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
-		run, err := r.historyRunByID(ctx, sessionID, runID)
+		run, err := history.ReadRun(ctx, r.db, &r.historyMu, r.config.HistoryDirectory, sessionID, runID)
 		if err != nil {
 			return r.historyToolError(err), true
 		}
@@ -146,20 +144,6 @@ func (r *AgentRuntime) executeMemoryTool(ctx context.Context, sessionID string, 
 	default:
 		return nil, false
 	}
-}
-
-func runHistoryToolArgument(arguments json.RawMessage) (int64, error) {
-	var raw struct {
-		RunID json.RawMessage `json:"run_id"`
-	}
-	if !tools.DecodeArguments(arguments, &raw) {
-		return 0, errors.New("run_id is required and no other field is accepted")
-	}
-	var runID int64
-	if len(raw.RunID) == 0 || bytes.Equal(bytes.TrimSpace(raw.RunID), []byte("null")) || json.Unmarshal(raw.RunID, &runID) != nil || runID < 1 {
-		return 0, errors.New("run_id must be a positive integer")
-	}
-	return runID, nil
 }
 
 func (r *AgentRuntime) memoryReadToolResult(memories []memory.Metadata, err error) json.RawMessage {
@@ -175,45 +159,6 @@ func (r *AgentRuntime) memoryPersistenceToolError(err error) json.RawMessage {
 	}
 	r.latchPersistenceFault(err)
 	return tools.ErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", "not_executed")
-}
-
-func (r *AgentRuntime) historyRunByID(ctx context.Context, sessionID string, runID int64) (historyRun, error) {
-	var status string
-	err := r.db.QueryRowContext(ctx, `SELECT status FROM runs WHERE session_id = ? AND run_id = ?`, sessionID, runID).Scan(&status)
-	if err != nil {
-		return historyRun{}, err
-	}
-	if status != "completed" && status != "failed" && status != "interrupted" {
-		return historyRun{}, sql.ErrNoRows
-	}
-	var name string
-	var start, end int64
-	err = r.db.QueryRowContext(ctx, `SELECT start_run_id, end_run_id, file_path FROM run_history_files
-		WHERE session_id = ? AND start_run_id <= ? AND end_run_id >= ?`, sessionID, runID, runID).Scan(&start, &end, &name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return historyRun{}, errors.New("History index is unavailable")
-	}
-	if err != nil {
-		return historyRun{}, err
-	}
-	expectedStart, expectedEnd := historyRange(runID)
-	if start != expectedStart || end != expectedEnd || name != historyFileName(sessionID, start, end) || filepath.Base(name) != name {
-		return historyRun{}, errors.New("History index is invalid")
-	}
-	if err := ctx.Err(); err != nil {
-		return historyRun{}, err
-	}
-	r.historyMu.Lock()
-	body, err := os.ReadFile(filepath.Join(r.config.HistoryDirectory, name))
-	r.historyMu.Unlock()
-	if err != nil || !validHistoryBody(body, sessionID, start, end, runID) {
-		return historyRun{}, errors.New("History index is invalid")
-	}
-	run, err := parseHistoryRun(body, runID)
-	if err != nil {
-		return historyRun{}, err
-	}
-	return run, nil
 }
 
 func (r *AgentRuntime) serveMemories(w http.ResponseWriter, request *http.Request, sessionID string, rest []string) {

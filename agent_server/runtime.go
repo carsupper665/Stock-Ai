@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"stock-ai/agent-server/internal/events"
+	"stock-ai/agent-server/internal/history"
 	"stock-ai/agent-server/internal/memory"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
@@ -216,7 +217,7 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 			retry_of_run_id INTEGER, retry_attempt INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (session_id, run_id)
 		)`,
-	}, events.Schema...), historySchema...), memory.Schema...) {
+	}, events.Schema...), history.Schema...), memory.Schema...) {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("initialize agent database: %w", err)
@@ -1514,7 +1515,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				return
 			}
 			result := r.executeTool(ctx, session, runID, call)
-			progress[len(progress)-1].Result = filterToolResultForHistory(call.Name, result)
+			progress[len(progress)-1].Result = history.FilterToolResult(call.Name, result)
 			finishTraceTiming(&progress[len(progress)-1], toolStarted, time.Now())
 			updated, err = r.updateRunProgress(session.ID, runID, modelCalls, toolCalls, progress)
 			if err != nil {
@@ -2068,9 +2069,9 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 		writeMutationPersistenceError(w, requestCanceled)
 		return
 	}
-	var historyStage *historyStage
+	var historyStage *history.Stage
 	if session.Status == "running" && session.CurrentRunID != 0 {
-		historyStage, err = r.stageHistoryRunIDsTx(tx, sessionID, clearanceHistoryRunIDs(session.CurrentRunID, clearance)...)
+		historyStage, err = history.StageRunIDs(tx, &r.historyMu, r.config.HistoryDirectory, sessionID, history.ClearanceRunIDs(session.CurrentRunID, clearance)...)
 		if err != nil {
 			requestCanceled := requestCancellationCausedPersistenceError(request.Context(), err)
 			if !requestCanceled {
@@ -2089,7 +2090,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 		}
 		_ = tx.Rollback()
 		if historyStage != nil {
-			if restoreErr := historyStage.finish(false); restoreErr != nil {
+			if restoreErr := historyStage.Finish(false); restoreErr != nil {
 				r.latchPersistenceFaultLocked(restoreErr)
 			}
 		}
@@ -2098,7 +2099,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 		return
 	}
 	if historyStage != nil {
-		if err := historyStage.finish(true); err != nil {
+		if err := historyStage.Finish(true); err != nil {
 			r.latchPersistenceFaultLocked(err)
 			r.mu.Unlock()
 			server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
