@@ -3,203 +3,21 @@ package common
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
+	"stock-ai/agent-server/internal/memory"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
-	"unicode/utf8"
 )
 
-const (
-	memoryPageSize        = 100
-	maxCandidateMemories  = 20
-	maxMemoryTypeRunes    = 64
-	maxMemorySummaryRunes = 500
-	maxMemoryContentBytes = 64 << 10
-	maxExpirationRunes    = 500
-)
-
-var memorySchema = []string{
-	`CREATE TABLE IF NOT EXISTS memories (
-		id TEXT PRIMARY KEY, session_id TEXT NOT NULL, run_id INTEGER NOT NULL,
-		candidate_index INTEGER NOT NULL, type TEXT NOT NULL, summary TEXT NOT NULL,
-		content TEXT NOT NULL, importance INTEGER NOT NULL CHECK (importance BETWEEN 1 AND 3),
-		run_start_at TEXT NOT NULL, run_end_at TEXT NOT NULL,
-		is_expired INTEGER NOT NULL DEFAULT 0 CHECK (is_expired IN (0, 1)),
-		expired_at TEXT, expired_source TEXT, expired_run_id INTEGER, expiration_reason TEXT,
-		created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-		UNIQUE (session_id, run_id, candidate_index)
-	)`,
-	`CREATE INDEX IF NOT EXISTS memories_session_listing
-		ON memories(session_id, is_expired, importance DESC, run_id DESC, id)`,
-}
-
-type Memory struct {
-	ID               string  `json:"id"`
-	SessionID        string  `json:"session_id"`
-	RunID            int64   `json:"run_id"`
-	Type             string  `json:"type"`
-	Summary          string  `json:"summary"`
-	Content          string  `json:"content"`
-	Importance       int     `json:"importance"`
-	RunStartAt       string  `json:"run_start_at"`
-	RunEndAt         string  `json:"run_end_at"`
-	IsExpired        bool    `json:"is_expired"`
-	ExpiredAt        *string `json:"expired_at"`
-	ExpiredSource    *string `json:"expired_source"`
-	ExpiredRunID     *int64  `json:"expired_run_id"`
-	ExpirationReason *string `json:"expiration_reason"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
-}
-
-type memoryMetadata struct {
-	ID         string `json:"id"`
-	RunID      int64  `json:"run_id"`
-	Type       string `json:"type"`
-	Summary    string `json:"summary"`
-	Importance int    `json:"importance"`
-	IsExpired  bool   `json:"is_expired"`
-}
-
-type memoryListItem struct {
-	ID               string  `json:"id"`
-	SessionID        string  `json:"session_id"`
-	RunID            int64   `json:"run_id"`
-	Type             string  `json:"type"`
-	Summary          string  `json:"summary"`
-	Importance       int     `json:"importance"`
-	RunStartAt       string  `json:"run_start_at"`
-	RunEndAt         string  `json:"run_end_at"`
-	IsExpired        bool    `json:"is_expired"`
-	ExpiredAt        *string `json:"expired_at"`
-	ExpiredSource    *string `json:"expired_source"`
-	ExpiredRunID     *int64  `json:"expired_run_id"`
-	ExpirationReason *string `json:"expiration_reason"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
-}
-
-type recentRunSummary struct {
-	RunID   int64  `json:"run_id"`
-	Summary string `json:"summary"`
-}
-
-type candidateMemory struct {
-	Type       string `json:"type"`
-	Summary    string `json:"summary"`
-	Content    string `json:"content"`
-	Importance int    `json:"importance"`
-}
-
-type memoryExpiration struct {
-	ID     string `json:"id"`
-	Reason string `json:"reason"`
-}
-
-type finalizationOutput struct {
-	Output            string             `json:"output"`
-	Summary           string             `json:"summary"`
-	CandidateMemories []candidateMemory  `json:"candidate_memories"`
-	ExpireMemories    []memoryExpiration `json:"expire_memories"`
-}
-
-type finalizationReferenceError struct{ message string }
-
-func (err *finalizationReferenceError) Error() string { return err.message }
-
-const finalizationInstruction = `
-
-When your work is normally complete, finish with finish_reason "stop" and content containing exactly one JSON object:
-{"output":"human-readable final decision","summary":"short summary (max 500 Unicode characters)","candidate_memories":[],"expire_memories":[]}
-All four fields are required. candidate_memories may contain at most 20 objects with only type (max 64 Unicode characters), summary (max 500 Unicode characters), content (max 65536 UTF-8 bytes), and importance (1, 2, or 3). expire_memories may contain at most 20 objects with only a Server-issued memory id and a reason of at most 500 Unicode characters. Do not include session_id, run_id, timestamps, credentials, hidden reasoning, or extra fields. Tool calls continue to use the structured tool channel; do not put this final object in a tool call.`
-
-func parseFinalization(content string) (finalizationOutput, error) {
-	decoder := json.NewDecoder(strings.NewReader(content))
-	decoder.DisallowUnknownFields()
-	var envelope struct {
-		Output            *string             `json:"output"`
-		Summary           *string             `json:"summary"`
-		CandidateMemories *[]candidateMemory  `json:"candidate_memories"`
-		ExpireMemories    *[]memoryExpiration `json:"expire_memories"`
-	}
-	if err := decoder.Decode(&envelope); err != nil || decoder.Decode(&struct{}{}) != io.EOF ||
-		envelope.Output == nil || envelope.Summary == nil || envelope.CandidateMemories == nil || envelope.ExpireMemories == nil {
-		return finalizationOutput{}, errors.New("content must be exactly one finalization JSON object with known fields")
-	}
-	output := finalizationOutput{
-		Output: *envelope.Output, Summary: *envelope.Summary,
-		CandidateMemories: *envelope.CandidateMemories, ExpireMemories: *envelope.ExpireMemories,
-	}
-	output.Output = strings.TrimSpace(output.Output)
-	output.Summary = strings.TrimSpace(output.Summary)
-	if output.Output == "" || output.Summary == "" {
-		return finalizationOutput{}, errors.New("output and summary must be nonempty strings")
-	}
-	if utf8.RuneCountInString(output.Summary) > maxMemorySummaryRunes {
-		return finalizationOutput{}, fmt.Errorf("summary must not exceed %d Unicode characters", maxMemorySummaryRunes)
-	}
-	if len(output.CandidateMemories) > maxCandidateMemories || len(output.ExpireMemories) > maxCandidateMemories {
-		return finalizationOutput{}, fmt.Errorf("candidate_memories and expire_memories may each contain at most %d items", maxCandidateMemories)
-	}
-	for index := range output.CandidateMemories {
-		candidate := &output.CandidateMemories[index]
-		candidate.Type = strings.TrimSpace(candidate.Type)
-		candidate.Summary = strings.TrimSpace(candidate.Summary)
-		candidate.Content = strings.TrimSpace(candidate.Content)
-		if candidate.Type == "" || utf8.RuneCountInString(candidate.Type) > maxMemoryTypeRunes {
-			return finalizationOutput{}, fmt.Errorf("candidate_memories[%d].type must contain 1 through %d Unicode characters", index, maxMemoryTypeRunes)
-		}
-		if candidate.Summary == "" || utf8.RuneCountInString(candidate.Summary) > maxMemorySummaryRunes {
-			return finalizationOutput{}, fmt.Errorf("candidate_memories[%d].summary must contain 1 through %d Unicode characters", index, maxMemorySummaryRunes)
-		}
-		if candidate.Content == "" || len(candidate.Content) > maxMemoryContentBytes {
-			return finalizationOutput{}, fmt.Errorf("candidate_memories[%d].content must contain 1 through %d UTF-8 bytes", index, maxMemoryContentBytes)
-		}
-		if candidate.Importance < 1 || candidate.Importance > 3 {
-			return finalizationOutput{}, fmt.Errorf("candidate_memories[%d].importance must be 1, 2, or 3", index)
-		}
-	}
-	seen := make(map[string]bool, len(output.ExpireMemories))
-	for index := range output.ExpireMemories {
-		expiration := &output.ExpireMemories[index]
-		expiration.ID = strings.TrimSpace(expiration.ID)
-		expiration.Reason = strings.TrimSpace(expiration.Reason)
-		if !validMemoryID(expiration.ID) {
-			return finalizationOutput{}, fmt.Errorf("expire_memories[%d].id must be a Server-issued Memory ID", index)
-		}
-		if expiration.Reason == "" || utf8.RuneCountInString(expiration.Reason) > maxExpirationRunes {
-			return finalizationOutput{}, fmt.Errorf("expire_memories[%d].reason must contain 1 through %d Unicode characters", index, maxExpirationRunes)
-		}
-		if seen[expiration.ID] {
-			return finalizationOutput{}, fmt.Errorf("expire_memories contains duplicate id %q", expiration.ID)
-		}
-		seen[expiration.ID] = true
-	}
-	return output, nil
-}
-
-func validMemoryID(id string) bool {
-	if len(id) != 34 || !strings.HasPrefix(id, "m_") || id != strings.ToLower(id) {
-		return false
-	}
-	_, err := hex.DecodeString(id[2:])
-	return err == nil
-}
-
-func (r *AgentRuntime) completeFinalizedRun(sessionID string, runID int64, final finalizationOutput) (bool, error) {
+func (r *AgentRuntime) completeFinalizedRun(sessionID string, runID int64, final memory.Finalization) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed || r.persistenceErr != nil {
@@ -221,7 +39,7 @@ func (r *AgentRuntime) completeFinalizedRun(sessionID string, runID int64, final
 		err := tx.QueryRow(`SELECT is_expired FROM memories WHERE id = ? AND session_id = ?`, expiration.ID, sessionID).Scan(&expired)
 		if errors.Is(err, sql.ErrNoRows) {
 			_ = tx.Rollback()
-			return false, &finalizationReferenceError{message: fmt.Sprintf("Memory %s does not exist in this Session", expiration.ID)}
+			return false, memory.NewReferenceError(expiration.ID)
 		}
 		if err != nil {
 			_ = tx.Rollback()
@@ -230,14 +48,13 @@ func (r *AgentRuntime) completeFinalizedRun(sessionID string, runID int64, final
 		expiredReferences[expiration.ID] = expired
 	}
 	for index, candidate := range final.CandidateMemories {
-		id, err := newMemoryID()
+		id, err := memory.NewMemoryID()
 		if err != nil {
 			_ = tx.Rollback()
 			return false, err
 		}
-		_, err = tx.Exec(`INSERT INTO memories
-			(id, session_id, run_id, candidate_index, type, summary, content, importance,
-			run_start_at, run_end_at, is_expired, created_at, updated_at)
+		_, err = tx.Exec(`INSERT INTO memories (id, session_id, run_id, candidate_index, type, summary,
+			content, importance, run_start_at, run_end_at, is_expired, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
 			id, sessionID, runID, index, candidate.Type, candidate.Summary, candidate.Content,
 			candidate.Importance, run.StartedAt, endTime, endTime, endTime)
@@ -284,14 +101,6 @@ func (r *AgentRuntime) completeFinalizedRun(sessionID string, runID int64, final
 	return true, nil
 }
 
-func newMemoryID() (string, error) {
-	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
-		return "", errors.New("unable to create Memory ID")
-	}
-	return "m_" + hex.EncodeToString(value), nil
-}
-
 func (r *AgentRuntime) executeMemoryTool(ctx context.Context, sessionID string, call gatewayTool) (json.RawMessage, bool) {
 	switch call.Name {
 	case "memory_list":
@@ -299,21 +108,21 @@ func (r *AgentRuntime) executeMemoryTool(ctx context.Context, sessionID string, 
 		if err != nil {
 			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
-		memories, err := r.memoryMetadata(ctx, sessionID, "", limit)
+		memories, err := memory.List(ctx, r.db, sessionID, "", limit)
 		return r.memoryReadToolResult(memories, err), true
 	case "memory_search":
 		query, limit, err := tools.MemorySearchArguments(call.Arguments)
 		if err != nil {
 			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
-		memories, err := r.memoryMetadata(ctx, sessionID, query, limit)
+		memories, err := memory.List(ctx, r.db, sessionID, query, limit)
 		return r.memoryReadToolResult(memories, err), true
 	case "memory_read":
 		id, err := tools.SingleIDArgument(call.Arguments, "memory_id")
 		if err != nil {
 			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
-		memory, err := r.memoryByID(ctx, sessionID, id, false)
+		mem, err := memory.MemoryByID(ctx, r.db, sessionID, id, false)
 		if errors.Is(err, sql.ErrNoRows) {
 			return tools.ErrorResult("MEMORY_NOT_FOUND", "Memory does not exist or is expired in this Session", "not_executed"), true
 		}
@@ -321,8 +130,8 @@ func (r *AgentRuntime) executeMemoryTool(ctx context.Context, sessionID string, 
 			return r.memoryPersistenceToolError(err), true
 		}
 		return tools.SuccessResult(map[string]any{
-			"id": memory.ID, "run_id": memory.RunID, "type": memory.Type,
-			"summary": memory.Summary, "content": memory.Content, "importance": memory.Importance,
+			"id": mem.ID, "run_id": mem.RunID, "type": mem.Type,
+			"summary": mem.Summary, "content": mem.Content, "importance": mem.Importance,
 		}), true
 	case "get_run_history":
 		runID, err := runHistoryToolArgument(call.Arguments)
@@ -353,49 +162,7 @@ func runHistoryToolArgument(arguments json.RawMessage) (int64, error) {
 	return runID, nil
 }
 
-func (r *AgentRuntime) memoryMetadata(ctx context.Context, sessionID, query string, limit int) ([]memoryMetadata, error) {
-	statement := `SELECT id, run_id, type, summary, importance, is_expired FROM memories
-		WHERE session_id = ? AND is_expired = 0`
-	args := []any{sessionID}
-	if query != "" {
-		statement += ` AND (instr(lower(summary), lower(?)) > 0 OR instr(lower(type), lower(?)) > 0)`
-		args = append(args, query, query)
-	}
-	statement += ` ORDER BY importance DESC, run_id DESC, id LIMIT ?`
-	args = append(args, limit)
-	rows, err := r.db.QueryContext(ctx, statement, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	memories := make([]memoryMetadata, 0)
-	for rows.Next() {
-		var memory memoryMetadata
-		if err := rows.Scan(&memory.ID, &memory.RunID, &memory.Type, &memory.Summary, &memory.Importance, &memory.IsExpired); err != nil {
-			return nil, err
-		}
-		memories = append(memories, memory)
-	}
-	return memories, rows.Err()
-}
-
-func (r *AgentRuntime) progressiveRunContext(ctx context.Context, sessionID string, currentRunID int64) (*recentRunSummary, []memoryMetadata, error) {
-	var recent recentRunSummary
-	err := r.db.QueryRowContext(ctx, `SELECT run_id, summary FROM runs
-		WHERE session_id = ? AND run_id < ? AND status = 'completed' AND summary IS NOT NULL
-		ORDER BY run_id DESC LIMIT 1`, sessionID, currentRunID).Scan(&recent.RunID, &recent.Summary)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, err
-	}
-	var recentPointer *recentRunSummary
-	if err == nil {
-		recentPointer = &recent
-	}
-	memories, err := r.memoryMetadata(ctx, sessionID, "", tools.MemoryDefaultLimit)
-	return recentPointer, memories, err
-}
-
-func (r *AgentRuntime) memoryReadToolResult(memories []memoryMetadata, err error) json.RawMessage {
+func (r *AgentRuntime) memoryReadToolResult(memories []memory.Metadata, err error) json.RawMessage {
 	if err != nil {
 		return r.memoryPersistenceToolError(err)
 	}
@@ -440,65 +207,13 @@ func (r *AgentRuntime) historyRunByID(ctx context.Context, sessionID string, run
 	body, err := os.ReadFile(filepath.Join(r.config.HistoryDirectory, name))
 	r.historyMu.Unlock()
 	if err != nil || !validHistoryBody(body, sessionID, start, end, runID) {
-		return historyRun{}, errors.New("History shard is unavailable")
+		return historyRun{}, errors.New("History index is invalid")
 	}
-	return parseHistoryRun(body, runID)
-}
-
-func scanMemory(row scanner) (Memory, error) {
-	var memory Memory
-	var expiredAt, expiredSource, expirationReason sql.NullString
-	var expiredRunID sql.NullInt64
-	err := row.Scan(&memory.ID, &memory.SessionID, &memory.RunID, &memory.Type, &memory.Summary,
-		&memory.Content, &memory.Importance, &memory.RunStartAt, &memory.RunEndAt, &memory.IsExpired,
-		&expiredAt, &expiredSource, &expiredRunID, &expirationReason, &memory.CreatedAt, &memory.UpdatedAt)
+	run, err := parseHistoryRun(body, runID)
 	if err != nil {
-		return Memory{}, err
+		return historyRun{}, err
 	}
-	memory.ExpiredAt = nullStringPointer(expiredAt)
-	memory.ExpiredSource = nullStringPointer(expiredSource)
-	memory.ExpirationReason = nullStringPointer(expirationReason)
-	if expiredRunID.Valid {
-		value := expiredRunID.Int64
-		memory.ExpiredRunID = &value
-	}
-	return memory, nil
-}
-
-const memorySelect = `SELECT id, session_id, run_id, type, summary, content, importance,
-	run_start_at, run_end_at, is_expired, expired_at, expired_source, expired_run_id,
-	expiration_reason, created_at, updated_at FROM memories`
-
-const memoryListSelect = `SELECT id, session_id, run_id, type, summary, importance,
-	run_start_at, run_end_at, is_expired, expired_at, expired_source, expired_run_id,
-	expiration_reason, created_at, updated_at FROM memories`
-
-func scanMemoryListItem(row scanner) (memoryListItem, error) {
-	var memory memoryListItem
-	var expiredAt, expiredSource, expirationReason sql.NullString
-	var expiredRunID sql.NullInt64
-	err := row.Scan(&memory.ID, &memory.SessionID, &memory.RunID, &memory.Type, &memory.Summary,
-		&memory.Importance, &memory.RunStartAt, &memory.RunEndAt, &memory.IsExpired,
-		&expiredAt, &expiredSource, &expiredRunID, &expirationReason, &memory.CreatedAt, &memory.UpdatedAt)
-	if err != nil {
-		return memoryListItem{}, err
-	}
-	memory.ExpiredAt = nullStringPointer(expiredAt)
-	memory.ExpiredSource = nullStringPointer(expiredSource)
-	memory.ExpirationReason = nullStringPointer(expirationReason)
-	if expiredRunID.Valid {
-		value := expiredRunID.Int64
-		memory.ExpiredRunID = &value
-	}
-	return memory, nil
-}
-
-func (r *AgentRuntime) memoryByID(ctx context.Context, sessionID, memoryID string, includeExpired bool) (Memory, error) {
-	query := memorySelect + ` WHERE session_id = ? AND id = ?`
-	if !includeExpired {
-		query += ` AND is_expired = 0`
-	}
-	return scanMemory(r.db.QueryRowContext(ctx, query, sessionID, memoryID))
+	return run, nil
 }
 
 func (r *AgentRuntime) serveMemories(w http.ResponseWriter, request *http.Request, sessionID string, rest []string) {
@@ -533,31 +248,31 @@ func (r *AgentRuntime) listMemoriesHTTP(w http.ResponseWriter, request *http.Req
 		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "page must be positive and include_expired must be true or false")
 		return
 	}
-	query := memoryListSelect + ` WHERE session_id = ?`
+	query := memory.ListSelect + ` WHERE session_id = ?`
 	if !includeExpired {
 		query += ` AND is_expired = 0`
 	}
 	query += ` ORDER BY importance DESC, run_id DESC, id LIMIT ? OFFSET ?`
-	rows, err := r.db.QueryContext(request.Context(), query, sessionID, memoryPageSize, (page-1)*memoryPageSize)
+	rows, err := r.db.QueryContext(request.Context(), query, sessionID, memory.PageSize, (page-1)*memory.PageSize)
 	if err != nil {
 		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
 		return
 	}
 	defer rows.Close()
-	memories := make([]memoryListItem, 0)
+	items := make([]memory.ListItem, 0)
 	for rows.Next() {
-		memory, err := scanMemoryListItem(rows)
+		item, err := memory.ScanListItem(rows)
 		if err != nil {
 			server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
 			return
 		}
-		memories = append(memories, memory)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
 		return
 	}
-	writeRuntimeJSON(w, http.StatusOK, map[string]any{"memories": memories, "page": page, "page_size": memoryPageSize, "include_expired": includeExpired})
+	writeRuntimeJSON(w, http.StatusOK, map[string]any{"memories": items, "page": page, "page_size": memory.PageSize, "include_expired": includeExpired})
 }
 
 func memoryListQuery(request *http.Request) (int, bool, bool) {
@@ -574,7 +289,7 @@ func memoryListQuery(request *http.Request) (int, bool, bool) {
 		}
 		var err error
 		page, err = strconv.Atoi(rawValues[0])
-		if err != nil || page < 1 || page > int(^uint(0)>>1)/memoryPageSize {
+		if err != nil || page < 1 || page > int(^uint(0)>>1)/memory.PageSize {
 			return 0, false, false
 		}
 	}
@@ -589,7 +304,7 @@ func memoryListQuery(request *http.Request) (int, bool, bool) {
 }
 
 func (r *AgentRuntime) getMemoryHTTP(w http.ResponseWriter, request *http.Request, sessionID, memoryID string) {
-	memory, err := r.memoryByID(request.Context(), sessionID, memoryID, true)
+	mem, err := memory.MemoryByID(request.Context(), r.db, sessionID, memoryID, true)
 	if errors.Is(err, sql.ErrNoRows) {
 		server.WriteJSONError(w, http.StatusNotFound, "MEMORY_NOT_FOUND", "Memory does not exist in this Session")
 		return
@@ -598,7 +313,7 @@ func (r *AgentRuntime) getMemoryHTTP(w http.ResponseWriter, request *http.Reques
 		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Memory")
 		return
 	}
-	writeRuntimeJSON(w, http.StatusOK, memory)
+	writeRuntimeJSON(w, http.StatusOK, mem)
 }
 
 func (r *AgentRuntime) deleteMemoryHTTP(w http.ResponseWriter, request *http.Request, sessionID, memoryID string) {
@@ -618,7 +333,7 @@ func (r *AgentRuntime) deleteMemoryHTTP(w http.ResponseWriter, request *http.Req
 		writeMutationPersistenceError(w, requestCanceled)
 		return
 	}
-	memory, err := scanMemory(tx.QueryRowContext(request.Context(), memorySelect+` WHERE session_id = ? AND id = ?`, sessionID, memoryID))
+	mem, err := memory.ScanMemory(tx.QueryRowContext(request.Context(), memory.Select+` WHERE session_id = ? AND id = ?`, sessionID, memoryID))
 	if errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
 		r.mu.Unlock()
@@ -636,7 +351,7 @@ func (r *AgentRuntime) deleteMemoryHTTP(w http.ResponseWriter, request *http.Req
 		return
 	}
 	var userExpiredAt *string
-	if !memory.IsExpired {
+	if !mem.IsExpired {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		userExpiredAt = &now
 		_, err = tx.ExecContext(request.Context(), `UPDATE memories SET is_expired = 1, expired_at = ?,
@@ -660,12 +375,12 @@ func (r *AgentRuntime) deleteMemoryHTTP(w http.ResponseWriter, request *http.Req
 	}
 	if userExpiredAt != nil {
 		source, reason := "user", "deleted by user"
-		memory.IsExpired = true
-		memory.ExpiredAt = userExpiredAt
-		memory.ExpiredSource = &source
-		memory.ExpirationReason = &reason
-		memory.UpdatedAt = *userExpiredAt
+		mem.IsExpired = true
+		mem.ExpiredAt = userExpiredAt
+		mem.ExpiredSource = &source
+		mem.ExpirationReason = &reason
+		mem.UpdatedAt = *userExpiredAt
 	}
 	r.mu.Unlock()
-	writeRuntimeJSON(w, http.StatusOK, memory)
+	writeRuntimeJSON(w, http.StatusOK, mem)
 }

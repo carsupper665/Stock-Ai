@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"stock-ai/agent-server/internal/events"
+	"stock-ai/agent-server/internal/memory"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
 )
@@ -710,7 +711,7 @@ func validHistoryRun(raw json.RawMessage, start, end int64) (historyRun, bool) {
 	}
 	for _, rawID := range memoryIDs {
 		var id string
-		if json.Unmarshal(rawID, &id) != nil || !validMemoryID(id) {
+		if json.Unmarshal(rawID, &id) != nil || !memory.ValidMemoryID(id) {
 			return historyRun{}, false
 		}
 	}

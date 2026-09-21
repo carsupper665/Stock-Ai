@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"stock-ai/agent-server/internal/events"
+	"stock-ai/agent-server/internal/memory"
 	"stock-ai/agent-server/internal/server"
 	"stock-ai/agent-server/internal/tools"
 
@@ -215,7 +216,7 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 			retry_of_run_id INTEGER, retry_attempt INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (session_id, run_id)
 		)`,
-	}, events.Schema...), historySchema...), memorySchema...) {
+	}, events.Schema...), historySchema...), memory.Schema...) {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("initialize agent database: %w", err)
@@ -1284,13 +1285,13 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		}
 		contextBody["retry_context"] = retryContext
 	}
-	var recentSummary *recentRunSummary
-	var memoryIndex []memoryMetadata
+	var recentSummary *memory.RecentRun
+	var memoryIndex []memory.Metadata
 	var err error
 	if trigger == "server_recovery" {
-		memoryIndex, err = r.memoryMetadata(ctx, session.ID, "", tools.MemoryDefaultLimit)
+		memoryIndex, err = memory.List(ctx, r.db, session.ID, "", tools.MemoryDefaultLimit)
 	} else {
-		recentSummary, memoryIndex, err = r.progressiveRunContext(ctx, session.ID, runID)
+		recentSummary, memoryIndex, err = memory.ProgressiveContext(ctx, r.db, session.ID, runID)
 	}
 	if err != nil {
 		r.handleRunPersistenceError(session.ID, runID, err)
@@ -1304,7 +1305,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 	}
 	contextBody["available_tools"] = runtimeToolNames()
 	encodedContext, _ := json.Marshal(contextBody)
-	systemPrompt := session.Prompt + toolDisclosureInstruction() + finalizationInstruction
+	systemPrompt := session.Prompt + toolDisclosureInstruction() + memory.Instruction
 	userPrompt := string(encodedContext)
 	messages := []gatewayMessage{{Role: "system", Content: &systemPrompt}, {Role: "user", Content: &userPrompt}}
 	progress := make([]traceEntry, 0)
@@ -1391,12 +1392,12 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			finalizationAttempts += attempts
 		}
 		if len(response.ToolCalls) == 0 {
-			var final finalizationOutput
+			var final memory.Finalization
 			var finalizationErr error
 			if response.Content == nil || strings.TrimSpace(*response.Content) == "" || response.FinishReason != "stop" {
 				finalizationErr = errors.New("final response requires nonempty content and stop finish_reason")
 			} else {
-				final, finalizationErr = parseFinalization(*response.Content)
+				final, finalizationErr = memory.ParseFinalization(*response.Content)
 			}
 			if finalizationErr != nil {
 				if !finalizing {
@@ -1422,7 +1423,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			}
 			completed, err := r.completeFinalizedRun(session.ID, runID, final)
 			if err != nil {
-				var referenceError *finalizationReferenceError
+				var referenceError *memory.ReferenceError
 				if errors.As(err, &referenceError) {
 					if !finalizing {
 						finalizing = true
