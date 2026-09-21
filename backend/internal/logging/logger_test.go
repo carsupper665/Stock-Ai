@@ -90,9 +90,9 @@ func TestRotationCreatesNewFileAndKeepsWriting(t *testing.T) {
 
 func TestRotationClosesPreviousFile(t *testing.T) {
 	// 縮短寬限期，讓測試不必等半秒。
-	original := closeGrace
-	closeGrace = 10 * time.Millisecond
-	t.Cleanup(func() { closeGrace = original })
+	original := closeGraceNs.Load()
+	closeGraceNs.Store(int64(10 * time.Millisecond))
+	t.Cleanup(func() { closeGraceNs.Store(original) })
 
 	l, _ := newTestLogger(t, 3)
 	ctx := context.Background()

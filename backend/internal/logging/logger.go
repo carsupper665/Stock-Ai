@@ -49,9 +49,9 @@ type Logger struct {
 	// 大量日誌可以在同一個時間刻度內寫完，開回同一個檔案就等於沒輪替。
 	seq atomic.Uint64
 
-	// counter 只用來決定何時輪替，刻意不做同步。
-	// 併發下少算幾行不影響正確性，換來寫入路徑零成本。
-	counter int
+	// counter 只用來決定何時輪替；併發下少算幾行不影響正確性，
+	// 但存取必須 atomic（非同步的共構 int 是 data race，-race 會抓到）。
+	counter atomic.Int64
 }
 
 // New 建立一個具名 logger，日誌檔放在 dir 底下，寫超過 max 行後自動輪替。
@@ -77,7 +77,10 @@ func New(name, dir string, max int, debug bool) (*Logger, error) {
 
 // closeGrace 是輪替後保留舊檔案 handle 的時間。給正在寫入的 goroutine
 // 用完手上的 handle，就不需要為了關檔而在寫入路徑加鎖。
-var closeGrace = 500 * time.Millisecond
+// 背景 deferred-close goroutine 可能比改它的測試活得更久，存取必須 atomic。
+var closeGraceNs atomic.Int64
+
+func init() { closeGraceNs.Store(int64(500 * time.Millisecond)) }
 
 // openFile 開一個新的日誌檔，檔名為 <名稱>-<時間>-<序號>.log。
 func (l *Logger) openFile() (*os.File, error) {
@@ -183,14 +186,13 @@ func (l *Logger) prefix(level int) string {
 
 // countLine 累計輸出行數，超過上限時在背景輪替日誌檔，不阻塞呼叫端。
 func (l *Logger) countLine() {
-	l.counter++
-	if l.counter <= l.max {
+	if l.counter.Add(1) <= int64(l.max) {
 		return
 	}
 	if !l.rotating.CompareAndSwap(false, true) {
 		return
 	}
-	l.counter = 0
+	l.counter.Store(0)
 	go l.rotate()
 }
 
@@ -210,7 +212,7 @@ func (l *Logger) rotate() {
 	// 立刻關掉舊 handle 會讓正在寫入的 goroutine 撲空掉行；延後關閉即可，
 	// 代價只是短時間多開一個 fd。
 	go func() {
-		time.Sleep(closeGrace)
+		time.Sleep(time.Duration(closeGraceNs.Load()))
 		_ = old.Close()
 	}()
 }
