@@ -75,6 +75,10 @@ func TestRotationCreatesNewFileAndKeepsWriting(t *testing.T) {
 
 	current := l.file.Load().Name()
 	l.Info(ctx, "after rotation marker")
+	// 最後這筆寫入可能又觸發一次背景輪替（counter 在第二次輪替前
+	// 未被重置）。等它完成再結束測試，否則輪替 goroutine 會在
+	// TempDir 清理時才建新檔，造成 "directory not empty" 的偶發失敗。
+	waitFor(t, "輪替結束", func() bool { return !l.rotating.Load() })
 
 	data, err := os.ReadFile(current)
 	if err != nil {
