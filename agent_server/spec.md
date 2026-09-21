@@ -2340,7 +2340,7 @@ response has more calls than remaining units, only the prefix fitting the budget
 is attempted; every remaining call receives a correlated, structured
 `MAX_TOOL_CALL_REACHED` result without dispatch. Reaching either limit forces one
 tool-disabled terminal finalization flow instead of failing the Run for the limit.
-That flow has at most four actual Generate attempts (the initial attempt plus three
+That flow has at most six actual Generate attempts (the initial attempt plus five
 retries). Counters never come from the model and count every actual Generate and
 accepted Tool attempt, including errors.
 
@@ -3106,7 +3106,7 @@ reasons are 1–500 Unicode characters. The Server, never the model, creates Mem
 assigns Session/Run ownership and timestamps.
 
 Plain final text, missing/null fields, unknown fields, malformed/trailing JSON, and invalid
-candidates trigger a tool-disabled repair request within the same four-attempt terminal
+candidates trigger a tool-disabled repair request within the same six-attempt terminal
 allowance. Exhaustion fails the Run as `FINALIZATION_INVALID`. Malformed or
 foreign/nonexistent expiration references fail without retrying the completion transaction. A finalization storage
 failure follows the existing persistence-fault path and cannot expose a completed Run or a
@@ -3715,11 +3715,11 @@ errors are nonretryable. Usage may remain `null`/unknown.
 
 ## 67.1 Terminal finalization and Memory validation
 
-Terminal finalization has four total model attempts. Its attempt numbers are monotonic across
+Terminal finalization has six total model attempts. Its attempt numbers are monotonic across
 malformed envelopes, transient Generate failures, disabled Tool calls and Memory-reference
 repairs. Transient failures from the preceding decision request do not consume this allowance.
-A natural malformed final response becomes terminal attempt 1; the fourth valid response may
-complete, while a fourth invalid response fails with `FINALIZATION_INVALID`. Hard stop still
+A natural malformed final response becomes terminal attempt 1; the sixth valid response may
+complete, while a sixth invalid response fails with `FINALIZATION_INVALID`. Hard stop still
 prevents later progress or completion writes.
 
 Candidate Memory shape errors and nonexistent/cross-Session expiration references are repairable.

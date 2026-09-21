@@ -240,6 +240,8 @@ func TestTicket28FailedRunDoesNotBlockQueuedTriggersAndKeepsItsTerminalState(t *
 		respondCut,
 		respondCut,
 		respondCut,
+		respondCut,
+		respondCut,
 		respondStop("handled after failure"),
 	)
 	fixture.generate = script.handler(t)
@@ -255,6 +257,8 @@ func TestTicket28FailedRunDoesNotBlockQueuedTriggersAndKeepsItsTerminalState(t *
 	script.next(t, "finalization repair 1")
 	script.next(t, "finalization repair 2")
 	script.next(t, "finalization repair 3")
+	script.next(t, "finalization repair 4")
+	script.next(t, "finalization repair 5")
 	failed := waitForRunStatus(t, runtime, session.ID, 1, "failed")
 	woke := script.next(t, "queued trigger after failed Run")
 	if len(contextTriggers(t, woke)) != 1 {

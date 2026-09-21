@@ -672,7 +672,7 @@ func TestTicket32FailedAndInterruptedHistoryRetainsFactsWithoutSummaryOrReplay(t
 		fixture.mu.Lock()
 		calls := fixture.generateCalls
 		fixture.mu.Unlock()
-		if calls != 4 {
+		if calls != 6 {
 			t.Fatalf("Gateway calls = %d, want bounded finalization repairs", calls)
 		}
 	})

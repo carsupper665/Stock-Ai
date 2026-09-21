@@ -90,8 +90,8 @@ func TestTicket33InvalidFinalizationFailsWithoutRepairOrMemory(t *testing.T) {
 			fixture.mu.Lock()
 			calls := fixture.generateCalls
 			fixture.mu.Unlock()
-			if calls != 4 {
-				t.Fatalf("Generate calls = %d, want initial final response plus three repairs", calls)
+			if calls != 6 {
+				t.Fatalf("Generate calls = %d, want initial final response plus five repairs", calls)
 			}
 			status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet, "/api/v1/sessions/"+session.ID+"/memories", agentAdminToken, nil)
 			if status != http.StatusOK || !strings.Contains(string(raw), `"memories":[]`) {

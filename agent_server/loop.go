@@ -154,7 +154,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		iteration := decisions + 1
 		toolsEnabled := !finalizing
 		if finalizing {
-			attemptLimit -= finalizationAttempts
+			attemptLimit = maxFinalizationRetries + 1 - finalizationAttempts
 			if attemptLimit <= 0 {
 				r.persistRunFailure(session.ID, runID, "FINALIZATION_INVALID: retry allowance exhausted")
 				return
@@ -193,7 +193,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 					finalizationAttempts = 1
 					markLastModelCallTerminal(progress, iteration)
 				}
-				if finalizationAttempts >= maxModelGenerateRetries+1 {
+				if finalizationAttempts >= maxFinalizationRetries+1 {
 					r.persistRunFailure(session.ID, runID, "FINALIZATION_INVALID: "+finalizationErr.Error())
 					return
 				}
@@ -218,7 +218,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 						finalizationAttempts = 1
 						markLastModelCallTerminal(progress, iteration)
 					}
-					if finalizationAttempts >= maxModelGenerateRetries+1 {
+					if finalizationAttempts >= maxFinalizationRetries+1 {
 						r.persistRunFailure(session.ID, runID, "FINALIZATION_INVALID: "+err.Error())
 						return
 					}
@@ -254,7 +254,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				finalizationAttempts = 1
 				markLastModelCallTerminal(progress, iteration)
 			}
-			if finalizationAttempts >= maxModelGenerateRetries+1 {
+			if finalizationAttempts >= maxFinalizationRetries+1 {
 				r.persistRunFailure(session.ID, runID, "FINALIZATION_INVALID: model returned tool calls during finalization")
 				return
 			}

@@ -24,6 +24,7 @@ const (
 	maxRuntimeBody          = 1 << 20
 	restartProgressEntries  = 5
 	maxModelGenerateRetries = 3
+	maxFinalizationRetries  = 5
 	maxManualRunRetries     = 3
 )
 

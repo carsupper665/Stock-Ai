@@ -106,16 +106,17 @@ func TestTicket15ConcurrentStartCreatesOnePersistentFirstRunThroughGatewayHTTP(t
 
 func TestTicket15GatewayFailureAndInvalidAnswerFailWithoutSummaryOrExtraCall(t *testing.T) {
 	for _, test := range []struct {
-		name     string
-		generate func(http.ResponseWriter, *http.Request)
+		name      string
+		generate  func(http.ResponseWriter, *http.Request)
+		wantCalls int
 	}{
-		{name: "Gateway error", generate: func(w http.ResponseWriter, _ *http.Request) {
+		{name: "Gateway error", wantCalls: 4, generate: func(w http.ResponseWriter, _ *http.Request) {
 			writeFixtureJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"code": "PROVIDER_UNAVAILABLE", "message": "offline"}})
 		}},
-		{name: "invalid answer", generate: func(w http.ResponseWriter, _ *http.Request) {
+		{name: "invalid answer", wantCalls: 6, generate: func(w http.ResponseWriter, _ *http.Request) {
 			writeFixtureJSON(w, http.StatusOK, map[string]any{"content": nil, "tool_calls": []any{}, "finish_reason": "stop", "usage": nil})
 		}},
-		{name: "incomplete answer", generate: func(w http.ResponseWriter, _ *http.Request) {
+		{name: "incomplete answer", wantCalls: 6, generate: func(w http.ResponseWriter, _ *http.Request) {
 			writeFixtureJSON(w, http.StatusOK, map[string]any{"content": "truncated", "tool_calls": []any{}, "finish_reason": "length", "usage": nil})
 		}},
 	} {
@@ -127,17 +128,17 @@ func TestTicket15GatewayFailureAndInvalidAnswerFailWithoutSummaryOrExtraCall(t *
 			status, raw := runtimeRequest(t, runtime.Handler(), http.MethodPost,
 				"/api/v1/sessions/"+session.ID+"/start", agentAdminToken, nil)
 			if status != http.StatusAccepted {
-				t.Fatalf("start status = %d body = %s", status, raw)
+				t.Fatalf("start status=%d body=%s", status, raw)
 			}
 			failed := waitForRunStatus(t, runtime, session.ID, 1, "failed")
-			if failed.Summary != nil || failed.Error == nil || failed.ModelCalls != 4 {
+			if failed.Summary != nil || failed.Error == nil || failed.ModelCalls != test.wantCalls {
 				t.Fatalf("failed Run = %+v", failed)
 			}
 			fixture.mu.Lock()
 			calls := fixture.generateCalls
 			fixture.mu.Unlock()
-			if calls != 4 {
-				t.Fatalf("Gateway calls = %d, want initial attempt plus three bounded retries", calls)
+			if calls != test.wantCalls {
+				t.Fatalf("Gateway calls = %d, want %d", calls, test.wantCalls)
 			}
 		})
 	}

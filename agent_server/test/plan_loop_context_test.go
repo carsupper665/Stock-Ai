@@ -152,7 +152,7 @@ func TestPlanAgentTerminalAttemptsAreIndependentAndMonotonic(t *testing.T) {
 	}
 }
 
-func TestPlanAgentTerminalFourthInvalidAttemptExhaustsAllowance(t *testing.T) {
+func TestPlanAgentTerminalSixthInvalidAttemptExhaustsAllowance(t *testing.T) {
 	fixture := newRuntimeFixture()
 	var calls atomic.Int32
 	fixture.generate = func(w http.ResponseWriter, _ *http.Request) {
@@ -163,7 +163,7 @@ func TestPlanAgentTerminalFourthInvalidAttemptExhaustsAllowance(t *testing.T) {
 	session := createStoppedSession(t, runtime, map[string]any{"max_loop": 1})
 	startSessionForTest(t, runtime, session.ID)
 	run := waitForRunStatus(t, runtime, session.ID, 1, "failed")
-	if calls.Load() != 4 || run.ModelCalls != 4 || run.Error == nil || !strings.Contains(*run.Error, "FINALIZATION_INVALID") {
+	if calls.Load() != 6 || run.ModelCalls != 6 || run.Error == nil || !strings.Contains(*run.Error, "FINALIZATION_INVALID") {
 		t.Fatalf("terminal exhaustion calls=%d Run=%+v", calls.Load(), run)
 	}
 	for attempt := 1; attempt <= 4; attempt++ {
