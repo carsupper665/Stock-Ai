@@ -1,4 +1,4 @@
-package common
+package eventloop
 
 import (
 	"context"
@@ -40,6 +40,10 @@ type Clock interface {
 }
 
 type realClock struct{}
+
+// RealClock returns the wall-clock implementation. Domain engines accept an injectable
+// Clock for tests and use this as the production default.
+func RealClock() Clock { return realClock{} }
 
 func (realClock) Now() time.Time { return time.Now() }
 func (realClock) NewTimer(deadline time.Time) Timer {

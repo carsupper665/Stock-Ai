@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"stock-ai/agent-server/internal/eventloop"
 )
 
 // priceSampleMaxAge bounds how far a Backend sample time may lie from the Event clock, in either
@@ -84,7 +86,7 @@ func (r *AgentRuntime) watchedInstruments(ctx context.Context, now time.Time) ([
 // previous round's sample. Duplicate or out-of-order samples carry no new information and never
 // update state. Freshness is judged against the clock at arrival, not at the round start, so a
 // slow earlier request in the same round cannot make a later answer look stale.
-func (r *AgentRuntime) samplePrices(ctx context.Context, clock Clock, watched []instrument, last map[string]priceSample) map[string]priceSample {
+func (r *AgentRuntime) samplePrices(ctx context.Context, clock eventloop.Clock, watched []instrument, last map[string]priceSample) map[string]priceSample {
 	fresh := make(map[string]priceSample, len(watched))
 	keep := make(map[string]bool, len(watched))
 	for _, item := range watched {

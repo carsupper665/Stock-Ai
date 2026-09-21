@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"stock-ai/agent-server/internal/server"
+	"stock-ai/agent-server/internal/tools"
 )
 
 const historyShardSize int64 = 20
@@ -563,21 +566,21 @@ func (r *AgentRuntime) persistTerminalRunLocked(sessionID string, runID int64, s
 func (r *AgentRuntime) serveRunHistory(w http.ResponseWriter, request *http.Request, sessionID, rawRunID string) {
 	if request.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
 	runID, err := strconv.ParseInt(rawRunID, 10, 64)
 	if err != nil || runID <= 0 {
-		writeHTTPError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
 		return
 	}
 	run, err := r.runByID(request.Context(), sessionID, runID)
 	if requestCancellationCausedPersistenceError(request.Context(), err) {
-		writeHTTPError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
+		server.WriteJSONError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
 		return
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
 		return
 	}
 	if err != nil {
@@ -585,11 +588,11 @@ func (r *AgentRuntime) serveRunHistory(w http.ResponseWriter, request *http.Requ
 		return
 	}
 	if err := request.Context().Err(); err != nil {
-		writeHTTPError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
+		server.WriteJSONError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
 		return
 	}
 	if run.Status == "running" {
-		writeHTTPError(w, http.StatusConflict, "HISTORY_NOT_READY", "Run History is available after the Run ends")
+		server.WriteJSONError(w, http.StatusConflict, "HISTORY_NOT_READY", "Run History is available after the Run ends")
 		return
 	}
 	var start, end int64
@@ -598,14 +601,14 @@ func (r *AgentRuntime) serveRunHistory(w http.ResponseWriter, request *http.Requ
 		WHERE session_id = ? AND start_run_id <= ? AND end_run_id >= ?`, sessionID, runID, runID).Scan(&start, &end, &name)
 	if err != nil {
 		if requestCancellationCausedPersistenceError(request.Context(), err) {
-			writeHTTPError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
+			server.WriteJSONError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
 			return
 		}
 		r.writeHistoryUnavailable(w, fmt.Errorf("resolve History index: %w", err))
 		return
 	}
 	if err := request.Context().Err(); err != nil {
-		writeHTTPError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
+		server.WriteJSONError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before Run History was read")
 		return
 	}
 	expectedStart, expectedEnd := historyRange(runID)
@@ -786,7 +789,7 @@ func validHistoryTime(value string) bool {
 
 func (r *AgentRuntime) writeHistoryUnavailable(w http.ResponseWriter, err error) {
 	r.latchPersistenceFault(err)
-	writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Run History is unavailable")
+	server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Run History is unavailable")
 }
 
 func filterToolResultForHistory(toolName string, result json.RawMessage) json.RawMessage {
@@ -893,7 +896,7 @@ func parseHistoryRun(body []byte, runID int64) (historyRun, error) {
 
 func (r *AgentRuntime) historyToolError(err error) json.RawMessage {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return toolErrorResult("TOOL_INTERRUPTED", "Run History read was interrupted", "not_executed")
+		return tools.ErrorResult("TOOL_INTERRUPTED", "Run History read was interrupted", "not_executed")
 	}
 	code := "HISTORY_UNAVAILABLE"
 	message := "Run History is unavailable"
@@ -902,5 +905,5 @@ func (r *AgentRuntime) historyToolError(err error) json.RawMessage {
 	} else {
 		r.latchPersistenceFault(err)
 	}
-	return toolErrorResult(code, message, "not_executed")
+	return tools.ErrorResult(code, message, "not_executed")
 }

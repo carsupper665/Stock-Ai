@@ -22,6 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"stock-ai/agent-server/internal/server"
+	"stock-ai/agent-server/internal/tools"
+
 	sqlite "github.com/glebarez/go-sqlite"
 )
 
@@ -455,19 +458,19 @@ func requestCancellationCausedPersistenceError(ctx context.Context, err error) b
 
 func writeMutationPersistenceError(w http.ResponseWriter, requestCanceled bool) {
 	if requestCanceled {
-		writeHTTPError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before the mutation committed")
+		server.WriteJSONError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before the mutation committed")
 		return
 	}
-	writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+	server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 }
 
 func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 	if !r.authorized(request) {
-		writeHTTPError(w, http.StatusUnauthorized, "UNAUTHORIZED", "valid Agent Server admin credentials are required")
+		server.WriteJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "valid Agent Server admin credentials are required")
 		return
 	}
 	if request.Method != http.MethodGet && r.persistenceUnavailable() {
-		writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+		server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 		return
 	}
 	path := strings.TrimSuffix(request.URL.Path, "/")
@@ -479,12 +482,12 @@ func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 			r.listSessions(w, request)
 		default:
 			w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
-			writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		}
 		return
 	}
 	if !strings.HasPrefix(path, "/api/v1/sessions/") {
-		writeHTTPError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+		server.WriteJSONError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/api/v1/sessions/"), "/")
@@ -496,7 +499,7 @@ func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 			r.deleteSession(w, request, parts[0])
 		default:
 			w.Header().Set("Allow", http.MethodGet+", "+http.MethodDelete)
-			writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "session settings are immutable")
+			server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "session settings are immutable")
 		}
 		return
 	}
@@ -527,7 +530,7 @@ func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 	if len(parts) == 4 && parts[1] == "runs" && parts[3] == "retry" {
 		if request.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
-			writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 			return
 		}
 		r.retryRun(w, request, parts[0], parts[2])
@@ -540,7 +543,7 @@ func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 		case "stop":
 			r.stopSession(w, request, parts[0])
 		default:
-			writeHTTPError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+			server.WriteJSONError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 		}
 		return
 	}
@@ -555,11 +558,11 @@ func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 			}
 			r.getRun(w, request, parts[0], parts[2])
 		default:
-			writeHTTPError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+			server.WriteJSONError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 		}
 		return
 	}
-	writeHTTPError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+	server.WriteJSONError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 }
 
 func (r *AgentRuntime) authorized(request *http.Request) bool {
@@ -581,34 +584,34 @@ type createSessionRequest struct {
 func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Request) {
 	var input createSessionRequest
 	if err := decodeRuntimeJSON(request, &input); err != nil {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	input.AccountID = strings.TrimSpace(input.AccountID)
 	input.ModelName = strings.TrimSpace(input.ModelName)
 	if input.Name == "" || input.AccountID == "" || input.ModelName == "" {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "name, account_id, and model_name are required")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "name, account_id, and model_name are required")
 		return
 	}
 	maxLoop, maxTools := r.config.DefaultMaxLoop, r.config.DefaultMaxToolCall
 	if len(input.MaxLoop) != 0 && (bytes.Equal(bytes.TrimSpace(input.MaxLoop), []byte("null")) || json.Unmarshal(input.MaxLoop, &maxLoop) != nil) {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "max_loop must be a positive integer when provided")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "max_loop must be a positive integer when provided")
 		return
 	}
 	if len(input.MaxToolCall) != 0 && (bytes.Equal(bytes.TrimSpace(input.MaxToolCall), []byte("null")) || json.Unmarshal(input.MaxToolCall, &maxTools) != nil) {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "max_tool_call must be a positive integer when provided")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "max_tool_call must be a positive integer when provided")
 		return
 	}
 	if maxLoop <= 0 || maxTools <= 0 {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "max_loop and max_tool_call must be positive integers")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "max_loop and max_tool_call must be positive integers")
 		return
 	}
 	prompt := r.config.DefaultPrompt
 	if len(input.Prompt) != 0 {
 		var parsed string
 		if bytes.Equal(bytes.TrimSpace(input.Prompt), []byte("null")) || json.Unmarshal(input.Prompt, &parsed) != nil {
-			writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "prompt must be a string when provided")
+			server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "prompt must be a string when provided")
 			return
 		}
 		if parsed != "" {
@@ -619,7 +622,7 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 	if len(input.ModelLevel) != 0 {
 		var parsed string
 		if bytes.Equal(bytes.TrimSpace(input.ModelLevel), []byte("null")) || json.Unmarshal(input.ModelLevel, &parsed) != nil || parsed == "" {
-			writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "model_level must be a nonempty supported string when provided")
+			server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "model_level must be a nonempty supported string when provided")
 			return
 		}
 		level = &parsed
@@ -640,14 +643,14 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 	}
 	id, err := newSessionID()
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to create session ID")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to create session ID")
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	r.mu.Lock()
 	if r.closed || r.persistenceErr != nil {
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+		server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 		return
 	}
 	_, err = r.db.ExecContext(request.Context(), `INSERT INTO sessions
@@ -665,7 +668,7 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 	if err != nil {
 		var sqliteError *sqlite.Error
 		if errors.As(err, &sqliteError) && sqliteError.Code() == 2067 {
-			writeHTTPError(w, http.StatusConflict, "ACCOUNT_ALREADY_BOUND", "account_id is already bound to a Session")
+			server.WriteJSONError(w, http.StatusConflict, "ACCOUNT_ALREADY_BOUND", "account_id is already bound to a Session")
 			return
 		}
 		writeMutationPersistenceError(w, requestCanceled)
@@ -690,10 +693,10 @@ func (e *dependencyError) Error() string { return e.msg }
 func (r *AgentRuntime) writeDependencyError(w http.ResponseWriter, err error) {
 	var dependency *dependencyError
 	if errors.As(err, &dependency) {
-		writeHTTPError(w, dependency.status, dependency.code, dependency.msg)
+		server.WriteJSONError(w, dependency.status, dependency.code, dependency.msg)
 		return
 	}
-	writeHTTPError(w, http.StatusBadGateway, "DEPENDENCY_UNAVAILABLE", "dependency request failed")
+	server.WriteJSONError(w, http.StatusBadGateway, "DEPENDENCY_UNAVAILABLE", "dependency request failed")
 }
 
 func (r *AgentRuntime) validateModel(ctx context.Context, modelName string, level *string) error {
@@ -792,23 +795,23 @@ func (r *AgentRuntime) fetchAccountToken(ctx context.Context, accountID string) 
 func (r *AgentRuntime) listSessions(w http.ResponseWriter, request *http.Request) {
 	page, ok := queryPage(request, "include_deleted")
 	if !ok {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "page must be a positive integer")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "page must be a positive integer")
 		return
 	}
 	includeDeleted := request.URL.Query().Get("include_deleted")
 	for key, values := range request.URL.Query() {
 		if (key != "page" && key != "include_deleted") || len(values) != 1 {
-			writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "only page and include_deleted are accepted once")
+			server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "only page and include_deleted are accepted once")
 			return
 		}
 	}
 	if includeDeleted != "" && includeDeleted != "true" && includeDeleted != "false" {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "include_deleted must be true or false")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "include_deleted must be true or false")
 		return
 	}
 	rows, err := r.db.QueryContext(request.Context(), sessionSelect+` WHERE (? OR status != 'deleted') ORDER BY created_at, id LIMIT ? OFFSET ?`, includeDeleted == "true", sessionPageSize, (page-1)*sessionPageSize)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Sessions")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Sessions")
 		return
 	}
 	defer rows.Close()
@@ -816,24 +819,24 @@ func (r *AgentRuntime) listSessions(w http.ResponseWriter, request *http.Request
 	for rows.Next() {
 		session, err := scanSession(rows)
 		if err != nil {
-			writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Sessions")
+			server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Sessions")
 			return
 		}
 		sessions = append(sessions, session)
 	}
 	if err := rows.Err(); err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Sessions")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Sessions")
 		return
 	}
 	if err := rows.Close(); err != nil {
-		writeHTTPError(w, 500, "INTERNAL_ERROR", "unable to list Sessions")
+		server.WriteJSONError(w, 500, "INTERNAL_ERROR", "unable to list Sessions")
 		return
 	}
 	aggregates := make([]sessionAggregate, 0, len(sessions))
 	for _, session := range sessions {
 		aggregate, err := r.sessionAggregate(request.Context(), session)
 		if err != nil {
-			writeHTTPError(w, 500, "INTERNAL_ERROR", "unable to aggregate Session list")
+			server.WriteJSONError(w, 500, "INTERNAL_ERROR", "unable to aggregate Session list")
 			return
 		}
 		aggregates = append(aggregates, aggregate)
@@ -844,16 +847,16 @@ func (r *AgentRuntime) listSessions(w http.ResponseWriter, request *http.Request
 func (r *AgentRuntime) getSession(w http.ResponseWriter, request *http.Request, sessionID string) {
 	session, err := r.sessionByID(request.Context(), sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	}
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
 		return
 	}
 	detail, err := r.sessionAggregate(request.Context(), session)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to aggregate Session")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to aggregate Session")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, detail)
@@ -976,7 +979,7 @@ func (r *AgentRuntime) startSession(w http.ResponseWriter, request *http.Request
 	r.mu.Lock()
 	if r.closed || r.persistenceErr != nil {
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+		server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 		return
 	}
 	tx, err := r.db.BeginTx(request.Context(), nil)
@@ -993,7 +996,7 @@ func (r *AgentRuntime) startSession(w http.ResponseWriter, request *http.Request
 	if errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	}
 	if err != nil {
@@ -1009,19 +1012,19 @@ func (r *AgentRuntime) startSession(w http.ResponseWriter, request *http.Request
 	if session.Status == "deleted" {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusConflict, "SESSION_DELETED", "deleted Session cannot be started")
+		server.WriteJSONError(w, http.StatusConflict, "SESSION_DELETED", "deleted Session cannot be started")
 		return
 	}
 	if session.Status != "stopped" {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusConflict, "SESSION_ALREADY_RUNNING", "Session is already running")
+		server.WriteJSONError(w, http.StatusConflict, "SESSION_ALREADY_RUNNING", "Session is already running")
 		return
 	}
 	if _, exists := r.active[sessionID]; exists {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusConflict, "SESSION_RUN_ACTIVE", "previous Run cancellation is still pending")
+		server.WriteJSONError(w, http.StatusConflict, "SESSION_RUN_ACTIVE", "previous Run cancellation is still pending")
 		return
 	}
 	runID := session.CurrentRunID + 1
@@ -1078,19 +1081,19 @@ func (r *AgentRuntime) startSession(w http.ResponseWriter, request *http.Request
 func (r *AgentRuntime) retryRun(w http.ResponseWriter, request *http.Request, sessionID, rawRunID string) {
 	runID, err := strconv.ParseInt(rawRunID, 10, 64)
 	if err != nil || runID <= 0 {
-		writeHTTPError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	r.mu.Lock()
 	if r.closed || r.persistenceErr != nil {
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+		server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 		return
 	}
 	if _, active := r.active[sessionID]; active {
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusConflict, "SESSION_RUN_ACTIVE", "a Run is already running")
+		server.WriteJSONError(w, http.StatusConflict, "SESSION_RUN_ACTIVE", "a Run is already running")
 		return
 	}
 	tx, err := r.db.BeginTx(request.Context(), nil)
@@ -1106,7 +1109,7 @@ func (r *AgentRuntime) retryRun(w http.ResponseWriter, request *http.Request, se
 	fail := func(status int, code, message string) {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, status, code, message)
+		server.WriteJSONError(w, status, code, message)
 	}
 	session, err := scanSession(tx.QueryRowContext(request.Context(), sessionSelect+` WHERE id = ?`, sessionID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1284,7 +1287,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 	var memoryIndex []memoryMetadata
 	var err error
 	if trigger == "server_recovery" {
-		memoryIndex, err = r.memoryMetadata(ctx, session.ID, "", memoryToolDefault)
+		memoryIndex, err = r.memoryMetadata(ctx, session.ID, "", tools.MemoryDefaultLimit)
 	} else {
 		recentSummary, memoryIndex, err = r.progressiveRunContext(ctx, session.ID, runID)
 	}
@@ -1448,7 +1451,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		messages = append(messages, gatewayMessage{Role: "assistant", Content: response.Content, ToolCalls: response.ToolCalls})
 		if finalizing || response.FinishReason != "tool_call" {
 			for _, call := range response.ToolCalls {
-				result := toolErrorResult("TOOL_DISABLED", "tools are disabled during finalization", "not_executed")
+				result := tools.ErrorResult("TOOL_DISABLED", "tools are disabled during finalization", "not_executed")
 				content := string(result)
 				callID := call.ID
 				messages = append(messages, gatewayMessage{Role: "tool", Content: &content, ToolCallID: &callID})
@@ -1485,7 +1488,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				return
 			}
 			if toolCalls >= session.MaxToolCall {
-				result := toolErrorResult("MAX_TOOL_CALL_REACHED", "tool-call budget is exhausted; finalize from existing evidence", "not_executed")
+				result := tools.ErrorResult("MAX_TOOL_CALL_REACHED", "tool-call budget is exhausted; finalize from existing evidence", "not_executed")
 				content := string(result)
 				callID := call.ID
 				messages = append(messages, gatewayMessage{Role: "tool", Content: &content, ToolCallID: &callID})
@@ -1498,7 +1501,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			toolStarted := time.Now()
 			progress = append(progress, traceEntry{Type: "tool_call", Iteration: decisions,
 				ToolCallID: call.ID, ToolName: call.Name, Arguments: call.Arguments,
-				Result:    toolErrorResult("TOOL_INTERRUPTED", "tool result is not yet known", "unknown"),
+				Result:    tools.ErrorResult("TOOL_INTERRUPTED", "tool result is not yet known", "unknown"),
 				StartedAt: toolStarted.UTC().Format(time.RFC3339Nano)})
 			updated, err := r.updateRunProgress(session.ID, runID, modelCalls, toolCalls, progress)
 			if err != nil {
@@ -1706,13 +1709,13 @@ func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *
 	if level != nil {
 		options["model_level"] = *level
 	}
-	tools := []map[string]any{}
+	toolDefinitions := []map[string]any{}
 	if toolsEnabled {
-		tools = runtimeToolDefinitions()
+		toolDefinitions = tools.Definitions()
 	}
 	body := map[string]any{
 		"provider": model.ProviderID, "model": model.Model, "messages": messages,
-		"tools": tools, "options": options, "conversation_id": conversationID,
+		"tools": toolDefinitions, "options": options, "conversation_id": conversationID,
 	}
 	if continuation != nil {
 		body["continuation"] = continuation
@@ -1830,65 +1833,26 @@ func (r *AgentRuntime) logOperational(event, sessionID string, runID int64, deta
 	r.logger.Printf("event=%s session_id=%s run_id=%d detail=%s", event, sessionID, runID, detail)
 }
 
-func runtimeToolDefinitions() []map[string]any {
-	tools := []map[string]any{
-		{
-			"name": "get_market_snapshot", "description": "Get the latest market price snapshot.",
-			"input_schema": map[string]any{
-				"type": "object", "properties": map[string]any{
-					"market": map[string]any{"type": "string"}, "symbol": map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
-				}, "required": []string{"symbol"}, "additionalProperties": false,
-			},
-		},
-		{
-			"name": "get_ohlcv", "description": "Get completed OHLCV candles in an ascending UTC time range.",
-			"input_schema": map[string]any{
-				"type": "object", "properties": map[string]any{
-					"market":     map[string]any{"type": "string", "default": "crypto"},
-					"symbol":     map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
-					"interval":   map[string]any{"type": "string", "enum": []string{"1m", "5m", "15m", "1h", "4h", "1d"}},
-					"start_time": map[string]any{"type": "string", "format": "date-time"},
-					"end_time":   map[string]any{"type": "string", "format": "date-time"},
-					"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
-				}, "required": []string{"symbol", "interval", "start_time", "end_time"}, "additionalProperties": false,
-			},
-		},
-		{
-			"name": "get_market_info", "description": "Get source market rules and their relationship to virtual Backend execution.",
-			"input_schema": map[string]any{
-				"type": "object", "properties": map[string]any{
-					"market": map[string]any{"type": "string", "default": "crypto"}, "symbol": map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
-				}, "required": []string{"symbol"}, "additionalProperties": false,
-			},
-		},
-	}
-	tools = append(tools, eventToolSchemas()...)
-	tools = append(tools, tradingToolDefinitions()...)
-	tools = append(tools, messageToolDefinitions()...)
-	tools = append(tools, memoryToolDefinitions()...)
-	return tools
-}
-
 func (r *AgentRuntime) executeTool(ctx context.Context, session Session, runID int64, call gatewayTool) json.RawMessage {
 	switch call.Name {
 	case "create_event", "delete_event", "list_events":
 		return r.executeEventTool(session, runID, call, time.Now())
 	case "get_market_snapshot":
-		query, err := snapshotToolQuery(call.Arguments)
+		query, err := tools.SnapshotQuery(call.Arguments)
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
 		}
 		return r.backendToolRequest(ctx, session, http.MethodGet, "/v1/market/price", query, nil)
 	case "get_ohlcv":
-		query, err := ohlcvToolQuery(call.Arguments)
+		query, err := tools.OHLCVQuery(call.Arguments)
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
 		}
 		return r.backendToolRequest(ctx, session, http.MethodGet, "/v1/market/ohlcv", query, nil)
 	case "get_market_info":
-		query, err := marketInfoToolQuery(call.Arguments)
+		query, err := tools.MarketInfoQuery(call.Arguments)
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
 		}
 		return r.backendToolRequest(ctx, session, http.MethodGet, "/v1/market/info", query, nil)
 	default:
@@ -1901,126 +1865,7 @@ func (r *AgentRuntime) executeTool(ctx context.Context, session Session, runID i
 		if result, handled := r.executeMemoryTool(ctx, session.ID, call); handled {
 			return result
 		}
-		return toolErrorResult("UNKNOWN_TOOL", "tool is not registered", "not_executed")
-	}
-}
-
-type marketSymbolArguments struct {
-	Market json.RawMessage `json:"market"`
-	Symbol json.RawMessage `json:"symbol"`
-}
-
-func snapshotToolQuery(arguments json.RawMessage) (url.Values, error) {
-	var rawArguments struct {
-		Market json.RawMessage `json:"market"`
-		Symbol json.RawMessage `json:"symbol"`
-	}
-	if !decodeToolArguments(arguments, &rawArguments) {
-		return nil, errors.New("symbol is required and only market and symbol are accepted")
-	}
-	market, symbol, err := parseMarketSymbol(rawArguments.Market, rawArguments.Symbol)
-	if err != nil {
-		return nil, err
-	}
-	return url.Values{"market": {market}, "symbol": {symbol}}, nil
-}
-
-func ohlcvToolQuery(arguments json.RawMessage) (url.Values, error) {
-	var rawArguments struct {
-		Market    json.RawMessage `json:"market"`
-		Symbol    json.RawMessage `json:"symbol"`
-		Interval  json.RawMessage `json:"interval"`
-		StartTime json.RawMessage `json:"start_time"`
-		EndTime   json.RawMessage `json:"end_time"`
-		Limit     json.RawMessage `json:"limit"`
-	}
-	if !decodeToolArguments(arguments, &rawArguments) {
-		return nil, errors.New("only market, symbol, interval, start_time, end_time, and limit are accepted")
-	}
-	market, symbol, err := parseMarketSymbol(rawArguments.Market, rawArguments.Symbol)
-	if err != nil {
-		return nil, err
-	}
-	interval, err := requiredToolString(rawArguments.Interval, "interval")
-	if err != nil || !validOHLCVInterval(interval) {
-		return nil, errors.New("interval must be one of 1m, 5m, 15m, 1h, 4h, or 1d")
-	}
-	startValue, err := requiredToolString(rawArguments.StartTime, "start_time")
-	if err != nil {
-		return nil, err
-	}
-	endValue, err := requiredToolString(rawArguments.EndTime, "end_time")
-	if err != nil {
-		return nil, err
-	}
-	start, startErr := time.Parse(time.RFC3339, startValue)
-	end, endErr := time.Parse(time.RFC3339, endValue)
-	if startErr != nil || endErr != nil || !start.Before(end) {
-		return nil, errors.New("start_time and end_time must be RFC3339 timestamps with start_time before end_time")
-	}
-	limit := 100
-	if len(rawArguments.Limit) != 0 {
-		if bytes.Equal(bytes.TrimSpace(rawArguments.Limit), []byte("null")) || json.Unmarshal(rawArguments.Limit, &limit) != nil || limit < 1 || limit > 500 {
-			return nil, errors.New("limit must be an integer from 1 through 500")
-		}
-	}
-	return url.Values{
-		"market": {market}, "symbol": {symbol}, "interval": {interval},
-		"start_time": {startValue}, "end_time": {endValue},
-		"limit": {strconv.Itoa(limit)},
-	}, nil
-}
-
-func marketInfoToolQuery(arguments json.RawMessage) (url.Values, error) {
-	var rawArguments marketSymbolArguments
-	if !decodeToolArguments(arguments, &rawArguments) {
-		return nil, errors.New("symbol is required and only market and symbol are accepted")
-	}
-	market, symbol, err := parseMarketSymbol(rawArguments.Market, rawArguments.Symbol)
-	if err != nil {
-		return nil, err
-	}
-	return url.Values{"market": {market}, "symbol": {symbol}}, nil
-}
-
-func decodeToolArguments(arguments json.RawMessage, target any) bool {
-	decoder := json.NewDecoder(bytes.NewReader(arguments))
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target) == nil && decoder.Decode(&struct{}{}) == io.EOF
-}
-
-func parseMarketSymbol(rawMarket, rawSymbol json.RawMessage) (string, string, error) {
-	symbol, err := requiredToolString(rawSymbol, "symbol")
-	if err != nil {
-		return "", "", err
-	}
-	market := "crypto"
-	if len(rawMarket) != 0 {
-		if bytes.Equal(bytes.TrimSpace(rawMarket), []byte("null")) || json.Unmarshal(rawMarket, &market) != nil {
-			return "", "", errors.New("market must be a string")
-		}
-		market = strings.TrimSpace(market)
-		if market == "" {
-			market = "crypto"
-		}
-	}
-	return market, strings.TrimSpace(symbol), nil
-}
-
-func requiredToolString(raw json.RawMessage, name string) (string, error) {
-	var value string
-	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value) == "" {
-		return "", fmt.Errorf("%s must be a nonempty string", name)
-	}
-	return strings.TrimSpace(value), nil
-}
-
-func validOHLCVInterval(interval string) bool {
-	switch interval {
-	case "1m", "5m", "15m", "1h", "4h", "1d":
-		return true
-	default:
-		return false
+		return tools.ErrorResult("UNKNOWN_TOOL", "tool is not registered", "not_executed")
 	}
 }
 
@@ -2030,13 +1875,6 @@ func dependencyReasonCode(err error) string {
 		return dependency.code
 	}
 	return "DEPENDENCY_UNAVAILABLE"
-}
-
-func toolErrorResult(code, message, outcome string) json.RawMessage {
-	encoded, _ := json.Marshal(map[string]any{"ok": false, "error": map[string]string{
-		"code": code, "message": message, "outcome": outcome,
-	}})
-	return encoded
 }
 
 func (r *AgentRuntime) runIsRunning(sessionID string, runID int64) (bool, error) {
@@ -2125,7 +1963,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 	r.mu.Lock()
 	if r.closed || r.persistenceErr != nil {
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+		server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 		return
 	}
 	tx, err := r.db.BeginTx(request.Context(), nil)
@@ -2142,7 +1980,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 	if errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	}
 	if err != nil {
@@ -2158,7 +1996,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 	if session.Status == "deleted" && !deleting {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusConflict, "SESSION_DELETED", "deleted Session cannot be stopped")
+		server.WriteJSONError(w, http.StatusConflict, "SESSION_DELETED", "deleted Session cannot be stopped")
 		return
 	}
 	nowTime := time.Now().UTC()
@@ -2261,7 +2099,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 		if err := historyStage.finish(true); err != nil {
 			r.latchPersistenceFaultLocked(err)
 			r.mu.Unlock()
-			writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+			server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 			return
 		}
 	}
@@ -2533,20 +2371,20 @@ func (r *AgentRuntime) runByID(ctx context.Context, sessionID string, runID int6
 
 func (r *AgentRuntime) listRuns(w http.ResponseWriter, request *http.Request, sessionID string) {
 	if _, err := r.sessionByID(request.Context(), sessionID); errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	} else if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
 		return
 	}
 	page, ok := queryPage(request)
 	if !ok {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "page must be a positive integer")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "page must be a positive integer")
 		return
 	}
 	rows, err := r.db.QueryContext(request.Context(), runSelect+` WHERE session_id = ? ORDER BY run_id LIMIT ? OFFSET ?`, sessionID, sessionPageSize, (page-1)*sessionPageSize)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Runs")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Runs")
 		return
 	}
 	defer rows.Close()
@@ -2554,13 +2392,13 @@ func (r *AgentRuntime) listRuns(w http.ResponseWriter, request *http.Request, se
 	for rows.Next() {
 		run, err := scanRun(rows)
 		if err != nil {
-			writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Runs")
+			server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Runs")
 			return
 		}
 		runs = append(runs, run)
 	}
 	if err := rows.Err(); err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Runs")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Runs")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, map[string]any{"runs": runs, "page": page, "page_size": sessionPageSize})
@@ -2569,10 +2407,10 @@ func (r *AgentRuntime) listRuns(w http.ResponseWriter, request *http.Request, se
 func (r *AgentRuntime) currentRun(w http.ResponseWriter, request *http.Request, sessionID string) {
 	session, err := r.sessionByID(request.Context(), sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	} else if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
 		return
 	}
 	run, err := scanRun(r.db.QueryRowContext(request.Context(), runSelect+` WHERE session_id = ? AND status = 'running' ORDER BY run_id DESC LIMIT 1`, sessionID))
@@ -2583,16 +2421,16 @@ func (r *AgentRuntime) currentRun(w http.ResponseWriter, request *http.Request, 
 		} else if session.Status == "deleted" {
 			message = "Deleted Session has no running Run"
 		}
-		writeHTTPError(w, http.StatusNotFound, "CURRENT_RUN_NOT_FOUND", message)
+		server.WriteJSONError(w, http.StatusNotFound, "CURRENT_RUN_NOT_FOUND", message)
 		return
 	}
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read current Run")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read current Run")
 		return
 	}
 	view, err := currentRunMonitoring(run, session, time.Now())
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read current Run monitoring")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read current Run monitoring")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, view)
@@ -2601,16 +2439,16 @@ func (r *AgentRuntime) currentRun(w http.ResponseWriter, request *http.Request, 
 func (r *AgentRuntime) getRun(w http.ResponseWriter, request *http.Request, sessionID, rawRunID string) {
 	runID, err := strconv.ParseInt(rawRunID, 10, 64)
 	if err != nil || runID <= 0 {
-		writeHTTPError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
 		return
 	}
 	run, err := r.runByID(request.Context(), sessionID, runID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "RUN_NOT_FOUND", "Run does not exist")
 		return
 	}
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Run")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Run")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, run)

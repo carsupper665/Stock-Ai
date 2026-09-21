@@ -1,4 +1,4 @@
-package common
+package server
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"stock-ai/agent-server/internal/eventloop"
 )
 
 var (
@@ -23,12 +25,12 @@ var (
 type BackgroundTask struct {
 	Name     string
 	Interval time.Duration
-	Run      TaskFunc
+	Run      eventloop.TaskFunc
 }
 
 type Server struct {
 	mu              sync.Mutex
-	loop            *EventLoop
+	loop            *eventloop.EventLoop
 	http            *http.Server
 	listener        net.Listener
 	resources       []io.Closer
@@ -42,7 +44,7 @@ type Server struct {
 	stopping        bool
 }
 
-func NewServer(loop *EventLoop, tasks []BackgroundTask, resources []io.Closer, logger *log.Logger, shutdownTimeout time.Duration, application ...http.Handler) (*Server, error) {
+func NewServer(loop *eventloop.EventLoop, tasks []BackgroundTask, resources []io.Closer, logger *log.Logger, shutdownTimeout time.Duration, application ...http.Handler) (*Server, error) {
 	if loop == nil {
 		return nil, ErrEventLoopRequired
 	}
@@ -72,11 +74,11 @@ func NewServer(loop *EventLoop, tasks []BackgroundTask, resources []io.Closer, l
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
-			writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 			return
 		}
 		if applicationHealth != nil && applicationHealth.HealthError() != nil {
-			writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+			WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -86,7 +88,7 @@ func NewServer(loop *EventLoop, tasks []BackgroundTask, resources []io.Closer, l
 		mux.Handle("/api/", application[0])
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		writeHTTPError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+		WriteJSONError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 	})
 	return &Server{
 		loop:            loop,
@@ -98,7 +100,7 @@ func NewServer(loop *EventLoop, tasks []BackgroundTask, resources []io.Closer, l
 	}, nil
 }
 
-func writeHTTPError(w http.ResponseWriter, status int, code, message string) {
+func WriteJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = fmt.Fprintf(w, `{"status_code":%d,"error":%q,"msg":%q}`, status, code, message)

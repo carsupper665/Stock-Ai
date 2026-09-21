@@ -16,13 +16,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"stock-ai/agent-server/internal/server"
+	"stock-ai/agent-server/internal/tools"
 	"unicode/utf8"
 )
 
 const (
 	memoryPageSize        = 100
-	memoryToolDefault     = 20
-	memoryToolMax         = 100
 	maxCandidateMemories  = 20
 	maxMemoryTypeRunes    = 64
 	maxMemorySummaryRunes = 500
@@ -291,115 +292,58 @@ func newMemoryID() (string, error) {
 	return "m_" + hex.EncodeToString(value), nil
 }
 
-func memoryToolDefinitions() []map[string]any {
-	limit := map[string]any{"type": "integer", "minimum": 1, "maximum": memoryToolMax, "default": memoryToolDefault}
-	return []map[string]any{
-		{"name": "memory_list", "description": "List unexpired Memory metadata for this Session.", "input_schema": map[string]any{
-			"type": "object", "properties": map[string]any{"limit": limit}, "additionalProperties": false,
-		}},
-		{"name": "memory_search", "description": "Search unexpired Memory summary and type text for this Session.", "input_schema": map[string]any{
-			"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}, "limit": limit},
-			"required": []string{"query"}, "additionalProperties": false,
-		}},
-		{"name": "memory_read", "description": "Read one unexpired Memory from this Session by id.", "input_schema": map[string]any{
-			"type": "object", "properties": map[string]any{"memory_id": map[string]any{"type": "string"}},
-			"required": []string{"memory_id"}, "additionalProperties": false,
-		}},
-		{"name": "get_run_history", "description": "Read one completed, failed, or interrupted Run from this Session's History.", "input_schema": map[string]any{
-			"type": "object", "properties": map[string]any{"run_id": map[string]any{"type": "integer", "minimum": 1}},
-			"required": []string{"run_id"}, "additionalProperties": false,
-		}},
-	}
-}
-
 func (r *AgentRuntime) executeMemoryTool(ctx context.Context, sessionID string, call gatewayTool) (json.RawMessage, bool) {
 	switch call.Name {
 	case "memory_list":
-		limit, err := memoryLimitArguments(call.Arguments)
+		limit, err := tools.MemoryLimitArguments(call.Arguments)
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
 		memories, err := r.memoryMetadata(ctx, sessionID, "", limit)
 		return r.memoryReadToolResult(memories, err), true
 	case "memory_search":
-		query, limit, err := memorySearchArguments(call.Arguments)
+		query, limit, err := tools.MemorySearchArguments(call.Arguments)
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
 		memories, err := r.memoryMetadata(ctx, sessionID, query, limit)
 		return r.memoryReadToolResult(memories, err), true
 	case "memory_read":
-		id, err := singleIDToolArgument(call.Arguments, "memory_id")
+		id, err := tools.SingleIDArgument(call.Arguments, "memory_id")
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
 		memory, err := r.memoryByID(ctx, sessionID, id, false)
 		if errors.Is(err, sql.ErrNoRows) {
-			return toolErrorResult("MEMORY_NOT_FOUND", "Memory does not exist or is expired in this Session", "not_executed"), true
+			return tools.ErrorResult("MEMORY_NOT_FOUND", "Memory does not exist or is expired in this Session", "not_executed"), true
 		}
 		if err != nil {
 			return r.memoryPersistenceToolError(err), true
 		}
-		return toolSuccessResult(map[string]any{
+		return tools.SuccessResult(map[string]any{
 			"id": memory.ID, "run_id": memory.RunID, "type": memory.Type,
 			"summary": memory.Summary, "content": memory.Content, "importance": memory.Importance,
 		}), true
 	case "get_run_history":
 		runID, err := runHistoryToolArgument(call.Arguments)
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed"), true
 		}
 		run, err := r.historyRunByID(ctx, sessionID, runID)
 		if err != nil {
 			return r.historyToolError(err), true
 		}
-		return toolSuccessResult(run), true
+		return tools.SuccessResult(run), true
 	default:
 		return nil, false
 	}
-}
-
-func memoryLimitArguments(arguments json.RawMessage) (int, error) {
-	var raw struct {
-		Limit json.RawMessage `json:"limit"`
-	}
-	if !decodeToolArguments(arguments, &raw) {
-		return 0, errors.New("only limit is accepted")
-	}
-	limit := memoryToolDefault
-	if len(raw.Limit) == 0 {
-		return limit, nil
-	}
-	if bytes.Equal(bytes.TrimSpace(raw.Limit), []byte("null")) || json.Unmarshal(raw.Limit, &limit) != nil || limit < 1 || limit > memoryToolMax {
-		return 0, fmt.Errorf("limit must be an integer from 1 through %d", memoryToolMax)
-	}
-	return limit, nil
-}
-
-func memorySearchArguments(arguments json.RawMessage) (string, int, error) {
-	var raw struct {
-		Query json.RawMessage `json:"query"`
-		Limit json.RawMessage `json:"limit"`
-	}
-	if !decodeToolArguments(arguments, &raw) {
-		return "", 0, errors.New("only query and limit are accepted")
-	}
-	query, err := requiredToolString(raw.Query, "query")
-	if err != nil {
-		return "", 0, err
-	}
-	limit := memoryToolDefault
-	if len(raw.Limit) != 0 && (bytes.Equal(bytes.TrimSpace(raw.Limit), []byte("null")) || json.Unmarshal(raw.Limit, &limit) != nil || limit < 1 || limit > memoryToolMax) {
-		return "", 0, fmt.Errorf("limit must be an integer from 1 through %d", memoryToolMax)
-	}
-	return query, limit, nil
 }
 
 func runHistoryToolArgument(arguments json.RawMessage) (int64, error) {
 	var raw struct {
 		RunID json.RawMessage `json:"run_id"`
 	}
-	if !decodeToolArguments(arguments, &raw) {
+	if !tools.DecodeArguments(arguments, &raw) {
 		return 0, errors.New("run_id is required and no other field is accepted")
 	}
 	var runID int64
@@ -447,7 +391,7 @@ func (r *AgentRuntime) progressiveRunContext(ctx context.Context, sessionID stri
 	if err == nil {
 		recentPointer = &recent
 	}
-	memories, err := r.memoryMetadata(ctx, sessionID, "", memoryToolDefault)
+	memories, err := r.memoryMetadata(ctx, sessionID, "", tools.MemoryDefaultLimit)
 	return recentPointer, memories, err
 }
 
@@ -455,15 +399,15 @@ func (r *AgentRuntime) memoryReadToolResult(memories []memoryMetadata, err error
 	if err != nil {
 		return r.memoryPersistenceToolError(err)
 	}
-	return toolSuccessResult(map[string]any{"memories": memories})
+	return tools.SuccessResult(map[string]any{"memories": memories})
 }
 
 func (r *AgentRuntime) memoryPersistenceToolError(err error) json.RawMessage {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return toolErrorResult("TOOL_INTERRUPTED", "Memory read was interrupted", "not_executed")
+		return tools.ErrorResult("TOOL_INTERRUPTED", "Memory read was interrupted", "not_executed")
 	}
 	r.latchPersistenceFault(err)
-	return toolErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", "not_executed")
+	return tools.ErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", "not_executed")
 }
 
 func (r *AgentRuntime) historyRunByID(ctx context.Context, sessionID string, runID int64) (historyRun, error) {
@@ -563,30 +507,30 @@ func (r *AgentRuntime) serveMemories(w http.ResponseWriter, request *http.Reques
 		r.listMemoriesHTTP(w, request, sessionID)
 	case len(rest) == 0:
 		w.Header().Set("Allow", http.MethodGet)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "users cannot create or modify Memories")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "users cannot create or modify Memories")
 	case len(rest) == 1 && request.Method == http.MethodGet:
 		r.getMemoryHTTP(w, request, sessionID, rest[0])
 	case len(rest) == 1 && request.Method == http.MethodDelete:
 		r.deleteMemoryHTTP(w, request, sessionID, rest[0])
 	case len(rest) == 1:
 		w.Header().Set("Allow", http.MethodGet+", "+http.MethodDelete)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "users cannot create or modify Memories")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "users cannot create or modify Memories")
 	default:
-		writeHTTPError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+		server.WriteJSONError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 	}
 }
 
 func (r *AgentRuntime) listMemoriesHTTP(w http.ResponseWriter, request *http.Request, sessionID string) {
 	if _, err := r.sessionByID(request.Context(), sessionID); errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	} else if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
 		return
 	}
 	page, includeExpired, ok := memoryListQuery(request)
 	if !ok {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "page must be positive and include_expired must be true or false")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "page must be positive and include_expired must be true or false")
 		return
 	}
 	query := memoryListSelect + ` WHERE session_id = ?`
@@ -596,7 +540,7 @@ func (r *AgentRuntime) listMemoriesHTTP(w http.ResponseWriter, request *http.Req
 	query += ` ORDER BY importance DESC, run_id DESC, id LIMIT ? OFFSET ?`
 	rows, err := r.db.QueryContext(request.Context(), query, sessionID, memoryPageSize, (page-1)*memoryPageSize)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
 		return
 	}
 	defer rows.Close()
@@ -604,13 +548,13 @@ func (r *AgentRuntime) listMemoriesHTTP(w http.ResponseWriter, request *http.Req
 	for rows.Next() {
 		memory, err := scanMemoryListItem(rows)
 		if err != nil {
-			writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
+			server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
 			return
 		}
 		memories = append(memories, memory)
 	}
 	if err := rows.Err(); err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list Memories")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, map[string]any{"memories": memories, "page": page, "page_size": memoryPageSize, "include_expired": includeExpired})
@@ -647,11 +591,11 @@ func memoryListQuery(request *http.Request) (int, bool, bool) {
 func (r *AgentRuntime) getMemoryHTTP(w http.ResponseWriter, request *http.Request, sessionID, memoryID string) {
 	memory, err := r.memoryByID(request.Context(), sessionID, memoryID, true)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "MEMORY_NOT_FOUND", "Memory does not exist in this Session")
+		server.WriteJSONError(w, http.StatusNotFound, "MEMORY_NOT_FOUND", "Memory does not exist in this Session")
 		return
 	}
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Memory")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Memory")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, memory)
@@ -661,7 +605,7 @@ func (r *AgentRuntime) deleteMemoryHTTP(w http.ResponseWriter, request *http.Req
 	r.mu.Lock()
 	if r.closed || r.persistenceErr != nil {
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+		server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 		return
 	}
 	tx, err := r.db.BeginTx(request.Context(), nil)
@@ -678,7 +622,7 @@ func (r *AgentRuntime) deleteMemoryHTTP(w http.ResponseWriter, request *http.Req
 	if errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusNotFound, "MEMORY_NOT_FOUND", "Memory does not exist in this Session")
+		server.WriteJSONError(w, http.StatusNotFound, "MEMORY_NOT_FOUND", "Memory does not exist in this Session")
 		return
 	}
 	if err != nil {
@@ -706,12 +650,12 @@ func (r *AgentRuntime) deleteMemoryHTTP(w http.ResponseWriter, request *http.Req
 		_ = tx.Rollback()
 		if requestCancellationCausedPersistenceError(request.Context(), err) {
 			r.mu.Unlock()
-			writeHTTPError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before the mutation committed")
+			server.WriteJSONError(w, http.StatusRequestTimeout, "REQUEST_CANCELED", "request was canceled before the mutation committed")
 			return
 		}
 		r.latchPersistenceFaultLocked(err)
 		r.mu.Unlock()
-		writeHTTPError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
+		server.WriteJSONError(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable")
 		return
 	}
 	if userExpiredAt != nil {

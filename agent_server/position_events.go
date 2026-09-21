@@ -8,6 +8,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"stock-ai/agent-server/internal/eventloop"
+	"stock-ai/agent-server/internal/server"
 )
 
 const positionEvidenceLimit = 200
@@ -57,9 +60,9 @@ type positionAccountSample struct {
 
 // PositionEventTask polls the bound Account's authoritative open-position view. A missing
 // position is a close only after a successful earlier poll observed that exact position ID.
-func (r *AgentRuntime) PositionEventTask(clock Clock, interval time.Duration) BackgroundTask {
+func (r *AgentRuntime) PositionEventTask(clock eventloop.Clock, interval time.Duration) server.BackgroundTask {
 	clock = eventClock(clock)
-	return BackgroundTask{Name: "agent-events-position", Interval: interval, Run: func(ctx context.Context) error {
+	return server.BackgroundTask{Name: "agent-events-position", Interval: interval, Run: func(ctx context.Context) error {
 		watched, err := r.watchedPositions(ctx, clock.Now())
 		if err != nil {
 			return err

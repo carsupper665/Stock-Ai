@@ -13,6 +13,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"stock-ai/agent-server/internal/eventloop"
+	"stock-ai/agent-server/internal/server"
+	"stock-ai/agent-server/internal/tools"
 )
 
 const (
@@ -93,63 +97,29 @@ func formatEventTime(value time.Time) string { return value.UTC().Format(eventTi
 
 func parseEventTime(value string) (time.Time, error) { return time.Parse(eventTimeLayout, value) }
 
-func eventToolSchemas() []map[string]any {
-	return []map[string]any{
-		{
-			"name": "create_event",
-			"description": "Create a one-shot wake-up condition for this Session. type=timer needs params.at (RFC3339, future); " +
-				"price_above/price_below/price_cross_above/price_cross_below need params.symbol and params.price (market defaults to crypto); " +
-				"price_change_pct needs params.symbol, params.base_price, params.direction (up|down) and params.pct; " +
-				"position_close needs params.position_id and fires only after that bound-Account position has first been observed open and is later absent. " +
-				"A position closed before its first successful observation does not fire this event. " +
-				"expires_at is optional RFC3339 (timer default: at + 1h; other events default: now + 24h). At most 10 active events per Session.",
-			"input_schema": map[string]any{
-				"type": "object", "properties": map[string]any{
-					"type": map[string]any{"type": "string", "enum": []string{
-						"timer", "price_above", "price_below", "price_cross_above", "price_cross_below", "price_change_pct", "position_close",
-					}},
-					"params":     map[string]any{"type": "object"},
-					"expires_at": map[string]any{"type": "string", "format": "date-time"},
-				}, "required": []string{"type", "params"}, "additionalProperties": false,
-			},
-		},
-		{
-			"name": "delete_event", "description": "Delete one of this Session's active events by id.",
-			"input_schema": map[string]any{
-				"type": "object", "properties": map[string]any{"event_id": map[string]any{"type": "string"}},
-				"required": []string{"event_id"}, "additionalProperties": false,
-			},
-		},
-		{
-			"name": "list_events", "description": "List this Session's active events.",
-			"input_schema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
-		},
-	}
-}
-
 func (r *AgentRuntime) executeEventTool(session Session, runID int64, call gatewayTool, now time.Time) json.RawMessage {
 	switch call.Name {
 	case "create_event":
 		record, err := parseCreateEvent(call.Arguments, session.ID, runID, now)
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
 		}
 		return r.createEventForRun(record)
 	case "delete_event":
 		var rawArguments struct {
 			EventID json.RawMessage `json:"event_id"`
 		}
-		if !decodeToolArguments(call.Arguments, &rawArguments) {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", "event_id is required and no other field is accepted", "not_executed")
+		if !tools.DecodeArguments(call.Arguments, &rawArguments) {
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", "event_id is required and no other field is accepted", "not_executed")
 		}
-		eventID, err := requiredToolString(rawArguments.EventID, "event_id")
+		eventID, err := tools.RequiredString(rawArguments.EventID, "event_id")
 		if err != nil {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", err.Error(), "not_executed")
 		}
 		return r.deleteEventForRun(session.ID, runID, eventID, now)
 	default:
-		if !decodeToolArguments(call.Arguments, &struct{}{}) {
-			return toolErrorResult("INVALID_TOOL_ARGUMENTS", "list_events accepts no arguments", "not_executed")
+		if !tools.DecodeArguments(call.Arguments, &struct{}{}) {
+			return tools.ErrorResult("INVALID_TOOL_ARGUMENTS", "list_events accepts no arguments", "not_executed")
 		}
 		return r.listEventsForRun(session.ID)
 	}
@@ -161,10 +131,10 @@ func parseCreateEvent(arguments json.RawMessage, sessionID string, runID int64, 
 		Params    json.RawMessage `json:"params"`
 		ExpiresAt json.RawMessage `json:"expires_at"`
 	}
-	if !decodeToolArguments(arguments, &rawArguments) {
+	if !tools.DecodeArguments(arguments, &rawArguments) {
 		return eventRecord{}, errors.New("only type, params, and expires_at are accepted")
 	}
-	eventType, err := requiredToolString(rawArguments.Type, "type")
+	eventType, err := tools.RequiredString(rawArguments.Type, "type")
 	if err != nil {
 		return eventRecord{}, err
 	}
@@ -186,7 +156,7 @@ func parseCreateEvent(arguments json.RawMessage, sessionID string, runID int64, 
 		var raw struct {
 			At json.RawMessage `json:"at"`
 		}
-		if !decodeToolArguments(rawArguments.Params, &raw) {
+		if !tools.DecodeArguments(rawArguments.Params, &raw) {
 			return eventRecord{}, errors.New("timer params accept only at")
 		}
 		at, err := requiredRFC3339(raw.At, "at")
@@ -205,7 +175,7 @@ func parseCreateEvent(arguments json.RawMessage, sessionID string, runID int64, 
 			Symbol json.RawMessage `json:"symbol"`
 			Price  json.RawMessage `json:"price"`
 		}
-		if !decodeToolArguments(rawArguments.Params, &raw) {
+		if !tools.DecodeArguments(rawArguments.Params, &raw) {
 			return eventRecord{}, errors.New("price params accept only market, symbol, and price")
 		}
 		market, symbol, err := parseEventMarketSymbol(raw.Market, raw.Symbol)
@@ -226,7 +196,7 @@ func parseCreateEvent(arguments json.RawMessage, sessionID string, runID int64, 
 			Direction json.RawMessage `json:"direction"`
 			Pct       json.RawMessage `json:"pct"`
 		}
-		if !decodeToolArguments(rawArguments.Params, &raw) {
+		if !tools.DecodeArguments(rawArguments.Params, &raw) {
 			return eventRecord{}, errors.New("price_change_pct params accept only market, symbol, base_price, direction, and pct")
 		}
 		market, symbol, err := parseEventMarketSymbol(raw.Market, raw.Symbol)
@@ -237,7 +207,7 @@ func parseCreateEvent(arguments json.RawMessage, sessionID string, runID int64, 
 		if err != nil {
 			return eventRecord{}, err
 		}
-		direction, err := requiredToolString(raw.Direction, "direction")
+		direction, err := tools.RequiredString(raw.Direction, "direction")
 		if err != nil || (direction != "up" && direction != "down") {
 			return eventRecord{}, errors.New("direction must be up or down")
 		}
@@ -251,10 +221,10 @@ func parseCreateEvent(arguments json.RawMessage, sessionID string, runID int64, 
 		var raw struct {
 			PositionID json.RawMessage `json:"position_id"`
 		}
-		if !decodeToolArguments(rawArguments.Params, &raw) {
+		if !tools.DecodeArguments(rawArguments.Params, &raw) {
 			return eventRecord{}, errors.New("position_close params accept only position_id")
 		}
-		positionID, err := requiredToolString(raw.PositionID, "position_id")
+		positionID, err := tools.RequiredString(raw.PositionID, "position_id")
 		if err != nil {
 			return eventRecord{}, err
 		}
@@ -276,7 +246,7 @@ func parseCreateEvent(arguments json.RawMessage, sessionID string, runID int64, 
 }
 
 func parseEventMarketSymbol(rawMarket, rawSymbol json.RawMessage) (string, string, error) {
-	market, symbol, err := parseMarketSymbol(rawMarket, rawSymbol)
+	market, symbol, err := tools.ParseMarketSymbol(rawMarket, rawSymbol)
 	if err != nil {
 		return "", "", err
 	}
@@ -285,7 +255,7 @@ func parseEventMarketSymbol(rawMarket, rawSymbol json.RawMessage) (string, strin
 }
 
 func requiredRFC3339(raw json.RawMessage, name string) (time.Time, error) {
-	value, err := requiredToolString(raw, name)
+	value, err := tools.RequiredString(raw, name)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -320,7 +290,7 @@ func (r *AgentRuntime) createEventForRun(record eventRecord) json.RawMessage {
 			return nil, err
 		}
 		if count >= maxActiveEvents {
-			return toolErrorResult("EVENT_LIMIT_EXCEEDED", fmt.Sprintf("Session already has %d active events", maxActiveEvents), "not_executed"), nil
+			return tools.ErrorResult("EVENT_LIMIT_EXCEEDED", fmt.Sprintf("Session already has %d active events", maxActiveEvents), "not_executed"), nil
 		}
 		_, err := tx.Exec(`INSERT INTO events (id, owner_session_id, created_run_id, type, params_json, market, symbol, due_at, state_json, created_at, expires_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`, record.ID, record.SessionID, record.CreatedRunID, record.Type,
@@ -328,7 +298,7 @@ func (r *AgentRuntime) createEventForRun(record eventRecord) json.RawMessage {
 		if err != nil {
 			return nil, err
 		}
-		return toolSuccessResult(map[string]any{"id": record.ID, "type": record.Type, "status": "created"}), nil
+		return tools.SuccessResult(map[string]any{"id": record.ID, "type": record.Type, "status": "created"}), nil
 	})
 }
 
@@ -336,7 +306,7 @@ func (r *AgentRuntime) deleteEventForRun(sessionID string, runID int64, eventID 
 	return r.eventToolTransaction(sessionID, runID, func(tx *sql.Tx) (json.RawMessage, error) {
 		record, err := scanEventRecord(tx.QueryRow(eventSelect+` WHERE id = ? AND owner_session_id = ?`, eventID, sessionID))
 		if errors.Is(err, sql.ErrNoRows) {
-			return toolErrorResult("EVENT_NOT_FOUND", "event does not exist in this Session", "not_executed"), nil
+			return tools.ErrorResult("EVENT_NOT_FOUND", "event does not exist in this Session", "not_executed"), nil
 		}
 		if err != nil {
 			return nil, err
@@ -344,7 +314,7 @@ func (r *AgentRuntime) deleteEventForRun(sessionID string, runID int64, eventID 
 		if err := removeEventTx(tx, record, "deleted_by_agent", &runID, nil, now); err != nil {
 			return nil, err
 		}
-		return toolSuccessResult(map[string]any{"id": record.ID, "type": record.Type, "status": "deleted"}), nil
+		return tools.SuccessResult(map[string]any{"id": record.ID, "type": record.Type, "status": "deleted"}), nil
 	})
 }
 
@@ -353,7 +323,7 @@ func (r *AgentRuntime) deleteEventForRun(sessionID string, runID int64, eventID 
 // Session's Events in its own transaction) can never be followed by a late Event write.
 func (r *AgentRuntime) eventToolTransaction(sessionID string, runID int64, mutate func(tx *sql.Tx) (json.RawMessage, error)) json.RawMessage {
 	unavailable := func(outcome string) json.RawMessage {
-		return toolErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", outcome)
+		return tools.ErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", outcome)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -368,7 +338,7 @@ func (r *AgentRuntime) eventToolTransaction(sessionID string, runID int64, mutat
 	running, err := runIsRunningTx(tx, sessionID, runID)
 	if err == nil && !running {
 		_ = tx.Rollback()
-		return toolErrorResult("RUN_NOT_RUNNING", "the current Run is no longer running", "not_executed")
+		return tools.ErrorResult("RUN_NOT_RUNNING", "the current Run is no longer running", "not_executed")
 	}
 	var result json.RawMessage
 	var logID int64
@@ -416,27 +386,22 @@ func runIsRunningTx(tx *sql.Tx, sessionID string, runID int64) (bool, error) {
 	return status == "running", err
 }
 
-func toolSuccessResult(result any) json.RawMessage {
-	encoded, _ := json.Marshal(map[string]any{"ok": true, "result": result})
-	return encoded
-}
-
 func (r *AgentRuntime) listEventsForRun(sessionID string) json.RawMessage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed || r.persistenceErr != nil {
-		return toolErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", "not_executed")
+		return tools.ErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", "not_executed")
 	}
 	events, err := sessionEvents(r.db, sessionID)
 	if err != nil {
 		r.latchPersistenceFaultLocked(err)
-		return toolErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", "not_executed")
+		return tools.ErrorResult("PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", "not_executed")
 	}
 	compact := make([]map[string]any, 0, len(events))
 	for _, event := range events {
 		compact = append(compact, compactEventToolView(event))
 	}
-	return toolSuccessResult(map[string]any{"events": compact})
+	return tools.SuccessResult(map[string]any{"events": compact})
 }
 
 func compactEventToolView(event Event) map[string]any {
@@ -582,28 +547,28 @@ func (r *AgentRuntime) serveEvents(w http.ResponseWriter, request *http.Request,
 		r.listEventsHTTP(w, request, sessionID)
 	case len(rest) == 0:
 		w.Header().Set("Allow", http.MethodGet)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only the Agent can create events")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only the Agent can create events")
 	case len(rest) == 1 && request.Method == http.MethodDelete:
 		r.deleteEventHTTP(w, request, sessionID, rest[0])
 	case len(rest) == 1:
 		w.Header().Set("Allow", http.MethodDelete)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 	default:
-		writeHTTPError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+		server.WriteJSONError(w, http.StatusNotFound, "NOT_FOUND", "route not found")
 	}
 }
 
 func (r *AgentRuntime) listEventsHTTP(w http.ResponseWriter, request *http.Request, sessionID string) {
 	if _, err := r.sessionByID(request.Context(), sessionID); errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	} else if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
 		return
 	}
 	events, err := sessionEvents(r.db, sessionID)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list events")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list events")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, map[string]any{"events": events})
@@ -612,7 +577,7 @@ func (r *AgentRuntime) listEventsHTTP(w http.ResponseWriter, request *http.Reque
 func (r *AgentRuntime) deleteEventHTTP(w http.ResponseWriter, request *http.Request, sessionID, eventID string) {
 	status, code, msg, event := r.deleteEventByUser(request.Context(), sessionID, eventID)
 	if code != "" {
-		writeHTTPError(w, status, code, msg)
+		server.WriteJSONError(w, status, code, msg)
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, event)
@@ -679,18 +644,18 @@ func (r *AgentRuntime) mutationFailureLocked(ctx context.Context, tx *sql.Tx, er
 	return http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", "Agent persistence is unavailable", Event{}
 }
 
-func eventClock(clock Clock) Clock {
+func eventClock(clock eventloop.Clock) eventloop.Clock {
 	if clock == nil {
-		return realClock{}
+		return eventloop.RealClock()
 	}
 	return clock
 }
 
 // LocalEventTask owns expiry and timer claims. It performs no remote I/O, so slow price
 // sampling can never delay it; expiry runs first so an Event expired at this instant never fires.
-func (r *AgentRuntime) LocalEventTask(clock Clock, interval time.Duration) BackgroundTask {
+func (r *AgentRuntime) LocalEventTask(clock eventloop.Clock, interval time.Duration) server.BackgroundTask {
 	clock = eventClock(clock)
-	return BackgroundTask{Name: "agent-events-local", Interval: interval, Run: func(ctx context.Context) error {
+	return server.BackgroundTask{Name: "agent-events-local", Interval: interval, Run: func(ctx context.Context) error {
 		now := clock.Now()
 		return r.dispatchEventRound(ctx, func(tx *sql.Tx) ([]string, error) {
 			if err := expireEventsTx(tx, now); err != nil {
@@ -705,10 +670,10 @@ func (r *AgentRuntime) LocalEventTask(clock Clock, interval time.Duration) Backg
 // The claim clock is read after sampling: an Event whose expiry arrived while Backend was
 // answering is filtered out (its expired trace belongs to the local task), and fired_at is
 // never earlier than the sample it reports. Without a new valid sample there is nothing to claim.
-func (r *AgentRuntime) PriceEventTask(clock Clock, interval time.Duration) BackgroundTask {
+func (r *AgentRuntime) PriceEventTask(clock eventloop.Clock, interval time.Duration) server.BackgroundTask {
 	clock = eventClock(clock)
 	lastSamples := make(map[string]priceSample)
-	return BackgroundTask{Name: "agent-events-price", Interval: interval, Run: func(ctx context.Context) error {
+	return server.BackgroundTask{Name: "agent-events-price", Interval: interval, Run: func(ctx context.Context) error {
 		watched, err := r.watchedInstruments(ctx, clock.Now())
 		if err != nil {
 			return err

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"stock-ai/agent-server/internal/tools"
 )
 
 const (
@@ -34,7 +36,7 @@ type modelContextProjection struct {
 }
 
 func runtimeToolNames() []string {
-	definitions := runtimeToolDefinitions()
+	definitions := tools.Definitions()
 	names := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
 		name, _ := definition["name"].(string)
@@ -78,7 +80,7 @@ func projectModelContext(messages []gatewayMessage) (modelContextProjection, err
 		if message.Role != "tool" || message.ToolCallID == nil {
 			continue
 		}
-		if isMutationTool(toolNames[*message.ToolCallID]) {
+		if tools.IsMutation(toolNames[*message.ToolCallID]) {
 			mutationResults = append(mutationResults, index)
 		} else {
 			readResults = append(readResults, index)
@@ -144,15 +146,6 @@ func replaceMessageContent(message *gatewayMessage, replacement string) bool {
 	}
 	message.Content = &replacement
 	return true
-}
-
-func isMutationTool(name string) bool {
-	switch name {
-	case "create_event", "delete_event", "place_order", "cancel_order", "close_position", "set_position_stops", "post_message":
-		return true
-	default:
-		return name == ""
-	}
 }
 
 func compactToolContent(name, content string, mutation bool) string {

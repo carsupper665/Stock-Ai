@@ -14,6 +14,8 @@ import (
 	"time"
 
 	common "stock-ai/agent-server"
+	"stock-ai/agent-server/internal/eventloop"
+	"stock-ai/agent-server/internal/server"
 )
 
 func main() {
@@ -48,13 +50,13 @@ func run(logger *log.Logger) (runErr error) {
 			runErr = errors.Join(runErr, runtime.Close())
 		}
 	}()
-	loop, err := common.NewEventLoop()
+	loop, err := eventloop.NewEventLoop()
 	if err != nil {
 		return err
 	}
-	server, err := common.NewServer(
+	srv, err := server.NewServer(
 		loop,
-		[]common.BackgroundTask{
+		[]server.BackgroundTask{
 			runtime.LocalEventTask(nil, eventScanInterval),
 			runtime.PriceEventTask(nil, eventScanInterval),
 			runtime.PositionEventTask(nil, eventScanInterval),
@@ -69,20 +71,20 @@ func run(logger *log.Logger) (runErr error) {
 	}
 	runtimeOwned = false
 	if ctx.Err() != nil {
-		return server.Shutdown()
+		return srv.Shutdown()
 	}
-	if err := server.Start(listener); err != nil {
-		return errors.Join(err, server.Shutdown())
+	if err := srv.Start(listener); err != nil {
+		return errors.Join(err, srv.Shutdown())
 	}
 	logger.Printf("ready: listening on %s", listener.Addr())
 
 	select {
 	case <-ctx.Done():
-		shutdownErr := server.Shutdown()
+		shutdownErr := srv.Shutdown()
 		waitCtx, cancelWait := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancelWait()
-		return errors.Join(shutdownErr, server.Wait(waitCtx))
-	case waitErr := <-serverDone(server):
+		return errors.Join(shutdownErr, srv.Wait(waitCtx))
+	case waitErr := <-serverDone(srv):
 		return waitErr
 	}
 }
@@ -161,7 +163,7 @@ func envPositiveDuration(name string, fallback time.Duration) (time.Duration, er
 	return value, nil
 }
 
-func serverDone(server *common.Server) <-chan error {
+func serverDone(server *server.Server) <-chan error {
 	done := make(chan error, 1)
 	go func() {
 		done <- server.Wait(context.Background())

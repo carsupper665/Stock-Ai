@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"stock-ai/agent-server/internal/server"
+	"stock-ai/agent-server/internal/tools"
 )
 
 const unknownToolStatsName = "_unknown"
@@ -66,30 +69,30 @@ type modelUsageKey struct {
 func (r *AgentRuntime) serveUsage(w http.ResponseWriter, request *http.Request, sessionID string) {
 	if request.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
 	if request.URL.RawQuery != "" {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Usage does not accept query parameters")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "Usage does not accept query parameters")
 		return
 	}
 	session, err := r.sessionByID(request.Context(), sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	}
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session Usage")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session Usage")
 		return
 	}
 	runs, err := r.monitoringRuns(request.Context(), sessionID)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session Usage")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session Usage")
 		return
 	}
 	response, err := aggregateUsage(session, runs)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to aggregate Session Usage")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to aggregate Session Usage")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, response)
@@ -346,28 +349,28 @@ type toolStats struct {
 func (r *AgentRuntime) serveToolStats(w http.ResponseWriter, request *http.Request, sessionID string) {
 	if request.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
 	if request.URL.RawQuery != "" {
-		writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Tool statistics do not accept query parameters")
+		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "Tool statistics do not accept query parameters")
 		return
 	}
 	if _, err := r.sessionByID(request.Context(), sessionID); errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	} else if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Tool statistics")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Tool statistics")
 		return
 	}
 	runs, err := r.monitoringRuns(request.Context(), sessionID)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Tool statistics")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Tool statistics")
 		return
 	}
 	stats, err := aggregateToolStats(runs)
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to aggregate Tool statistics")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to aggregate Tool statistics")
 		return
 	}
 	writeRuntimeJSON(w, http.StatusOK, map[string]any{"session_id": sessionID, "tools": stats})
@@ -376,7 +379,7 @@ func (r *AgentRuntime) serveToolStats(w http.ResponseWriter, request *http.Reque
 func aggregateToolStats(runs []monitoringRun) ([]toolStats, error) {
 	known := make(map[string]bool)
 	statsByName := make(map[string]*toolStats)
-	for _, definition := range runtimeToolDefinitions() {
+	for _, definition := range tools.Definitions() {
 		name, _ := definition["name"].(string)
 		if name == "" {
 			continue

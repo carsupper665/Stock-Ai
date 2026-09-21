@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"stock-ai/agent-server/internal/server"
 )
 
 type sessionAggregate struct {
@@ -149,13 +151,13 @@ func (r *AgentRuntime) tradingAggregate(ctx context.Context, session Session) ma
 func (r *AgentRuntime) serveTradingMonitor(w http.ResponseWriter, request *http.Request, sessionID, resource string) {
 	if request.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeHTTPError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		server.WriteJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
 	query := request.URL.Query()
 	for key, values := range query {
 		if resource != "ledger" || key != "before_seq" || len(values) != 1 {
-			writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "only Ledger before_seq is supported")
+			server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "only Ledger before_seq is supported")
 			return
 		}
 	}
@@ -164,17 +166,17 @@ func (r *AgentRuntime) serveTradingMonitor(w http.ResponseWriter, request *http.
 		var err error
 		before, err = strconv.ParseInt(query.Get("before_seq"), 10, 64)
 		if err != nil || before < 1 {
-			writeHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "before_seq must be positive")
+			server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "before_seq must be positive")
 			return
 		}
 	}
 	session, err := r.sessionByID(request.Context(), sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeHTTPError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
+		server.WriteJSONError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "Session does not exist")
 		return
 	}
 	if err != nil {
-		writeHTTPError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
+		server.WriteJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to read Session")
 		return
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), r.config.RequestTimeout)
@@ -203,7 +205,7 @@ func (r *AgentRuntime) serveTradingMonitor(w http.ResponseWriter, request *http.
 	}
 	var items []json.RawMessage
 	if json.Unmarshal(body[key], &items) != nil || items == nil {
-		writeHTTPError(w, http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend monitoring response is invalid")
+		server.WriteJSONError(w, http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend monitoring response is invalid")
 		return
 	}
 	result := map[string]any{key: items, "scope": "account", "session_id": sessionID, "account_id": session.AccountID, "observed_at": time.Now().UTC().Format(time.RFC3339Nano)}
