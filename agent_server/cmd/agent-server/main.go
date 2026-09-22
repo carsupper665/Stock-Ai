@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 	"stock-ai/agent-server/internal/eventloop"
 	"stock-ai/agent-server/internal/server"
 )

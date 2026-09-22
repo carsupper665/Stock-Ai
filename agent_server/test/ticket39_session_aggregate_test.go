@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 )
 
 type ticket39Backend struct {

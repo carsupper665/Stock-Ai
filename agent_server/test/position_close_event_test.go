@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 
 	events "stock-ai/agent-server/internal/events"
 )

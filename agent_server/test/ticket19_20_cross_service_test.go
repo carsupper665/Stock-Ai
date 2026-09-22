@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 )
 
 const crossBackendUserToken = "ticket-19-20-backend-user"

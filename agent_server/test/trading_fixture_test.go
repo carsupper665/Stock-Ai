@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 )
 
 // tradingBackend is a local Backend HTTP fixture with one Account Token per Account.

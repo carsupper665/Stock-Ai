@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	server "stock-ai/agent-server/internal/server"

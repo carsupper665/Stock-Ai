@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 )
 
 func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity(t *testing.T) {

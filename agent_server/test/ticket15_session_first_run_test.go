@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 )
 
 func TestTicket15ConcurrentStartCreatesOnePersistentFirstRunThroughGatewayHTTP(t *testing.T) {

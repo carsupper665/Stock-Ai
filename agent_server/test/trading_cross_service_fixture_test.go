@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 )
 
 // settablePriceSource answers the Binance ticker endpoint the actual Backend polls, so

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	agent "stock-ai/agent-server"
+	agent "stock-ai/agent-server/internal/agent"
 )
 
 func openMarketReadRuntime(t *testing.T, fixture *runtimeFixture, marketHandler http.HandlerFunc) *agent.AgentRuntime {
