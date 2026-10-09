@@ -27,6 +27,7 @@ build/
 *.log
 *.db
 tmp/
+/agent_server/agent-history/
 
 # 行情資料（本機用，見 scripts/download_crypto_data.py）
 data/*.csv
