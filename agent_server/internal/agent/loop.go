@@ -93,7 +93,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 	}
 	contextBody["available_tools"] = runtimeToolNames()
 	encodedContext, _ := json.Marshal(contextBody)
-	systemPrompt := session.Prompt + toolDisclosureInstruction() + memory.Instruction
+	systemPrompt := session.Prompt + toolDisclosureInstruction() + messageBoardInstruction + memory.Instruction
 	userPrompt := string(encodedContext)
 	messages := []gatewayMessage{{Role: "system", Content: &systemPrompt}, {Role: "user", Content: &userPrompt}}
 	progress := make([]traceEntry, 0)

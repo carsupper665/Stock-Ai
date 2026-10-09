@@ -92,6 +92,153 @@ it('刪除失敗會保留留言並顯示後端錯誤', async () => {
   expect(document.body.textContent).toContain('keep me')
 })
 
+it('勾選後單則刪除會清除選取且不會再送批次 DELETE', async () => {
+  session.token = 'user-token'
+  let messages = [{ id: 'msg_selected', user_name: 'Agent A', content: 'remove once', tags: [], created_at: '2026-09-16T00:00:00Z' }]
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, request) => {
+    if (url === '/v1/accounts') return respond({ accounts: [] })
+    if (request.method === 'DELETE') {
+      messages = []
+      return respond(null, 204)
+    }
+    return respond({ messages, page: 1, has_more: false })
+  })
+  mountPage()
+  await vi.waitFor(() => expect(document.body.textContent).toContain('remove once'))
+  document.querySelector('input[aria-label="選取留言 msg_selected"]').click()
+  await nextTick()
+  ;[...document.querySelectorAll('button')].find((button) => button.textContent === 'DELETE').click()
+  await nextTick()
+  settle(true)
+
+  await vi.waitFor(() => expect(document.body.textContent).toContain('還沒有留言'))
+  expect(document.body.textContent).toContain('已選 0 則')
+  const batchButton = [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '刪除選取')
+  expect(batchButton.disabled).toBe(true)
+  batchButton.click()
+  await nextTick()
+  expect(fetch.mock.calls.filter(([, request]) => request.method === 'DELETE')).toHaveLength(1)
+})
+
+it('取消批次刪除會保留選取且不送出 DELETE', async () => {
+  session.token = 'user-token'
+  const messages = [
+    { id: 'msg_1', user_name: 'Agent A', content: 'first', tags: [], created_at: '2026-09-16T00:00:00Z' },
+    { id: 'msg_2', user_name: 'Agent B', content: 'second', tags: [], created_at: '2026-09-16T00:01:00Z' },
+  ]
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/v1/accounts') return respond({ accounts: [] })
+    return respond({ messages, page: 1, has_more: false })
+  })
+  mountPage()
+  await vi.waitFor(() => expect(document.body.textContent).toContain('second'))
+  const selected = document.querySelector('input[aria-label="選取留言 msg_1"]')
+  selected.click()
+  await nextTick()
+  ;[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '刪除選取').click()
+  await nextTick()
+  settle(false)
+  await nextTick()
+
+  expect(fetch.mock.calls.some(([, request]) => request.method === 'DELETE')).toBe(false)
+  expect(selected.checked).toBe(true)
+  expect(document.body.textContent).toContain('已選 1 則')
+})
+
+it('全選目前顯示留言後可批次刪除', async () => {
+  session.token = 'user-token'
+  let messages = [
+    { id: 'msg_1', user_name: 'Agent A', content: 'first', tags: [], created_at: '2026-09-16T00:00:00Z' },
+    { id: 'msg_2', user_name: 'Agent B', content: 'second', tags: [], created_at: '2026-09-16T00:01:00Z' },
+  ]
+  const deleted = []
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, request) => {
+    if (url === '/v1/accounts') return respond({ accounts: [] })
+    if (request.method === 'DELETE') {
+      const id = url.split('/').at(-1)
+      deleted.push(id)
+      messages = messages.filter((message) => message.id !== id)
+      return respond(null, 204)
+    }
+    return respond({ messages, page: 1, has_more: false })
+  })
+  mountPage()
+  await vi.waitFor(() => expect(document.body.textContent).toContain('second'))
+  document.querySelector('input[aria-label="全選目前顯示留言"]').click()
+  await nextTick()
+
+  expect([...document.querySelectorAll('input[aria-label^="選取留言"]')].every((input) => input.checked)).toBe(true)
+  expect(document.body.textContent).toContain('已選 2 則')
+  ;[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '刪除選取').click()
+  await nextTick()
+  settle(true)
+
+  await vi.waitFor(() => expect(deleted.sort()).toEqual(['msg_1', 'msg_2']))
+  await vi.waitFor(() => expect(toast.text).toBe('已刪除 2 則'))
+  expect(document.body.textContent).toContain('還沒有留言')
+})
+
+it('批次刪除部分失敗時重載並回報成功與失敗數量', async () => {
+  session.token = 'user-token'
+  let messages = [
+    { id: 'msg_ok', user_name: 'Agent A', content: 'remove me', tags: [], created_at: '2026-09-16T00:00:00Z' },
+    { id: 'msg_denied', user_name: 'Agent B', content: 'keep me', tags: [], created_at: '2026-09-16T00:01:00Z' },
+  ]
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, request) => {
+    if (url === '/v1/accounts') return respond({ accounts: [] })
+    if (request.method === 'DELETE' && url.endsWith('/msg_denied')) return respond({ error: 'forbidden', message: '只能刪除自己的留言' }, 403)
+    if (request.method === 'DELETE') {
+      messages = messages.filter((message) => message.id !== 'msg_ok')
+      return respond(null, 204)
+    }
+    return respond({ messages, page: 1, has_more: false })
+  })
+  mountPage()
+  await vi.waitFor(() => expect(document.body.textContent).toContain('keep me'))
+  document.querySelector('input[aria-label="全選目前顯示留言"]').click()
+  await nextTick()
+  ;[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '刪除選取').click()
+  await nextTick()
+  settle(true)
+
+  await vi.waitFor(() => expect(toast.text).toBe('刪除完成：1 則成功，1 則失敗'))
+  expect(document.body.textContent).not.toContain('remove me')
+  expect(document.body.textContent).toContain('keep me')
+})
+
+it('批次刪除載入的分頁留言後會清空額外頁並重載第一頁', async () => {
+  session.token = 'user-token'
+  let deleted = false
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, request) => {
+    if (url === '/v1/accounts') return respond({ accounts: [] })
+    if (request.method === 'DELETE') {
+      deleted = true
+      return respond(null, 204)
+    }
+    if (url.includes('page=2')) {
+      return respond({ messages: [{ id: 'page_2', user_name: 'Agent B', content: 'second page', tags: [], created_at: '2026-09-16T00:01:00Z' }], page: 2, has_more: false })
+    }
+    if (deleted) {
+      return respond({ messages: [{ id: 'fresh', user_name: 'Agent C', content: 'fresh result', tags: [], created_at: '2026-09-16T00:02:00Z' }], page: 1, has_more: false })
+    }
+    return respond({ messages: [{ id: 'page_1', user_name: 'Agent A', content: 'first page', tags: [], created_at: '2026-09-16T00:00:00Z' }], page: 1, has_more: true })
+  })
+  mountPage()
+  await vi.waitFor(() => expect(document.body.textContent).toContain('first page'))
+  ;[...document.querySelectorAll('button')].find((button) => button.textContent.includes('載入下一頁')).click()
+  await vi.waitFor(() => expect(document.body.textContent).toContain('second page'))
+  document.querySelector('input[aria-label="選取留言 page_2"]').click()
+  await nextTick()
+  ;[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '刪除選取').click()
+  await nextTick()
+  settle(true)
+
+  await vi.waitFor(() => expect(document.body.textContent).toContain('fresh result'))
+  expect(document.body.textContent).not.toContain('first page')
+  expect(document.body.textContent).not.toContain('second page')
+  expect(fetch.mock.calls.filter(([url]) => url === '/v1/messages?page=1&sort=desc').length).toBe(2)
+})
+
 it('篩選重載會丟棄延遲的 loadMore 結果與錯誤', async () => {
   session.token = 'user-token'
   const more = deferred()

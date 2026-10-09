@@ -41,7 +41,7 @@ func messageDefinitions() []map[string]any {
 			},
 		},
 		{
-			"name": "post_message", "description": "Publish meaningful, actionable collaboration as the bound Account. Tag relevant others; do not post routine logs, progress noise, or repeated status updates.",
+			"name": "post_message", "description": "Publish one durable, actionable decision, blocker, handoff, or request as the bound Account. Tag relevant Account names; do not post routine progress, completion notices, repeated status, raw tool output, or secrets.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
 					"content": map[string]any{"type": "string", "minLength": 1, "maxLength": messageContentLimit},
