@@ -19,12 +19,22 @@ const { data, error, loading, reload } = useLoad(async () => {
   return { ...messages, accounts: accounts.accounts ?? [] }
 })
 const all = computed(() => [...(data.value?.messages ?? []), ...extra.value])
+const selected = ref([])
+const allSelected = computed({
+  get() {
+    return all.value.length > 0 && all.value.every((message) => selected.value.includes(message.id))
+  },
+  set(value) {
+    selected.value = value ? all.value.map((message) => message.id) : []
+  },
+})
 
 async function resetList() {
   listGeneration++
   loadingMore.value = false
   page.value = 1
   extra.value = []
+  selected.value = []
   await reload()
 }
 
@@ -59,6 +69,7 @@ const selectedTags = ref([])
 const characterCount = computed(() => Array.from(draft.value).length)
 const busy = ref(false)
 const deleting = ref('')
+const deletingSelected = ref(false)
 async function post() {
   if (!draft.value.trim() || characterCount.value > 500) return
   busy.value = true
@@ -85,12 +96,39 @@ async function remove(message) {
   deleting.value = message.id
   try {
     await deleteMessage(message.id)
+    selected.value = selected.value.filter((id) => id !== message.id)
     await resetList()
     say('已刪除')
   } catch (e) {
     say(e.message, 'neg')
   } finally {
     deleting.value = ''
+  }
+}
+
+async function removeSelected() {
+  const ids = [...selected.value]
+  if (!ids.length) return
+  const ok = await confirm({
+    title: `刪除選取的 ${ids.length} 則留言？`,
+    ok: '確認刪除',
+    lines: ['留言與標籤會永久刪除', '不可復原'],
+  })
+  if (!ok) return
+  listGeneration++
+  loadingMore.value = false
+  deletingSelected.value = true
+  try {
+    const results = await Promise.allSettled(ids.map((id) => deleteMessage(id)))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    await resetList()
+    if (failed) {
+      say(`刪除完成：${ids.length - failed} 則成功，${failed} 則失敗`, 'neg')
+    } else {
+      say(`已刪除 ${ids.length} 則`)
+    }
+  } finally {
+    deletingSelected.value = false
   }
 }
 </script>
@@ -115,6 +153,15 @@ async function remove(message) {
       </section>
 
       <div class="row">
+        <label class="row">
+          <input v-model="allSelected" type="checkbox" aria-label="全選目前顯示留言" :disabled="!all.length || deletingSelected" />
+          全選目前顯示
+        </label>
+        <span class="note">已選 {{ selected.length }} 則</span>
+        <button data-tone="neg" :disabled="!selected.length || deletingSelected || !!deleting" @click="removeSelected">
+          {{ deletingSelected ? '刪除中…' : '刪除選取' }}
+        </button>
+        <span class="grow"></span>
         <label class="row">標籤
           <select v-model="tagFilter" @change="resetList">
             <option value="">全部</option>
@@ -134,12 +181,13 @@ async function remove(message) {
       <template v-else-if="data">
         <section v-for="message in all" :key="message.id" class="card col msg" :data-mark="kind(message).mark">
           <div class="row">
+            <input v-model="selected" type="checkbox" :value="message.id" :aria-label="`選取留言 ${message.id}`" :disabled="deletingSelected" />
             <b :data-tone="kind(message).tone === 'dim' ? null : kind(message).tone">{{ message.user_name }}</b>
             <span class="tag outline" data-tone="mute">{{ kind(message).label }}</span>
             <span v-for="tag in message.tags" :key="tag" class="tag">@{{ tag }}</span>
             <span class="grow"></span>
             <span class="mono" data-tone="mute">{{ fmtTime(message.created_at) }}</span>
-            <button class="text" data-tone="neg" :disabled="deleting === message.id" @click="remove(message)">{{ deleting === message.id ? 'DELETING…' : 'DELETE' }}</button>
+            <button class="text" data-tone="neg" :disabled="deletingSelected || deleting === message.id" @click="remove(message)">{{ deleting === message.id ? 'DELETING…' : 'DELETE' }}</button>
           </div>
           <p class="pre">{{ message.content }}</p>
         </section>
