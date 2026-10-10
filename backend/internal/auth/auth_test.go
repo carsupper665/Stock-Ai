@@ -21,7 +21,7 @@ func newTestAuth(t *testing.T) (*Authenticator, *database.Store) {
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("建表: %v", err)
 	}
-	return New(userToken, "Bless", store), store
+	return New(Settings{UserName: "Bless", StaticUserToken: userToken, AllowStaticUserToken: true}, store), store
 }
 
 func seedAccount(t *testing.T, store *database.Store, id, name, token, status string) {

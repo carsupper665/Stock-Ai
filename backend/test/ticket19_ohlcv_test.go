@@ -71,7 +71,7 @@ func newMarketReadAPI(t *testing.T, sources map[string]market.Source, now time.T
 	t.Cleanup(func() { _ = logger.Close() })
 	prices := market.New(sources, logger, market.Options{WaitTimeout: time.Second, Now: func() time.Time { return now }})
 	t.Cleanup(prices.Close)
-	cfg := &config.Config{UserToken: ticketMarketToken, UserName: "ticket", FeeRateMaker: 0.0002, FeeRateTaker: 0.0004}
+	cfg := &config.Config{UserToken: ticketMarketToken, AllowStaticUserToken: true, UserName: "ticket", FeeRateMaker: 0.0002, FeeRateTaker: 0.0004}
 	return api.New(cfg, store, prices, trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker), logger)
 }
 

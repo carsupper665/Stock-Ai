@@ -144,7 +144,7 @@ func newTradingAPIWithStore(t *testing.T, store *database.Store, dbPath string) 
 		FreshTTL: time.Millisecond, WaitTimeout: 2 * time.Second, Now: clock.now,
 	})
 	t.Cleanup(prices.Close)
-	cfg := &config.Config{UserToken: tradingUserToken, UserName: "ticket", FeeRateMaker: 0.0002, FeeRateTaker: 0.0004}
+	cfg := &config.Config{UserToken: tradingUserToken, AllowStaticUserToken: true, UserName: "ticket", FeeRateMaker: 0.0002, FeeRateTaker: 0.0004}
 	trader := trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker)
 	return &tradingAPI{
 		handler: api.New(cfg, store, prices, trader, logger),

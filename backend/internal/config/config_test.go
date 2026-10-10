@@ -23,6 +23,7 @@ func TestLoadReadsEnvFile(t *testing.T) {
 		"# 這行是註解",
 		"",
 		"USER_TOKEN=secret-token",
+		"ALLOW_STATIC_USER_TOKEN=true",
 		`USER_NAME="Bless"`,
 		"DB_DRIVER=sqlite",
 		"FEE_RATE_MAKER=0.001",
@@ -49,6 +50,7 @@ func TestLoadReadsEnvFile(t *testing.T) {
 
 func TestRealEnvBeatsEnvFile(t *testing.T) {
 	t.Setenv("USER_TOKEN", "from-environment")
+	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	path := writeEnv(t, "USER_TOKEN=from-file\n")
 
 	cfg, err := Load(path)
@@ -62,6 +64,7 @@ func TestRealEnvBeatsEnvFile(t *testing.T) {
 
 func TestMissingEnvFileIsNotAnError(t *testing.T) {
 	t.Setenv("USER_TOKEN", "token")
+	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 
 	if _, err := Load(filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
 		t.Fatalf(".env 不存在不該視為錯誤: %v", err)
@@ -70,6 +73,7 @@ func TestMissingEnvFileIsNotAnError(t *testing.T) {
 
 func TestMissingUserTokenIsRejected(t *testing.T) {
 	t.Setenv("USER_TOKEN", "")
+	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	path := writeEnv(t, "USER_NAME=Bless\n")
 
 	_, err := Load(path)
@@ -83,6 +87,7 @@ func TestMissingUserTokenIsRejected(t *testing.T) {
 
 func TestUnknownDriverIsRejected(t *testing.T) {
 	t.Setenv("USER_TOKEN", "token")
+	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	t.Setenv("DB_DRIVER", "mysql")
 
 	_, err := Load(filepath.Join(t.TempDir(), "none"))
@@ -103,6 +108,7 @@ func TestMalformedLineIsRejected(t *testing.T) {
 
 func TestNonNumericFeeRateIsRejected(t *testing.T) {
 	t.Setenv("USER_TOKEN", "token")
+	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	t.Setenv("FEE_RATE_TAKER", "abc")
 
 	_, err := Load(filepath.Join(t.TempDir(), "none"))
@@ -113,67 +119,49 @@ func TestNonNumericFeeRateIsRejected(t *testing.T) {
 
 func TestProductionLoadsNamespaceScopedSecretFiles(t *testing.T) {
 	directory := t.TempDir()
-	userPath := filepath.Join(directory, "stock-ai-release_backend_user_token")
 	keyPath := filepath.Join(directory, "stock-ai-release_backend_account_token_key")
-	userToken := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_"
-	if err := os.WriteFile(userPath, []byte(userToken+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	keyBytes := "0123456789abcdefGHIJKLMNOPQRSTUV"
 	key := base64.StdEncoding.EncodeToString([]byte(keyBytes))
 	if err := os.WriteFile(keyPath, []byte(key+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
-	t.Setenv("USER_TOKEN_FILE", userPath)
+	t.Setenv("ALLOW_STATIC_USER_TOKEN", "false")
 	t.Setenv("ACCOUNT_TOKEN_KEY_FILE", keyPath)
-	t.Setenv("USER_TOKEN", "")
 	t.Setenv("ACCOUNT_TOKEN_KEY", "")
-	// LookupEnv treats an explicitly empty variable as a direct source; remove it
-	// so production cannot accidentally combine direct and file sources.
-	os.Unsetenv("USER_TOKEN")
 	os.Unsetenv("ACCOUNT_TOKEN_KEY")
+	setReleaseOIDC(t)
 
 	cfg, err := Load(filepath.Join(directory, "missing.env"))
 	if err != nil {
 		t.Fatalf("Load production files: %v", err)
 	}
-	if cfg.UserToken != userToken || string(cfg.AccountTokenKey) != keyBytes {
+	if cfg.UserToken != "" || string(cfg.AccountTokenKey) != keyBytes {
 		t.Fatal("production secret files were not loaded")
 	}
 }
 
 func TestProductionRejectsDirectMissingAndWrongNamespaceSecrets(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdefGHIJKLMNOPQRSTUV"))
-	userToken := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_"
 	for _, test := range []struct {
 		name      string
-		userFile  string
 		keyFile   string
 		direct    string
 		wantError string
 	}{
-		{name: "direct value", direct: userToken, wantError: "USER_TOKEN_FILE is required"},
-		{name: "wrong namespace", userFile: "stock-ai-test_backend_user_token", keyFile: "stock-ai-release_backend_account_token_key", wantError: "outside the stock-ai-release"},
-		{name: "missing key", userFile: "stock-ai-release_backend_user_token", wantError: "ACCOUNT_TOKEN_KEY_FILE is required"},
+		{name: "direct value", direct: key, wantError: "ACCOUNT_TOKEN_KEY_FILE is required"},
+		{name: "wrong namespace", keyFile: "stock-ai-test_backend_account_token_key", wantError: "outside the stock-ai-release"},
+		{name: "missing key", wantError: "ACCOUNT_TOKEN_KEY_FILE is required"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
+			t.Setenv("ALLOW_STATIC_USER_TOKEN", "false")
+			setReleaseOIDC(t)
 			if test.direct != "" {
-				t.Setenv("USER_TOKEN", test.direct)
+				t.Setenv("ACCOUNT_TOKEN_KEY", test.direct)
 			} else {
-				os.Unsetenv("USER_TOKEN")
-			}
-			os.Unsetenv("ACCOUNT_TOKEN_KEY")
-			if test.userFile != "" {
-				path := filepath.Join(directory, test.userFile)
-				if err := os.WriteFile(path, []byte(userToken), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv("USER_TOKEN_FILE", path)
-			} else {
-				os.Unsetenv("USER_TOKEN_FILE")
+				os.Unsetenv("ACCOUNT_TOKEN_KEY")
 			}
 			if test.keyFile != "" {
 				path := filepath.Join(directory, test.keyFile)
@@ -189,5 +177,22 @@ func TestProductionRejectsDirectMissingAndWrongNamespaceSecrets(t *testing.T) {
 				t.Fatalf("error = %v; want %q", err, test.wantError)
 			}
 		})
+	}
+}
+
+func setReleaseOIDC(t *testing.T) {
+	t.Helper()
+	t.Setenv("OIDC_ISSUER", "https://idp.example/realms/release")
+	t.Setenv("OIDC_AUDIENCE", "stock-ai-api-release")
+	t.Setenv("OIDC_USER_SUBJECT", "release-user-subject")
+	t.Setenv("OIDC_JWKS_URL", "https://idp.example/realms/release/jwks")
+}
+
+func TestReleaseRejectsStaticUserAuthentication(t *testing.T) {
+	t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
+	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
+	_, err := Load(filepath.Join(t.TempDir(), "missing.env"))
+	if err == nil || !strings.Contains(err.Error(), "forbidden in Release") {
+		t.Fatalf("Release must reject static USER authentication: %v", err)
 	}
 }

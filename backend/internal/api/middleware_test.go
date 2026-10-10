@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -82,5 +84,43 @@ func TestDisabledAccountTokenStopsWorking(t *testing.T) {
 
 	if status, _ := do(t, engine, http.MethodGet, "/v1/account", accountToken, nil); status != http.StatusUnauthorized {
 		t.Fatalf("停用後 token 應失效並回 401，得到 %d", status)
+	}
+}
+
+func TestMeReturnsResolvedIdentity(t *testing.T) {
+	engine, _ := newTestServer(t)
+	id, accountToken := createAccountFor(t, engine, "BTC-Agent-01", 1000)
+
+	status, body := do(t, engine, http.MethodGet, "/v1/me", testUserToken, nil)
+	if status != http.StatusOK || body["kind"] != "user" || body["user_name"] != "Bless" {
+		t.Fatalf("USER /v1/me response is wrong: status=%d body=%v", status, body)
+	}
+	if _, present := body["account_id"]; present {
+		t.Fatalf("USER response disclosed an account identity: %v", body)
+	}
+
+	status, body = do(t, engine, http.MethodGet, "/v1/me", accountToken, nil)
+	if status != http.StatusOK || body["kind"] != "account" || body["account_id"] != id || body["user_name"] != "BTC-Agent-01" {
+		t.Fatalf("Account /v1/me response is wrong: status=%d body=%v", status, body)
+	}
+	if _, present := body["subject"]; present {
+		t.Fatalf("Account response disclosed an OIDC subject: %v", body)
+	}
+
+	if status, _ := do(t, engine, http.MethodGet, "/v1/me", "", nil); status != http.StatusUnauthorized {
+		t.Fatalf("anonymous /v1/me should be 401, got %d", status)
+	}
+	status, body = do(t, engine, http.MethodGet, "/v1/me", "secret.claims.signature", nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("invalid JWT-shaped token should be 401, got %d", status)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"secret", "claims", "signature", "jwks"} {
+		if strings.Contains(strings.ToLower(string(raw)), forbidden) {
+			t.Fatalf("authentication response disclosed %q: %s", forbidden, raw)
+		}
 	}
 }

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"time"
+
 	"backend/internal/account"
 	"backend/internal/auth"
 	"backend/internal/config"
@@ -31,11 +33,22 @@ func New(cfg *config.Config, store *database.Store, prices *market.Runtime, trad
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	var oidcSettings *auth.OIDCSettings
+	if cfg.OIDCIssuer != "" {
+		oidcSettings = &auth.OIDCSettings{
+			Issuer: cfg.OIDCIssuer, Audience: cfg.OIDCAudience, Subject: cfg.OIDCUserSubject,
+			JWKSURL: cfg.OIDCJWKSURL, TokenType: cfg.OIDCTokenType,
+			Timeout: 3 * time.Second, CacheTTL: 15 * time.Minute,
+		}
+	}
 	s := &Server{
-		cfg:      cfg,
-		log:      log,
-		store:    store,
-		auth:     auth.New(cfg.UserToken, cfg.UserName, store),
+		cfg:   cfg,
+		log:   log,
+		store: store,
+		auth: auth.New(auth.Settings{
+			UserName: cfg.UserName, StaticUserToken: cfg.UserToken,
+			AllowStaticUserToken: cfg.AllowStaticUserToken, OIDC: oidcSettings,
+		}, store),
 		accounts: account.New(store),
 		market:   prices,
 		trading:  trader,
@@ -58,6 +71,7 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 
 	// 健康檢查：不需要身分
 	v1.GET("/health", s.health)
+	v1.GET("/me", s.requireAny(), s.me)
 
 	// 帳號管理：只有 USER Token
 	admin := v1.Group("/accounts", s.requireUser())
