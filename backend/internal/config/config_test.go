@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,5 +108,86 @@ func TestNonNumericFeeRateIsRejected(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "none"))
 	if err == nil || !strings.Contains(err.Error(), "FEE_RATE_TAKER") {
 		t.Fatalf("預期拒絕非數字的費率，得到: %v", err)
+	}
+}
+
+func TestProductionLoadsNamespaceScopedSecretFiles(t *testing.T) {
+	directory := t.TempDir()
+	userPath := filepath.Join(directory, "stock-ai-release_backend_user_token")
+	keyPath := filepath.Join(directory, "stock-ai-release_backend_account_token_key")
+	userToken := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_"
+	if err := os.WriteFile(userPath, []byte(userToken+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyBytes := "0123456789abcdefGHIJKLMNOPQRSTUV"
+	key := base64.StdEncoding.EncodeToString([]byte(keyBytes))
+	if err := os.WriteFile(keyPath, []byte(key+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
+	t.Setenv("USER_TOKEN_FILE", userPath)
+	t.Setenv("ACCOUNT_TOKEN_KEY_FILE", keyPath)
+	t.Setenv("USER_TOKEN", "")
+	t.Setenv("ACCOUNT_TOKEN_KEY", "")
+	// LookupEnv treats an explicitly empty variable as a direct source; remove it
+	// so production cannot accidentally combine direct and file sources.
+	os.Unsetenv("USER_TOKEN")
+	os.Unsetenv("ACCOUNT_TOKEN_KEY")
+
+	cfg, err := Load(filepath.Join(directory, "missing.env"))
+	if err != nil {
+		t.Fatalf("Load production files: %v", err)
+	}
+	if cfg.UserToken != userToken || string(cfg.AccountTokenKey) != keyBytes {
+		t.Fatal("production secret files were not loaded")
+	}
+}
+
+func TestProductionRejectsDirectMissingAndWrongNamespaceSecrets(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdefGHIJKLMNOPQRSTUV"))
+	userToken := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_"
+	for _, test := range []struct {
+		name      string
+		userFile  string
+		keyFile   string
+		direct    string
+		wantError string
+	}{
+		{name: "direct value", direct: userToken, wantError: "USER_TOKEN_FILE is required"},
+		{name: "wrong namespace", userFile: "stock-ai-test_backend_user_token", keyFile: "stock-ai-release_backend_account_token_key", wantError: "outside the stock-ai-release"},
+		{name: "missing key", userFile: "stock-ai-release_backend_user_token", wantError: "ACCOUNT_TOKEN_KEY_FILE is required"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
+			if test.direct != "" {
+				t.Setenv("USER_TOKEN", test.direct)
+			} else {
+				os.Unsetenv("USER_TOKEN")
+			}
+			os.Unsetenv("ACCOUNT_TOKEN_KEY")
+			if test.userFile != "" {
+				path := filepath.Join(directory, test.userFile)
+				if err := os.WriteFile(path, []byte(userToken), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("USER_TOKEN_FILE", path)
+			} else {
+				os.Unsetenv("USER_TOKEN_FILE")
+			}
+			if test.keyFile != "" {
+				path := filepath.Join(directory, test.keyFile)
+				if err := os.WriteFile(path, []byte(key), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("ACCOUNT_TOKEN_KEY_FILE", path)
+			} else {
+				os.Unsetenv("ACCOUNT_TOKEN_KEY_FILE")
+			}
+			_, err := Load(filepath.Join(directory, "missing.env"))
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("error = %v; want %q", err, test.wantError)
+			}
+		})
 	}
 }

@@ -11,7 +11,7 @@ import (
 // 下單會同時動到餘額、部位、訂單與成交，必須一起成功或一起失敗。
 func (s *Store) Tx(ctx context.Context, fn func(*Store) error) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(&Store{db: tx})
+		return fn(&Store{db: tx, tokenKey: s.tokenKey})
 	})
 }
 

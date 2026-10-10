@@ -357,6 +357,9 @@ func validateRuntimeConfig(config RuntimeConfig) error {
 			return fmt.Errorf("%s is required", name)
 		}
 	}
+	if config.AdminToken == config.BackendUserToken || config.AdminToken == config.GatewayRuntimeToken || config.BackendUserToken == config.GatewayRuntimeToken {
+		return errors.New("agent admin, Backend USER, and Gateway runtime tokens must be distinct")
+	}
 	for name, value := range map[string]string{"Backend URL": config.BackendURL, "Gateway URL": config.GatewayURL} {
 		parsed, err := url.Parse(value)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||

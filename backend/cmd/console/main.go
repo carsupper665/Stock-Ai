@@ -21,13 +21,25 @@ func main() {
 }
 
 func run() error {
-	configuration, err := config.Load(".env")
+	userToken, err := config.Secret("USER_TOKEN", "backend_user_token")
+	if err != nil {
+		return err
+	}
+	agentToken, err := config.Secret("AGENT_SERVER_ADMIN_TOKEN", "agent_admin_token")
+	if err != nil {
+		return err
+	}
+	llmAdminToken, err := config.Secret("LLM_SERVER_ADMIN_TOKEN", "llm_admin_token")
+	if err != nil {
+		return err
+	}
+	llmRuntimeToken, err := config.Secret("LLM_SERVER_RUNTIME_TOKEN", "llm_runtime_token")
 	if err != nil {
 		return err
 	}
 	handler, err := console.New(console.Config{
-		UserToken: configuration.UserToken, AgentToken: os.Getenv("AGENT_SERVER_ADMIN_TOKEN"),
-		GatewayAdminToken: os.Getenv("LLM_SERVER_ADMIN_TOKEN"), GatewayRuntimeToken: os.Getenv("LLM_SERVER_RUNTIME_TOKEN"),
+		UserToken: userToken, AgentToken: agentToken,
+		GatewayAdminToken: llmAdminToken, GatewayRuntimeToken: llmRuntimeToken,
 		BackendURL: os.Getenv("BACKEND_URL"), AgentURL: os.Getenv("AGENT_SERVER_URL"), GatewayURL: os.Getenv("LLM_SERVER_URL"),
 		Public: os.DirFS(env("CONSOLE_PUBLIC_DIR", "public")),
 	})

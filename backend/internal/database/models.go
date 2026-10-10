@@ -49,12 +49,17 @@ func (s Source) Known() bool {
 
 // Account 是一個虛擬交易帳號。
 //
-// Token 以明文保存：規格 §1 要求 USER 能「查看 / Reset Account Token」，
-// 雜湊後就只能重設、無法查看。
+// Token is decrypted only inside the Store. Production databases persist an
+// AES-GCM ciphertext and use TokenHash for keyed lookup, while USER responses
+// can still display the decrypted token as required by the application spec.
 type Account struct {
-	ID             string  `gorm:"primaryKey;size:64"`
-	UserName       string  `gorm:"size:64;not null;uniqueIndex"`
-	Token          string  `gorm:"size:128;not null;uniqueIndex"`
+	ID       string `gorm:"primaryKey;size:64"`
+	UserName string `gorm:"size:64;not null;uniqueIndex"`
+	Token    string `gorm:"size:256;not null;uniqueIndex"`
+	// TokenHash is NULL in development/no-key databases so the unique index
+	// permits multiple rows while Token itself remains the development invariant.
+	// Production sets it to a keyed digest, making duplicate credentials a DB error.
+	TokenHash      *string `gorm:"size:64;uniqueIndex:idx_accounts_token_hash"`
 	InitialBalance float64 `gorm:"not null"`
 	Balance        float64 `gorm:"not null"`
 	Status         string  `gorm:"size:16;not null;index"`
