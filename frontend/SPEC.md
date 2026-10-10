@@ -11,9 +11,9 @@ USER（人）用的控制台。後端行為以 `backend/SPEC.md` 為準，本文
    設計依據是 `design_handoff_agent_console/README.md`（高保真交接稿）。
 4. 新增頁面 = 新增一個資料夾。`core/` 與其他頁面零修改。
 5. 預設所有路由都要登入。公開頁自己標 `meta.public`，目前只有登入頁。
-6. 登入方式是可換的 provider：現在貼 USER Token，之後接自家 IDP（OIDC）。切換點只有一行。
+6. USER 登入固定走同源的 private OIDC Gateway；瀏覽器不接觸 access token、client secret 或 PKCE verifier。
 7. 三個服務（交易後端、Agent Server、LLM Provider Server）都沒有 CORS，Agent／LLM 的管理憑證也不能進瀏覽器：
-   同源代理去前綴並注入 Bearer（§8）。瀏覽器只持有 USER Token。
+   同源代理驗證 HttpOnly Gateway session，再於私有邊界替換憑證（§8）。瀏覽器只持有 HttpOnly session cookie。
 8. 規格沒定或 API 尚未提供的資料：畫面明說「尚未提供」、掛「待定 N」標籤，不假裝有值（交接稿「狀態不足時的顯示規則」）。
 
 ## 1. 選型
@@ -49,10 +49,10 @@ frontend/
     core/                   # 只做接線，不含業務
       pages.js              # 頁面包載入器：routes 與 nav（3 行）
       router.js             # 路由 + 唯一的 auth 守衛
-      session.js            # 登入狀態：token、name、save、logout
-      auth.js               # login(input)；provider 切換點
-      providers/token.js    # 現在的登入方式：貼 USER Token
-      api.js                # fetch 包裝：帶 token、拆三種錯誤信封
+      session.js            # Gateway 顯示身分、到期計時與 /oauth2/me 恢復
+      auth.js               # login(input) 導向 Gateway
+      providers/oidc.js     # login、current user、POST logout navigation
+      api.js                # cookie-based fetch、Account 代查、拆三種錯誤信封
       load.js               # useLoad：頁面載資料的唯一寫法；sync：殼的「更新於」與全域重新整理
       theme.js              # setTheme：套用並記住 light／dark／跟系統
     shared/                 # 跨頁共用（AGENT.md 9）
@@ -128,106 +128,27 @@ export const nav = routes.filter((r) => r.meta?.nav).sort((a, b) => a.meta.nav -
 
 新增頁面的全部動作：建資料夾、寫 `index.js`、寫 `Page.vue`。重新整理就出現在選單。
 
-## 4. Auth：統一把關與登入街口
+## 4. Auth：Gateway session
 
-兩層把關，都在 `core/`：
+登入由 server-side confidential OIDC Gateway 完成，細節與 edge contract 見
+`docs/deployment/oidc-gateway.md`。前端只有四個行為：
 
-1. 路由守衛（全站唯一一個）：不是 `public` 又沒有 `session.token` → 轉去 `/login?redirect=原路徑`。
-2. API 層：每個請求自動帶 `Authorization: Bearer`；用自己的 token 收到 401 → `logout()`。
+1. 路由守衛首次進入受保護頁時呼叫 `GET /oauth2/me`，成功後只保存顯示名稱與到期時間。
+2. 登入按鈕整頁導向 `GET /oauth2/start?return=<local path>`；callback 不由 JavaScript 處理。
+3. API 使用同源 `HttpOnly` cookie，不替 OIDC USER 建立 `Authorization` header。
+4. 登出建立同源 `POST /oauth2/logout` 的 navigation；401 或本地到期計時器清除顯示身分並回登入頁。
 
-```js
-// src/core/router.js
-import { createRouter, createWebHistory } from 'vue-router'
-import { nav, routes } from './pages.js'
-import { session } from './session.js'
-
-// 首頁是選單第一項；還沒有任何頁面時退到登入頁
-const home = { name: nav[0]?.name ?? 'login' }
-
-export const router = createRouter({
-  history: createWebHistory(),
-  routes: [...routes, { path: '/', redirect: home }, { path: '/:pathMatch(.*)*', redirect: '/' }],
-})
-
-router.beforeEach((to) => {
-  if (to.meta.public || session.token) return true
-  return { name: 'login', query: { redirect: to.fullPath } }
-})
-```
-
-```js
-// src/core/session.js
-import { reactive } from 'vue'
-
-export const session = reactive({
-  token: sessionStorage.getItem('token'),
-  name: sessionStorage.getItem('name'),
-})
-
-export function save({ token, name }) {
-  Object.assign(session, { token, name })
-  sessionStorage.setItem('token', token)
-  sessionStorage.setItem('name', name)
-}
-
-export function logout() {
-  sessionStorage.clear()
-  location.assign('/login')
-}
-```
-
-`sessionStorage`：重新整理不掉、關分頁即登出。`logout()` 用整頁跳轉，所以 `api.js` 不需要認得 router。
-
-### 登入街口
-
-```js
-// src/core/auth.js
-import { save } from './session.js'
-import * as token from './providers/token.js'
-
-const providers = { token }                                   // 接 IDP 時加一行：oidc
-const providerName = import.meta.env.VITE_AUTH_PROVIDER ?? 'token'
-
-export async function login(input) {
-  save(await providers[providerName].login(input))
-}
-```
-
-provider 契約只有一個函式：
-
-```text
-login(input) → Promise<{ token, name }>     token：能放進 Authorization: Bearer 的字串
-```
-
-**token provider（現在）**
-
-```js
-// src/core/providers/token.js
-import { api } from '../api.js'
-
-export async function login({ token }) {
-  await api('GET', '/v1/accounts', undefined, token)   // 200 才是 USER Token；401/403 由 api() 丟出
-  return { token, name: 'USER' }
-}
-```
-
-登入頁：一個輸入框（開發時由 `VITE_DEV_TOKEN` 預填）→ `login({ token })` → 成功後 `router.push(redirect ?? '/')`，失敗顯示後端的 `message`。已登入時改顯示身分與登出鈕。
-
-**oidc provider（預留，接自家 IDP 時實作）**
-
-- 流程：Authorization Code + PKCE（SPA 沒有 client secret）。
-- `login({})`：把 `redirect` 目標存進 `sessionStorage`，產生 PKCE、導去 IDP 的 authorize endpoint，`redirect_uri` 是 `<origin>/login`。
-- `login({ code, state })`：IDP 導回 `/login?code=…` 時由登入頁呼叫；驗 state、用 code 換 token；回 `{ token: access_token, name: id_token.name }`。
-- 同一個 `login(input)`，用 `input.code` 有沒有值區分去程與回程，不另開函式。
-- 需要新增：`core/providers/oidc.js`、`.env` 的 `VITE_OIDC_ISSUER`、`VITE_OIDC_CLIENT_ID`、`auth.js` 的一行、登入頁把輸入框換成按鈕（把 `providerName` export 出去判斷）。
-- 後端要能認 IDP 的 JWT，見 §11。
-- 預留的是契約與切換點，**不寫空殼檔案**（AGENT.md 5、11）。
+access token、ID token、state、nonce、PKCE verifier 和 client secret 都不得出現在
+JavaScript state、Web Storage、URL、可讀 cookie 或 frontend bundle。Production build
+只接受 `VITE_AUTH_PROVIDER=oidc`。`session.token` 只保留為單元測試 seam；production
+登入流程不會設定它。Account token 仍可由需要代查的 API call 以明確第四參數傳入，
+不得拿來建立 USER session 或解鎖 `/agent`、`/llm`。
 
 ## 5. API 層
 
 ```js
 // src/core/api.js
-import { logout, session } from './session.js'
+import { expire } from './session.js'
 
 const base = import.meta.env.VITE_API_BASE ?? ''
 
@@ -235,18 +156,18 @@ const base = import.meta.env.VITE_API_BASE ?? ''
 const codeOf = (d) => (typeof d.error === 'string' ? d.error : d.error?.code)
 const messageOf = (d) => d.message ?? d.msg ?? d.error?.message
 
-// token：預設帶 USER Token；傳 null 就不帶（Agent／LLM Server 的管理憑證由代理注入）
-export async function api(method, path, body, token = session.token) {
+// 省略 token 時用 Gateway cookie；只有 Account 代查才明確傳 token。
+export async function api(method, path, body, token) {
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+  const res = await fetch(base + path, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) })
   if (res.status === 204) return null
   const data = await res.json().catch(() => ({}))     // 後端掛了時代理回空的 502，不能讓解析錯誤蓋掉狀態碼
   if (res.ok) return data
 
-  if (res.status === 401 && token && token === session.token) logout()
+  if (res.status === 401 && token === undefined) expire()
   throw Object.assign(new Error(messageOf(data) ?? `${res.status} ${res.statusText}`), { status: res.status, code: codeOf(data) })
 }
 ```
@@ -257,9 +178,9 @@ export async function api(method, path, body, token = session.token) {
 - 失敗丟 `Error`，帶 `status`、`code`、`message`；三種信封在這裡拆成同一形狀，頁面直接顯示 `message`。
   後端沒開時代理回的是空的 502，`message` 會是 `502 Bad Gateway`，`code` 是 `undefined`。
 - 第四個參數 `token`：
-  - 省略 → USER Token（交易後端）。
+  - 省略 → Gateway session cookie（OIDC USER）。
   - 帳號的 token → 代打（§10 D 組：帳號明細與 Session 概覽用它代查 `GET /v1/account`）。代打的 401 只丟錯，不登出 USER。
-  - `null` → 不帶 Authorization：`/agent/*`、`/llm/*` 由代理注入管理憑證；這種 401 表示代理設定錯，也只丟錯。
+  - `null` → 不帶 Authorization，供公開 health/message 等要求使用。
 - `VITE_API_BASE` 預設空字串＝同源：開發走 vite proxy，正式走反向代理。
 
 頁面的 `api.js` 一行一個端點；打 Agent／LLM Server 的頁面在檔頭包一個加前綴、傳 `null` 的小函式：
@@ -385,7 +306,8 @@ cd frontend && npm install && npm run dev                   # :5173
 
 | 瀏覽器打 | 轉到 | 注入 |
 |---|---|---|
-| `/v1/*` | 交易後端 `/v1/*` | 不注入，瀏覽器自己帶 USER Token |
+| `/oauth2/*` | OIDC Gateway `/oauth2/*` | 不注入；cookie 僅供 Gateway session 使用 |
+| `/v1/*` | 交易後端 `/v1/*` | 開發直連只適用公開或 Account-token request；OIDC USER 路徑由 Ticket 05 Console 完成 |
 | `/agent/*` | Agent Server `/*`（去掉 `/agent`） | `Authorization: Bearer $AGENT_SERVER_ADMIN_TOKEN` |
 | `/llm/v1/models` | LLM Server `/v1/models` | `Bearer $LLM_SERVER_RUNTIME_TOKEN`（模型目錄只認 runtime 憑證） |
 | `/llm/*` | LLM Server `/*`（去掉 `/llm`） | `Bearer $LLM_SERVER_ADMIN_TOKEN` |
@@ -396,8 +318,8 @@ cd frontend && npm install && npm run dev                   # :5173
 
 ```env
 VITE_API_BASE=                 # 空＝同源
-VITE_AUTH_PROVIDER=token
-VITE_DEV_TOKEN=                # 開發時預填登入框
+VITE_AUTH_PROVIDER=oidc
+OIDC_GATEWAY_URL=http://127.0.0.1:4180
 BACKEND_URL=http://localhost:7794            # 以下沒有 VITE_ 前綴，只有代理看得到
 AGENT_SERVER_URL=http://127.0.0.1:8080
 LLM_SERVER_URL=http://127.0.0.1:8090
@@ -407,18 +329,19 @@ LLM_SERVER_RUNTIME_TOKEN=
 ```
 
 正式：`npm run build` 產出 `dist/`。反向代理照上表做同樣的去前綴與注入，其他路徑給 `dist/`，找不到檔案時回 `index.html`（history 模式必要）。
-反向代理還要把 `/agent/*`、`/llm/*` 擋在登入之後（現在 dev proxy 不擋：誰連得到 :5173 誰就能打管理 API）——這是接 OIDC 時一併做的事（§11）。
+正式反向代理的 authenticated Console boundary 與 `/agent/*`、`/llm/*` credential replacement 由 Ticket 05 實作；Nginx external enforcement 由 Ticket 09 實作。
 
 ## 9. 測試
 
-`frontend/test/*.test.js`，`npm test` = `vitest run`，環境 happy-dom（要有 `sessionStorage`、`location`）。
-只測接線與契約，四支：
+`frontend/test/*.test.js`，`npm test` = `vitest run`，環境 happy-dom。
+測試接線、頁面契約與 OIDC browser flow：
 
 | 檔案 | 驗什麼 |
 |---|---|
 | `pages.test.js` | 每個 `pages/*/index.js` 都有 `path`（以 `/` 開頭）、`name`、`component`；`name` 不重複；只有 `login` 是 `public`；每個 `component()` 都載得起來；`nav` 只收有 `nav` 的頁面且已排序 |
-| `router.test.js` | 用 `addRoute` 掛一個受保護的測試路由，不依賴真實頁面：沒 token 被送去 `login` 且 `query.redirect` 是原路徑；有 token 進得去；`/login` 免 token；不認得的路徑不 404 |
-| `api.test.js` | 帶 `Authorization` 與 JSON body；204 回 `null`；三種錯誤信封都變成 `{status, code, message}`；自己的 token 401 會 `logout`、代打的 token 401 與 `token = null` 的 401 只丟錯；空的 502 也拿得到狀態碼（mock `fetch`） |
+| `router.test.js` | 用 `addRoute` 掛一個受保護的測試路由：沒有 Gateway identity 被送去 `login` 且保留 `query.redirect`；有 identity 進得去；`/login` 公開；未知路徑不 404 |
+| `api.test.js` | same-origin credential request、明確 Account bearer、JSON body、204、三種錯誤信封、session-bound 401 expiry、代打 401 與空 502（mock `fetch`） |
+| `oidc-browser.test.js` | 首次登入 navigation、`/oauth2/me` refresh、無 Web Storage token、client expiry、POST logout navigation |
 | `theme.test.js` | `src/**/*.{vue,css}` 除了 `theme.css` 沒有 `#hex`、`rgb(`、`hsl(`（`import.meta.glob` 讀原始碼掃） |
 
 頁面不寫單元測試：對著真後端手動驗，跟 `backend/test/*.py` 一樣是真流程。頁面長相定下來後再考慮 e2e。
@@ -427,7 +350,7 @@ LLM_SERVER_RUNTIME_TOKEN=
 
 ### 10.1 共同約定
 
-- 認證：`Authorization: Bearer <token>`。USER Token 來自後端 `.env`；Account Token 由後端產生，USER 查帳號時看得到。
+- 認證：OIDC USER 由 Gateway session 在私有邊界換成 access-token bearer；瀏覽器不讀取該 token。Account Token 由後端產生，需要代查時由前端明確帶 `Authorization: Bearer <account-token>`。
 - 時間：UTC、RFC3339、結尾 `Z`。顯示時轉瀏覽器本地時間。
 - 數字：float64，後端已收斂到小數 8 位。前端只做顯示格式，不做金額運算。
 - 列表都包在複數 key 裡：`accounts`、`orders`、`positions`、`trades`、`messages`、`subscriptions`。
@@ -525,7 +448,7 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 | HTTP | `error` | 什麼時候 | 前端 |
 |---|---|---|---|
 | 400 | `invalid_request` | JSON 壞掉、欄位不合法、參數格式錯 | 顯示 `message` |
-| 401 | `unauthorized` | 沒帶、帶錯、帳號已停用 | 自己的 token → 登出；否則顯示 |
+| 401 | `unauthorized` | session 到期、沒帶、帶錯、帳號已停用 | Gateway session request → 回登入；明確 Account token request → 顯示 |
 | 403 | `forbidden` | token 種類不對（USER 打 D 組、Account 打 B 組） | 顯示 |
 | 403 | `account_disabled` | 停用帳號想交易 | 顯示 |
 | 404 | `not_found` | id 不存在、部位已平 | 顯示，列表 `reload()` |

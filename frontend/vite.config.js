@@ -15,13 +15,18 @@ function upstream(target, prefix, token) {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  if (mode === 'production' && env.VITE_AUTH_PROVIDER && env.VITE_AUTH_PROVIDER !== 'oidc') {
+    throw new Error('Production frontend supports only cookie-based OIDC authentication')
+  }
   const agent = env.AGENT_SERVER_URL ?? 'http://127.0.0.1:8080'
   const llm = env.LLM_SERVER_URL ?? 'http://127.0.0.1:8090'
+  const gateway = env.OIDC_GATEWAY_URL ?? 'http://127.0.0.1:4180'
   return {
     plugins: [vue()],
-    define: mode === 'production' ? { 'import.meta.env.VITE_DEV_TOKEN': JSON.stringify('') } : {},
+    define: mode === 'production' ? { 'import.meta.env.VITE_AUTH_PROVIDER': JSON.stringify('oidc'), 'import.meta.env.VITE_DEV_TOKEN': JSON.stringify('') } : {},
     server: {
       proxy: {
+        '/oauth2': gateway,
         '/v1': env.BACKEND_URL ?? 'http://localhost:7794',
         // 順序有意義：/llm/v1/models 要 runtime 憑證，其餘 /llm 要 admin 憑證
         '/llm/v1/models': upstream(llm, '/llm', env.LLM_SERVER_RUNTIME_TOKEN),
