@@ -10,6 +10,7 @@
 .sis
 .playwright-mcp/
 .worktrees/
+.serena/
 
 # 機密與憑證
 *.env
