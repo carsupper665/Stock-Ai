@@ -2,9 +2,11 @@ package config
 
 import (
 	"bufio"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,8 +15,10 @@ import (
 // Config 是整個 backend 的執行期設定，全部來自環境變數或 .env。
 type Config struct {
 	UserToken string // USER 的固定 token
-	UserName  string // USER 在留言板上的公開名稱
-	Port      string
+	// AccountTokenKey encrypts Account tokens at rest. It is mandatory in Test/Release.
+	AccountTokenKey []byte
+	UserName        string // USER 在留言板上的公開名稱
+	Port            string
 
 	DBDriver string // sqlite | postgres
 	DBDSN    string
@@ -39,19 +43,34 @@ func Load(envPath string) (*Config, error) {
 	if err := loadEnvFile(envPath); err != nil {
 		return nil, err
 	}
-
-	cfg := &Config{
-		UserToken:   os.Getenv("USER_TOKEN"),
-		UserName:    envString("USER_NAME", "USER"),
-		Port:        envString("PORT", "7794"),
-		DBDriver:    envString("DB_DRIVER", "sqlite"),
-		DBDSN:       envString("DB_DSN", "backend.db"),
-		LogDir:      envString("LOG_DIR", "logs"),
-		LogMaxLines: envInt("LOG_MAX_LINES", 100000),
-		Debug:       envBool("DEBUG", false),
+	userToken, err := Secret("USER_TOKEN", "backend_user_token")
+	if err != nil {
+		return nil, err
+	}
+	accountTokenKey, err := Secret("ACCOUNT_TOKEN_KEY", "backend_account_token_key")
+	if err != nil {
+		return nil, err
+	}
+	var decodedAccountTokenKey []byte
+	if accountTokenKey != "" {
+		decodedAccountTokenKey, err = base64.StdEncoding.DecodeString(accountTokenKey)
+		if err != nil || len(decodedAccountTokenKey) != 32 || base64.StdEncoding.EncodeToString(decodedAccountTokenKey) != accountTokenKey {
+			return nil, errors.New("ACCOUNT_TOKEN_KEY must be canonical base64 encoding of exactly 32 bytes")
+		}
 	}
 
-	var err error
+	cfg := &Config{
+		UserToken:       userToken,
+		AccountTokenKey: decodedAccountTokenKey,
+		UserName:        envString("USER_NAME", "USER"),
+		Port:            envString("PORT", "7794"),
+		DBDriver:        envString("DB_DRIVER", "sqlite"),
+		DBDSN:           envString("DB_DSN", "backend.db"),
+		LogDir:          envString("LOG_DIR", "logs"),
+		LogMaxLines:     envInt("LOG_MAX_LINES", 100000),
+		Debug:           envBool("DEBUG", false),
+	}
+
 	if cfg.FeeRateMaker, err = envFloat("FEE_RATE_MAKER", 0.0002); err != nil {
 		return nil, err
 	}
@@ -72,6 +91,82 @@ func Load(envPath string) (*Config, error) {
 	}
 
 	return cfg, cfg.validate()
+}
+
+// Secret reads a development environment value or a namespace-scoped secret
+// file in Test/Release. Error messages never contain secret material.
+func Secret(name, logicalName string) (string, error) {
+	environment := os.Getenv("STOCK_AI_ENVIRONMENT")
+	direct, directSet := os.LookupEnv(name)
+	fileName, fileSet := os.LookupEnv(name + "_FILE")
+	if directSet && fileSet {
+		return "", fmt.Errorf("%s and %s_FILE cannot both be set", name, name)
+	}
+	production := environment == "Test" || environment == "Release"
+	if environment != "" && !production {
+		return "", errors.New("STOCK_AI_ENVIRONMENT must be exactly Test or Release")
+	}
+	if production && !fileSet {
+		return "", fmt.Errorf("%s_FILE is required in %s", name, environment)
+	}
+	if fileSet {
+		namespace := "stock-ai-" + strings.ToLower(environment)
+		if production && filepath.Base(fileName) != namespace+"_"+logicalName {
+			return "", fmt.Errorf("%s_FILE is outside the %s secret namespace", name, namespace)
+		}
+		info, err := os.Lstat(fileName)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", fmt.Errorf("%s_FILE must name a readable regular file", name)
+		}
+		raw, err := os.ReadFile(fileName)
+		if err != nil {
+			return "", fmt.Errorf("%s_FILE is unreadable", name)
+		}
+		value := strings.TrimSpace(string(raw))
+		if value == "" {
+			return "", fmt.Errorf("%s_FILE is empty", name)
+		}
+		if production {
+			if err := validateProductionSecret(value, strings.HasSuffix(logicalName, "_key")); err != nil {
+				return "", fmt.Errorf("%s_FILE is invalid: %w", name, err)
+			}
+		}
+		return value, nil
+	}
+	return direct, nil
+}
+
+func validateProductionSecret(value string, key bool) error {
+	lower := strings.ToLower(value)
+	for _, marker := range []string{"change-me", "changeme", "placeholder", "example", "fixture", "password", "dev-secret", "secret-token"} {
+		if strings.Contains(lower, marker) {
+			return errors.New("known development or placeholder value")
+		}
+	}
+	if len(value) < 32 {
+		return errors.New("fewer than 32 bytes")
+	}
+	characters := make(map[rune]struct{})
+	for _, character := range value {
+		characters[character] = struct{}{}
+	}
+	if len(characters) < 16 {
+		return errors.New("insufficient character diversity")
+	}
+	if key {
+		decoded, err := base64.StdEncoding.DecodeString(value)
+		if err != nil || len(decoded) != 32 || base64.StdEncoding.EncodeToString(decoded) != value {
+			return errors.New("must be canonical base64 encoding of exactly 32 bytes")
+		}
+		bytes := make(map[byte]struct{})
+		for _, item := range decoded {
+			bytes[item] = struct{}{}
+		}
+		if len(bytes) < 16 || string(decoded[:16]) == string(decoded[16:]) {
+			return errors.New("decoded key has insufficient randomness")
+		}
+	}
+	return nil
 }
 
 func (c *Config) validate() error {

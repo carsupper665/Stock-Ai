@@ -24,7 +24,8 @@ var (
 
 // Store 是所有資料庫操作的唯一入口。
 type Store struct {
-	db *gorm.DB
+	db       *gorm.DB
+	tokenKey []byte
 }
 
 // Open 依設定連上資料庫。正式環境用 postgres，測試環境用 sqlite。
@@ -54,7 +55,7 @@ func Open(cfg *config.Config, log *logging.Logger) (*Store, error) {
 		sqlDB.SetMaxOpenConns(1)
 	}
 
-	store := &Store{db: db}
+	store := &Store{db: db, tokenKey: append([]byte(nil), cfg.AccountTokenKey...)}
 	if err := store.Ping(context.Background()); err != nil {
 		return nil, fmt.Errorf("資料庫無回應 (%s): %w", cfg.DBDriver, err)
 	}
@@ -109,6 +110,9 @@ func (s *Store) Ping(ctx context.Context) error {
 func (s *Store) Migrate() error {
 	if err := s.db.AutoMigrate(&Account{}, &Order{}, &Position{}, &Trade{}, &Message{}, &MessageTag{}, &LedgerEntry{}); err != nil {
 		return fmt.Errorf("建立資料表失敗: %w", err)
+	}
+	if err := s.migrateAccountTokens(); err != nil {
+		return fmt.Errorf("protect Account tokens: %w", err)
 	}
 	return nil
 }

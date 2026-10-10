@@ -29,6 +29,10 @@ func New(config Config) (http.Handler, error) {
 	if config.UserToken == "" || config.AgentToken == "" || config.GatewayAdminToken == "" || config.GatewayRuntimeToken == "" || config.Public == nil {
 		return nil, errors.New("console credentials and public filesystem are required")
 	}
+	if config.UserToken == config.AgentToken || config.UserToken == config.GatewayAdminToken || config.UserToken == config.GatewayRuntimeToken ||
+		config.AgentToken == config.GatewayAdminToken || config.AgentToken == config.GatewayRuntimeToken || config.GatewayAdminToken == config.GatewayRuntimeToken {
+		return nil, errors.New("console credential roles must be distinct")
+	}
 	backend, err := proxy(config.BackendURL, "", nil)
 	if err != nil {
 		return nil, err

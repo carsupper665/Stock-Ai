@@ -22,9 +22,18 @@ func main() {
 }
 
 func run() error {
-	adminToken := os.Getenv("LLM_SERVER_ADMIN_TOKEN")
-	runtimeToken := os.Getenv("LLM_SERVER_RUNTIME_TOKEN")
-	masterKey := os.Getenv("LLM_SERVER_MASTER_KEY")
+	adminToken, err := secret("LLM_SERVER_ADMIN_TOKEN", "llm_admin_token")
+	if err != nil {
+		return err
+	}
+	runtimeToken, err := secret("LLM_SERVER_RUNTIME_TOKEN", "llm_runtime_token")
+	if err != nil {
+		return err
+	}
+	masterKey, err := secret("LLM_SERVER_MASTER_KEY", "llm_master_key")
+	if err != nil {
+		return err
+	}
 	dbPath := envOrDefault("LLM_SERVER_DB_PATH", "llm-provider.db")
 	address := envOrDefault("LLM_SERVER_ADDR", "127.0.0.1:8090")
 	timeout, err := time.ParseDuration(envOrDefault("LLM_SERVER_PROVIDER_TIMEOUT", "30s"))

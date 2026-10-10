@@ -90,6 +90,18 @@ func run(logger *log.Logger) (runErr error) {
 }
 
 func processConfig() (agent.RuntimeConfig, string, time.Duration, error) {
+	adminToken, err := secret("AGENT_SERVER_ADMIN_TOKEN", "agent_admin_token")
+	if err != nil {
+		return agent.RuntimeConfig{}, "", 0, err
+	}
+	backendUserToken, err := secret("AGENT_SERVER_BACKEND_USER_TOKEN", "backend_user_token")
+	if err != nil {
+		return agent.RuntimeConfig{}, "", 0, err
+	}
+	gatewayRuntimeToken, err := secret("AGENT_SERVER_GATEWAY_RUNTIME_TOKEN", "llm_runtime_token")
+	if err != nil {
+		return agent.RuntimeConfig{}, "", 0, err
+	}
 	defaultMaxLoop, err := envPositiveInt("AGENT_SERVER_DEFAULT_MAX_LOOP", 20)
 	if err != nil {
 		return agent.RuntimeConfig{}, "", 0, err
@@ -117,11 +129,11 @@ func processConfig() (agent.RuntimeConfig, string, time.Duration, error) {
 	config := agent.RuntimeConfig{
 		DatabasePath:        envString("AGENT_SERVER_DB_PATH", "agent-server.db"),
 		HistoryDirectory:    envString("AGENT_SERVER_HISTORY_DIR", "agent-history"),
-		AdminToken:          os.Getenv("AGENT_SERVER_ADMIN_TOKEN"),
+		AdminToken:          adminToken,
 		BackendURL:          os.Getenv("AGENT_SERVER_BACKEND_URL"),
-		BackendUserToken:    os.Getenv("AGENT_SERVER_BACKEND_USER_TOKEN"),
+		BackendUserToken:    backendUserToken,
 		GatewayURL:          os.Getenv("AGENT_SERVER_GATEWAY_URL"),
-		GatewayRuntimeToken: os.Getenv("AGENT_SERVER_GATEWAY_RUNTIME_TOKEN"),
+		GatewayRuntimeToken: gatewayRuntimeToken,
 		DefaultPrompt:       envString("AGENT_SERVER_DEFAULT_PROMPT", "You are an autonomous trading agent."),
 		DefaultMaxLoop:      defaultMaxLoop,
 		DefaultMaxToolCall:  defaultMaxToolCall,
