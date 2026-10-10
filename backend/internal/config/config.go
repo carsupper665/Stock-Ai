@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,7 +15,13 @@ import (
 
 // Config 是整個 backend 的執行期設定，全部來自環境變數或 .env。
 type Config struct {
-	UserToken string // USER 的固定 token
+	UserToken            string // 僅明確啟用時作為非 Release 靜態 USER token
+	AllowStaticUserToken bool
+	OIDCIssuer           string
+	OIDCAudience         string
+	OIDCUserSubject      string
+	OIDCJWKSURL          string
+	OIDCTokenType        string
 	// AccountTokenKey encrypts Account tokens at rest. It is mandatory in Test/Release.
 	AccountTokenKey []byte
 	UserName        string // USER 在留言板上的公開名稱
@@ -43,9 +50,19 @@ func Load(envPath string) (*Config, error) {
 	if err := loadEnvFile(envPath); err != nil {
 		return nil, err
 	}
-	userToken, err := Secret("USER_TOKEN", "backend_user_token")
+	allowStaticUserToken, err := envBoolStrict("ALLOW_STATIC_USER_TOKEN", false)
 	if err != nil {
 		return nil, err
+	}
+	if os.Getenv("STOCK_AI_ENVIRONMENT") == "Release" && allowStaticUserToken {
+		return nil, errors.New("ALLOW_STATIC_USER_TOKEN is forbidden in Release")
+	}
+	var userToken string
+	if allowStaticUserToken {
+		userToken, err = Secret("USER_TOKEN", "backend_user_token")
+		if err != nil {
+			return nil, err
+		}
 	}
 	accountTokenKey, err := Secret("ACCOUNT_TOKEN_KEY", "backend_account_token_key")
 	if err != nil {
@@ -60,15 +77,21 @@ func Load(envPath string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		UserToken:       userToken,
-		AccountTokenKey: decodedAccountTokenKey,
-		UserName:        envString("USER_NAME", "USER"),
-		Port:            envString("PORT", "7794"),
-		DBDriver:        envString("DB_DRIVER", "sqlite"),
-		DBDSN:           envString("DB_DSN", "backend.db"),
-		LogDir:          envString("LOG_DIR", "logs"),
-		LogMaxLines:     envInt("LOG_MAX_LINES", 100000),
-		Debug:           envBool("DEBUG", false),
+		UserToken:            userToken,
+		AllowStaticUserToken: allowStaticUserToken,
+		OIDCIssuer:           strings.TrimSpace(os.Getenv("OIDC_ISSUER")),
+		OIDCAudience:         strings.TrimSpace(os.Getenv("OIDC_AUDIENCE")),
+		OIDCUserSubject:      strings.TrimSpace(os.Getenv("OIDC_USER_SUBJECT")),
+		OIDCJWKSURL:          strings.TrimSpace(os.Getenv("OIDC_JWKS_URL")),
+		OIDCTokenType:        envString("OIDC_TOKEN_TYPE", "at+jwt"),
+		AccountTokenKey:      decodedAccountTokenKey,
+		UserName:             envString("USER_NAME", "USER"),
+		Port:                 envString("PORT", "7794"),
+		DBDriver:             envString("DB_DRIVER", "sqlite"),
+		DBDSN:                envString("DB_DSN", "backend.db"),
+		LogDir:               envString("LOG_DIR", "logs"),
+		LogMaxLines:          envInt("LOG_MAX_LINES", 100000),
+		Debug:                envBool("DEBUG", false),
 	}
 
 	if cfg.FeeRateMaker, err = envFloat("FEE_RATE_MAKER", 0.0002); err != nil {
@@ -170,8 +193,38 @@ func validateProductionSecret(value string, key bool) error {
 }
 
 func (c *Config) validate() error {
-	if c.UserToken == "" {
-		return errors.New("USER_TOKEN 未設定：這是 USER 身分的唯一憑證，必須在 .env 指定")
+	environment := os.Getenv("STOCK_AI_ENVIRONMENT")
+	if environment == "Release" && c.AllowStaticUserToken {
+		return errors.New("ALLOW_STATIC_USER_TOKEN is forbidden in Release")
+	}
+	if c.AllowStaticUserToken && c.UserToken == "" {
+		return errors.New("USER_TOKEN is required when ALLOW_STATIC_USER_TOKEN is enabled")
+	}
+	oidcValues := []string{c.OIDCIssuer, c.OIDCAudience, c.OIDCUserSubject, c.OIDCJWKSURL}
+	oidcCount := 0
+	for _, value := range oidcValues {
+		if value != "" {
+			oidcCount++
+		}
+	}
+	if oidcCount != 0 && oidcCount != len(oidcValues) {
+		return errors.New("OIDC_ISSUER, OIDC_AUDIENCE, OIDC_USER_SUBJECT, OIDC_JWKS_URL, and OIDC_TOKEN_TYPE must be configured together")
+	}
+	if oidcCount == 0 && !c.AllowStaticUserToken {
+		return errors.New("OIDC configuration is required when static USER authentication is disabled")
+	}
+	if oidcCount == len(oidcValues) {
+		issuer, issuerErr := url.Parse(c.OIDCIssuer)
+		jwks, jwksErr := url.Parse(c.OIDCJWKSURL)
+		if issuerErr != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.RawQuery != "" || issuer.Fragment != "" {
+			return errors.New("OIDC_ISSUER must be an exact HTTPS issuer URL")
+		}
+		if jwksErr != nil || jwks.Scheme != "https" || jwks.Host == "" || jwks.User != nil || jwks.Fragment != "" {
+			return errors.New("OIDC_JWKS_URL must be an HTTPS URL")
+		}
+		if strings.TrimSpace(c.OIDCTokenType) == "" {
+			return errors.New("OIDC_TOKEN_TYPE must not be empty")
+		}
 	}
 	if c.DBDriver != "sqlite" && c.DBDriver != "postgres" {
 		return fmt.Errorf("DB_DRIVER 只支援 sqlite 或 postgres，收到 %q", c.DBDriver)
@@ -249,6 +302,18 @@ func envBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return v
+}
+
+func envBoolStrict(key string, fallback bool) (bool, error) {
+	raw, exists := os.LookupEnv(key)
+	if !exists || raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", key)
+	}
+	return value, nil
 }
 
 // envDuration 讀取時間長度，接受 Go 的寫法（例如 1.5s、60s、200ms）。

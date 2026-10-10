@@ -27,7 +27,7 @@ function New-Fixture([string]$Name, [switch]$WithoutEnvironment) {
     Write-Text (Join-Path $root 'synthetic-launch.json') @'
 {
   "configurations": [
-    { "runtimeArgs": ["$env:USER_TOKEN='fixture-user'; $env:USER_NAME='Fixture'; $env:AGENT_SERVER_ADMIN_TOKEN='fixture-agent'; $env:LLM_SERVER_ADMIN_TOKEN='fixture-admin'; $env:LLM_SERVER_RUNTIME_TOKEN='fixture-runtime'; $env:LLM_SERVER_MASTER_KEY='fixture-master'"] }
+    { "runtimeArgs": ["$env:ALLOW_STATIC_USER_TOKEN='true'; $env:USER_TOKEN='fixture-user'; $env:USER_NAME='Fixture'; $env:AGENT_SERVER_ADMIN_TOKEN='fixture-agent'; $env:LLM_SERVER_ADMIN_TOKEN='fixture-admin'; $env:LLM_SERVER_RUNTIME_TOKEN='fixture-runtime'; $env:LLM_SERVER_MASTER_KEY='fixture-master'"] }
   ]
 }
 '@
