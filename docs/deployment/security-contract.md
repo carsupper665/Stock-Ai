@@ -133,12 +133,14 @@ only these authenticated response headers to Console:
 Nginx never originates an authenticated identity value.
 
 `Authorization` is handled by route rather than trusted as an identity header.
-Nginx removes it on browser-session, authentication, static, `/agent`, and `/llm`
-requests. It may preserve an opaque Bearer value only on `/v1`, where Console
-passes it unchanged and Backend validates it as an Account token. For an OIDC
-session Console discards browser Authorization and creates the Backend bearer
-from the verified Gateway access token. `Cookie` is sent only to the Gateway and
-Console session boundary and is removed before Backend, Agent, or LLM proxying.
+Nginx removes it on authentication, static, `/agent`, and `/llm` requests. It may
+preserve an opaque Bearer value only on `/v1`, where Console passes it unchanged
+and Backend validates it as an Account token. An explicit `/v1` Bearer always
+selects Account delegation, even when the browser also has an OIDC session;
+without that explicit Bearer, Console creates the Backend bearer from the
+verified Gateway access token. JWT-shaped browser Bearers are rejected. `Cookie`
+is sent only to the Gateway and Console session boundary and is removed before
+Backend, Agent, or LLM proxying.
 
 Console MUST independently verify the access token or a signed assertion including
 issuer, audience, subject and expiry before credential substitution. It strips all
@@ -171,9 +173,9 @@ owner fixes it.
 
 | ID | Severity | Status | Reproduction / evidence | Intended control | Owner | Ticket |
 |---|---|---|---|---|---|---|
-| R-001 | Critical | Open | Start current Backend/Console with a static `USER_TOKEN`; the same bearer grants human USER and private-service elevation. | Production rejects static USER auth; validate OIDC token and separate service identities. | Backend Owner | 02, 03, 05 |
+| R-001 | Critical | Closed | `backend/internal/config/config_test.go` proves Release rejects static USER auth; `backend/test/backend_oidc_test.go` proves independent Backend OIDC validation; `backend/test/console_test.go` proves Console no longer accepts or loads `USER_TOKEN` before private credential substitution. | Production rejects static USER auth; Backend and Console independently validate the OIDC identity and retain separate service identities. | Backend Owner | 02, 03, 05 |
 | R-002 | Critical | Closed | `oidc_gateway/internal/gateway/gateway_test.go` proves confidential Authorization Code, state/nonce/S256 PKCE, one-time callback, secure server session, expiry/logout, fixation resistance, and every listed failure; `frontend/test/oidc-browser.test.js` proves the browser flow has no token storage. | Confidential Gateway plus browser/session negative tests; live edge/IdP repetition is gated by Tickets 09–10. | Identity Owner | 04 |
-| R-003 | Critical | Open | Current Console accepts the static USER bearer before injecting Agent/LLM credentials. | Independently verify environment-local OIDC identity; strip spoofed headers; replace credentials only per matrix. | Console Owner | 05 |
+| R-003 | Critical | Closed | `backend/test/console_test.go` proves environment-local OIDC signature/issuer/audience/subject verification, denial without upstream contact, trusted-header removal, route-specific credential substitution, auth-failure translation, and response non-disclosure. | Console independently verifies Gateway assertions, strips boundary headers, and substitutes credentials only per the authorization matrix. | Console Owner | 05 |
 | R-004 | High | Open | `backend/main.go` defaults to `:<PORT>` and a host run exposes Backend on all interfaces. | Container-only private bind/network; no host port publication; automated port checks. | Platform Owner | 08 |
 | R-005 | Critical | Closed | `scripts/test/test_production_secrets.py` rejects weak, missing, duplicate, wrong-namespace and disclosed values; `scripts/production-secrets.ps1` applies and validates Windows ACLs without printing values. | Destination-generated secret mounts, strength/isolation validation, ACLs and disclosure tests. | Security Owner | 02 |
 | R-006 | High | Closed | `backend/internal/database/account_encryption_test.go` proves plaintext migration, AES-GCM storage, keyed lookup, transaction propagation, and wrong-key failure; Ticket 13 retains encrypted-backup controls. | Encrypt Account tokens at rest with a destination key, preserve the key with protected backups, and fail closed on a mismatched retained database. | Backend Owner | 02, 13 |

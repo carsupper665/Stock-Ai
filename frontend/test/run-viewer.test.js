@@ -162,7 +162,7 @@ it('downloads the authenticated whole History shard with a safe filename and rev
   await vi.waitFor(() => expect(clicked).toBeTruthy())
 
   expect(fetch).toHaveBeenCalledWith('/agent/api/v1/sessions/unsafe%2F..%2F%3Csession%3E/runs/21/history', expect.objectContaining({
-    method: 'GET', headers: { Authorization: 'Bearer console-user' },
+    method: 'GET', headers: {},
   }))
   expect(clicked).toEqual({ href: 'blob:history', download: 'history-unsafe_session_-runs-21-40.json' })
   expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
@@ -221,7 +221,7 @@ it('Retry button sends the failed Run retry action and reports the new retry Run
   await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
   const [url, request] = fetch.mock.calls.find(([, options]) => options.method === 'POST')
   expect(url).toBe('/agent/api/v1/sessions/session_1/runs/4/retry')
-  expect(request.headers.Authorization).toBe('Bearer console-user')
+  expect(request.headers.Authorization).toBeUndefined()
   await nextTick()
   await vi.waitFor(() => expect(document.body.textContent).toContain('Retry 1 / 3'))
 })

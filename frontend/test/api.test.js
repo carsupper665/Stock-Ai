@@ -84,10 +84,10 @@ it('三個服務三種錯誤信封都拆成同樣的 code／message', async () =
   }
 })
 
-it('管理路由先用 USER token 驗證 console，401 會登出', async () => {
+it('管理路由只用 Gateway cookie 驗證 console，401 會登出', async () => {
   const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond(401, { status_code: 401, error: 'UNAUTHORIZED', msg: 'admin credentials required' }))
   const err = await api('GET', '/agent/api/v1/sessions', undefined, null).catch((e) => e)
-  expect(fetch.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer ut_me' })
+  expect(fetch.mock.calls[0][1].headers).toEqual({})
   expect(err.status).toBe(401)
 	expect(location.assign).toHaveBeenCalledWith('/login?expired=1')
 })
