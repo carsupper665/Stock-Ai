@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"backend/internal/auth"
 	"backend/internal/config"
 	"backend/internal/console"
 )
@@ -21,10 +22,6 @@ func main() {
 }
 
 func run() error {
-	userToken, err := config.Secret("USER_TOKEN", "backend_user_token")
-	if err != nil {
-		return err
-	}
 	agentToken, err := config.Secret("AGENT_SERVER_ADMIN_TOKEN", "agent_admin_token")
 	if err != nil {
 		return err
@@ -38,7 +35,11 @@ func run() error {
 		return err
 	}
 	handler, err := console.New(console.Config{
-		UserToken: userToken, AgentToken: agentToken,
+		OIDC: &auth.OIDCSettings{
+			Issuer: os.Getenv("OIDC_ISSUER"), Audience: os.Getenv("OIDC_AUDIENCE"), Subject: os.Getenv("OIDC_USER_SUBJECT"),
+			JWKSURL: os.Getenv("OIDC_JWKS_URL"), TokenType: env("OIDC_TOKEN_TYPE", "at+jwt"),
+		},
+		AgentToken:        agentToken,
 		GatewayAdminToken: llmAdminToken, GatewayRuntimeToken: llmRuntimeToken,
 		BackendURL: os.Getenv("BACKEND_URL"), AgentURL: os.Getenv("AGENT_SERVER_URL"), GatewayURL: os.Getenv("LLM_SERVER_URL"),
 		Public: os.DirFS(env("CONSOLE_PUBLIC_DIR", "public")),

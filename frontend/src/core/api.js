@@ -11,7 +11,10 @@ const messageOf = (d) => d.message ?? d.msg ?? d.error?.message
 async function request(method, path, body, token, sessionBound) {
   const consoleRoute = path.startsWith('/agent/') || path.startsWith('/llm/')
   if (consoleRoute) {
-    token = session.token
+    // Private-service routes are authenticated only by the HttpOnly Gateway
+    // session. Browser Bearers have Account-only semantics and must never be
+    // presented to Console's Agent/LLM boundary.
+    token = null
     sessionBound = true
   }
   const headers = {}

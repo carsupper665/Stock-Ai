@@ -27,7 +27,7 @@ it('新增模型送到管理端點，保留 Provider 對應、模型及 level op
   await vi.waitFor(() => expect(saved).toHaveBeenCalledWith({ model_name: 'new-choice' }))
   const [url, request] = fetch.mock.calls[0]
   expect(url).toBe('/llm/v1/model-catalog')
-  expect(request.headers.Authorization).toBe('Bearer console-user')
+  expect(request.headers.Authorization).toBeUndefined()
   expect(JSON.parse(request.body)).toMatchObject({ model_name: 'new-choice', provider_id: 'new-provider', model: 'actual-model', levels: { high: { reasoning_effort: 'high' } } })
 })
 
@@ -60,7 +60,7 @@ it('History 與監控使用 Agent HTTP，不在瀏覽器取得 Account Token', a
   await getUsage('s_1')
   await getToolStats('s_1')
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/agent/api/v1/sessions/s_1/runs/21/history', '/agent/api/v1/sessions/s_1/ledger?before_seq=99', '/agent/api/v1/sessions/s_1/usage', '/agent/api/v1/sessions/s_1/tools/stats'])
-  expect(fetch.mock.calls.every(([, request]) => request.headers.Authorization === 'Bearer console-user')).toBe(true)
+  expect(fetch.mock.calls.every(([, request]) => request.headers.Authorization === undefined)).toBe(true)
 })
 
 it('新增 Provider 可選 Codex／Claude Code，CLI 模式不要求 URL', async () => {

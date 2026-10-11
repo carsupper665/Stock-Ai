@@ -302,7 +302,7 @@ cd llm_provider_server && go run ./cmd/llm-provider-server  # :8090   LLM_SERVER
 cd frontend && npm install && npm run dev                   # :5173
 ```
 
-代理（`vite.config.js`）：
+本機開發代理（`vite.config.js`，不代表 production 的信任邊界）：
 
 | 瀏覽器打 | 轉到 | 注入 |
 |---|---|---|
@@ -312,7 +312,10 @@ cd frontend && npm install && npm run dev                   # :5173
 | `/llm/v1/models` | LLM Server `/v1/models` | `Bearer $LLM_SERVER_RUNTIME_TOKEN`（模型目錄只認 runtime 憑證） |
 | `/llm/*` | LLM Server `/*`（去掉 `/llm`） | `Bearer $LLM_SERVER_ADMIN_TOKEN` |
 
-注入用 `proxyReq.setHeader`，會蓋掉瀏覽器送的 Authorization。為什麼要前綴：交易後端與 LLM Server 都用 `/v1`，同源會撞（待定 11）。
+本機開發注入用 `proxyReq.setHeader`，會蓋掉瀏覽器送的 Authorization。Production
+一律由 Console 驗證 Gateway access token 與 subject 後才注入，且瀏覽器不得對
+`/agent`、`/llm` 送 Authorization。為什麼要前綴：交易後端與 LLM Server 都用
+`/v1`，同源會撞（待定 11）。
 
 `.env.example`（實際值放 `.env.local`，已在 `.gitignore`）：
 

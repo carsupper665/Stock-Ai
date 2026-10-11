@@ -92,7 +92,7 @@ async function create() {
 
         <section class="card col">
           <div class="row"><span class="eyebrow grow">模型目錄</span><button data-tone="acc" :disabled="!data.length" @click="editingModel = null">+ 新增模型</button></div>
-          <p v-if="models.error.value" class="note" data-tone="warn">拿不到：{{ models.error.value.message }}（要在代理設定 LLM_SERVER_RUNTIME_TOKEN）</p>
+          <p v-if="models.error.value" class="note" data-tone="warn">拿不到：{{ models.error.value.message }}（請檢查 Console 的 LLM runtime credential）</p>
           <div v-else-if="models.data.value" class="rows">
             <div v-for="m in models.data.value" :key="m.model_name" class="row">
               <span class="mono">{{ m.model_name }}</span>
