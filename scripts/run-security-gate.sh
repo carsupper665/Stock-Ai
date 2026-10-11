@@ -10,6 +10,7 @@ cd "$root"
 git diff --quiet
 git diff --cached --quiet
 test -z "$(git ls-files --others --exclude-standard)"
+test "$(go env GOVERSION)" = "go1.27.2"
 revision=$(git rev-parse HEAD)
 mkdir -p "$artifact_dir"
 
@@ -43,6 +44,59 @@ for module in backend agent_server llm_provider_server oidc_gateway; do
     (cd "$module" && go vet ./...) >"$artifact_dir/go-vet-$module.log" 2>&1
     (cd "$module" && "$govulncheck" -json ./...) >"$artifact_dir/govulncheck-$module.json"
 done
+
+python3 - "$artifact_dir" <<'PY'
+import json
+import pathlib
+import sys
+
+artifact_dir = pathlib.Path(sys.argv[1])
+projects = {
+    "backend": "backend",
+    "agent_server": "stock-ai/agent-server",
+    "llm_provider_server": "stock-ai/llm-provider-server",
+    "oidc_gateway": "oidc_gateway",
+}
+allowed = {
+    "GO-2026-5932": {
+        "severity": "informational",
+        "owner": "Stock AI release owner",
+        "control": "The vulnerable openpgp package is not imported or called; this gate blocks if a project call trace appears.",
+        "expiry": "2027-01-31",
+    }
+}
+summary = {"status": "pass", "called_findings": [], "exceptions": []}
+for name, project in projects.items():
+    text = (artifact_dir / f"govulncheck-{name}.json").read_text(encoding="utf-8")
+    decoder = json.JSONDecoder()
+    offset = 0
+    while offset < len(text):
+        while offset < len(text) and text[offset].isspace():
+            offset += 1
+        if offset == len(text):
+            break
+        item, offset = decoder.raw_decode(text, offset)
+        finding = item.get("finding")
+        if finding is None:
+            continue
+        advisory = finding["osv"]
+        called = any(frame.get("module") == project and frame.get("function") for frame in finding.get("trace", []))
+        if called:
+            summary["called_findings"].append({"module": name, "advisory": advisory})
+        elif advisory in allowed and not any(exception["advisory"] == advisory for exception in summary["exceptions"]):
+            summary["exceptions"].append({"advisory": advisory, **allowed[advisory]})
+        elif advisory not in allowed:
+            summary["status"] = "fail"
+            summary.setdefault("unapproved_findings", []).append({"module": name, "advisory": advisory})
+
+if summary["called_findings"]:
+    summary["status"] = "fail"
+with (artifact_dir / "govulncheck-summary.json").open("w", encoding="utf-8") as handle:
+    json.dump(summary, handle, indent=2)
+    handle.write("\n")
+if summary["status"] != "pass":
+    raise SystemExit("Go vulnerability policy failed")
+PY
 
 python3 scripts/validate_security_contract.py >"$artifact_dir/security-contract.log"
 
