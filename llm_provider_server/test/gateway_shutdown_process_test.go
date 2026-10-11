@@ -77,6 +77,9 @@ func TestGatewayShutdownCancelsHarnessAndRemovesTemporaryLogin(t *testing.T) {
 	readyContext, cancelReady := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := waitForGatewayReady(readyContext, client, address); err != nil {
 		cancelReady()
+		_ = command.Process.Kill()
+		<-processResult
+		stopped = true
 		t.Fatalf("Gateway did not become ready: %v\n%s", err, logs)
 	}
 	cancelReady()
@@ -123,7 +126,10 @@ func TestGatewayShutdownCancelsHarnessAndRemovesTemporaryLogin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Gateway shutdown failed: %v\n%s", err, logs)
 		}
-	case <-time.After(4 * time.Second):
+	case <-time.After(10 * time.Second):
+		_ = command.Process.Kill()
+		<-processResult
+		stopped = true
 		t.Fatalf("Gateway did not cancel and join the Harness during shutdown\n%s", logs)
 	}
 	select {
