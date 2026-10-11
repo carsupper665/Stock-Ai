@@ -5,7 +5,8 @@ import { useRoute } from 'vue-router'
 import { api } from './core/api.js'
 import { sync } from './core/load.js'
 import { nav } from './core/pages.js'
-import { logout, session } from './core/session.js'
+import * as oidc from './core/providers/oidc.js'
+import { isAuthenticated, session } from './core/session.js'
 import { setTheme } from './core/theme.js'
 import Confirm from './shared/Confirm.vue'
 import { relTime } from './shared/format.js'
@@ -39,6 +40,7 @@ async function probe(s) {
   }
 }
 const probeAll = () => services.forEach(probe)
+function logout() { oidc.logout() }
 
 const now = ref(Date.now())
 let tick, poll
@@ -55,7 +57,7 @@ watch(() => sync.key, probeAll)
 </script>
 
 <template>
-  <div v-if="session.token" id="shell">
+  <div v-if="isAuthenticated()" id="shell">
     <aside>
       <div class="row logo"><i class="dot square" data-tone="acc"></i><b>Agent 控制台</b></div>
       <div class="col services">
@@ -76,7 +78,7 @@ watch(() => sync.key, probeAll)
           <span class="grow"></span>
           <button class="text" @click="logout">登出</button>
         </div>
-        <div class="mono small" data-tone="mute">USER Token 登入 · 重新整理不掉<br />關閉分頁即登出</div>
+        <div class="mono small" data-tone="mute">安全工作階段 · token 不進入瀏覽器儲存空間</div>
       </div>
     </aside>
 

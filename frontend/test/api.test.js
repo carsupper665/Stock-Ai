@@ -59,7 +59,7 @@ it('後端掛掉時代理回的空 502 也要拿得到狀態碼', async () => {
 it('自己的 token 收到 401 會登出', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond(401, { error: 'unauthorized', message: 'token 無效' }))
   await api('GET', '/v1/accounts').catch(() => {})
-  expect(location.assign).toHaveBeenCalledWith('/login')
+	expect(location.assign).toHaveBeenCalledWith('/login?expired=1')
   expect(sessionStorage.getItem('token')).toBeNull()
 })
 
@@ -89,5 +89,5 @@ it('管理路由先用 USER token 驗證 console，401 會登出', async () => {
   const err = await api('GET', '/agent/api/v1/sessions', undefined, null).catch((e) => e)
   expect(fetch.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer ut_me' })
   expect(err.status).toBe(401)
-  expect(location.assign).toHaveBeenCalledWith('/login')
+	expect(location.assign).toHaveBeenCalledWith('/login?expired=1')
 })
