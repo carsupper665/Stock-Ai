@@ -57,6 +57,20 @@ func newFixture(t *testing.T) (*Server, *fakeIDP) {
 	return s, f
 }
 
+func TestSecurityGateHeaders(t *testing.T) {
+	s, _ := newFixture(t)
+	response := httptest.NewRecorder()
+	s.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "https://app.example/oauth2/me", nil))
+	for name, want := range map[string]string{
+		"Cache-Control": "no-store", "Pragma": "no-cache",
+		"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+	} {
+		if got := response.Header().Get(name); got != want {
+			t.Errorf("%s=%q, want %q", name, got, want)
+		}
+	}
+}
+
 func (f *fakeIDP) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/realms/stock-ai-test/jwks":

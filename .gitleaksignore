@@ -1,0 +1,5 @@
+# Deterministic cryptographic and disclosure-test fixtures; exact fingerprints only.
+backend/internal/config/config_test.go:generic-api-key:123
+llm_provider_server/test/diagnostic_security_http_test.go:generic-api-key:86
+llm_provider_server/test/token_http_test.go:generic-api-key:99
+llm_provider_server/test/provider_http_test.go:generic-api-key:22

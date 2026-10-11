@@ -48,9 +48,6 @@ func AccessLog(l *Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
-		if raw := c.Request.URL.RawQuery; raw != "" {
-			path = path + "?" + raw
-		}
 
 		c.Next()
 
