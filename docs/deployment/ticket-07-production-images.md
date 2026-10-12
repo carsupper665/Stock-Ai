@@ -13,7 +13,8 @@ containing browser assets. No runtime stage copies a source directory.
 The executable evidence gate is `scripts/build-production-images.ps1`. It
 requires a clean checkout and Linux Docker daemon, builds with maximal
 provenance plus SBOM attestations, exports an SPDX SBOM, scans Critical/High
-with a failing exit code, inventories the flattened runtime filesystem, and
+anonymously with the digest-pinned official Trivy 0.75.0 image and a failing
+exit code, inventories the flattened runtime filesystem, and
 rejects forbidden files and tools. Its sealed `provenance.json` identifies all
 dependency inputs needed to compare a same-revision rebuild.
 

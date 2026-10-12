@@ -20,6 +20,9 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
 $gitSafeDirectory = $root.Replace('\', '/')
 $builder = "stock-ai-evidence-$PID"
 $builderCreated = $false
+$trivyImage = 'aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa'
+$trivyCache = "stock-ai-trivy-cache-$PID"
+$trivyCacheCreated = $false
 Push-Location $root
 try {
     if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
@@ -46,7 +49,13 @@ try {
         throw "Docker must be in Linux-container mode; server OS is '$serverOS'."
     }
     & docker buildx version | Out-Null
-    & docker scout version | Out-Null
+    & docker pull $trivyImage | Out-Null
+    $trivyVersion = ((& docker run --rm $trivyImage --version) -join "`n")
+    if ($trivyVersion -notmatch 'Version:\s+0\.75\.0') {
+        throw "Pinned Trivy image reported an unexpected version: $trivyVersion"
+    }
+    & docker volume create $trivyCache | Out-Null
+    $trivyCacheCreated = $true
     & docker buildx create --name $builder --driver docker-container --bootstrap | Out-Null
     $builderCreated = $true
 
@@ -153,11 +162,35 @@ try {
         }
 
         $sbomPath = Join-Path $EvidenceDirectory "$name-sbom.spdx.json"
-        & docker scout sbom --format spdx --output $sbomPath $tag
-        if ($LASTEXITCODE -ne 0 -or !(Test-Path $sbomPath)) { throw "SBOM generation failed: $name" }
+        $sbomLogPath = Join-Path $EvidenceDirectory "$name-sbom.log"
+        $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        try {
+            & docker run --rm --volume '/var/run/docker.sock:/var/run/docker.sock' `
+                --volume "${trivyCache}:/root/.cache/trivy" $trivyImage image --quiet --scanners vuln `
+                --format spdx-json $tag 2> $sbomLogPath | Set-Content -Encoding utf8NoBOM $sbomPath
+            $sbomExitCode = $LASTEXITCODE
+        } finally {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+        }
+        if ($sbomExitCode -ne 0 -or !(Test-Path $sbomPath) -or (Get-Item $sbomPath).Length -eq 0) {
+            throw "Trivy SPDX SBOM generation failed: $name"
+        }
         $scanPath = Join-Path $EvidenceDirectory "$name-vulnerabilities.sarif"
-        & docker scout cves --only-severity critical,high --exit-code --format sarif --output $scanPath $tag
-        if ($LASTEXITCODE -ne 0) { throw "$name has a Critical/High vulnerability or its scan failed." }
+        $scanLogPath = Join-Path $EvidenceDirectory "$name-vulnerabilities.log"
+        $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        try {
+            & docker run --rm --volume '/var/run/docker.sock:/var/run/docker.sock' `
+                --volume "${trivyCache}:/root/.cache/trivy" $trivyImage image --quiet --scanners vuln `
+                --severity HIGH,CRITICAL --exit-code 1 --format sarif $tag `
+                2> $scanLogPath | Set-Content -Encoding utf8NoBOM $scanPath
+            $scanExitCode = $LASTEXITCODE
+        } finally {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+        }
+        if ($scanExitCode -ne 0) { throw "$name has a Critical/High vulnerability or its Trivy scan failed." }
+        if (!(Test-Path $scanPath) -or (Get-Item $scanPath).Length -eq 0) { throw "Trivy SARIF generation failed: $name" }
 
         $runtimeContainer = "stock-ai-runtime-$name-$PID"
         $runtimeVolume = "stock-ai-runtime-$name-$PID"
@@ -262,7 +295,8 @@ try {
         platform = 'linux/amd64'
         docker = (& docker version --format '{{json .}}' | ConvertFrom-Json)
         buildx = ((& docker buildx version) -join "`n")
-        scout = ((& docker scout version) -join "`n")
+        trivy_image = $trivyImage
+        trivy_version = $trivyVersion
         images = $images
         inputs_sha256 = $inputHashes
     }
@@ -287,8 +321,9 @@ try {
     if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
         throw 'The production build modified the source checkout.'
     }
-    Write-Host "PASS: four production images built and scanned; evidence: $EvidenceDirectory"
+    Write-Host "PASS: four production images built and scanned by pinned Trivy; evidence: $EvidenceDirectory"
 } finally {
     if ($builderCreated) { & docker buildx rm $builder | Out-Null }
+    if ($trivyCacheCreated) { & docker volume rm $trivyCache | Out-Null }
     Pop-Location
 }

@@ -11,6 +11,7 @@ the compiled frontend. Build stages use these immutable official-image indexes:
 |---|---|
 | `golang:1.27.2-alpine3.23` | `sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079` |
 | `node:24.21.0-alpine3.23` | `sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2` |
+| `aquasec/trivy:0.75.0` (acceptance scanner) | `sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa` |
 
 Go 1.27.2 is the exact toolchain accepted by the Ticket 06 gate. Node 24 is the
 supported LTS line used only to compile Console. Alpine is confined to build
@@ -21,7 +22,7 @@ logs, caches, and unrelated repository content before upload to BuildKit.
 
 ## Build and evidence
 
-Install current Docker Desktop with Buildx and Docker Scout, switch it to Linux
+Install current Docker Desktop with Buildx, switch it to Linux
 containers, and use PowerShell 7 from a clean checkout:
 
 ```powershell
@@ -36,13 +37,16 @@ the default Docker driver cannot export attestations. For every image it records
 an OCI archive carrying BuildKit's maximal SLSA provenance and SBOM attestations,
 an SPDX JSON SBOM, the image configuration, the exported
 filesystem inventory, constrained runtime acceptance, a same-input rebuild
-comparison, and a Docker Scout SARIF scan. A Critical or High result
-is fatal. It also fails if an exported filesystem contains source, `.env`, a
+comparison, and an anonymous scan from the digest-pinned Trivy 0.75.0 image.
+Trivy emits both SPDX JSON and SARIF; `HIGH,CRITICAL --exit-code 1` makes either
+severity, a database/download failure, or a missing report fatal. It also fails
+if an exported filesystem contains source, `.env`, a
 database, a log, an authentication file, compiler, shell, package manager,
 download client, Node, npm, or other forbidden CLI named by the policy.
 
 `provenance.json` binds the four image IDs to the Git revision/tree, commit
-timestamp, semantic version, target platform, Docker/Buildx/Scout versions,
+timestamp, semantic version, target platform, Docker/Buildx versions, the exact
+Trivy image digest and reported version,
 and SHA-256 of every Dockerfile and dependency lock input. `SHA256SUMS` seals
 the evidence directory. Preserve that directory unchanged with the Test
 certification record. A rebuild is comparable only when `revision`,

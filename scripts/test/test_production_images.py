@@ -13,6 +13,7 @@ DOCKERFILES = {
 }
 GO_BASE = "golang:1.27.2-alpine3.23@sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079"
 NODE_BASE = "node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2"
+TRIVY_IMAGE = "aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa"
 
 
 class ProductionImagePolicyTest(unittest.TestCase):
@@ -59,8 +60,10 @@ class ProductionImagePolicyTest(unittest.TestCase):
             "--sbom=true",
             "--driver docker-container",
             'type=oci,dest=$ociPath',
-            "docker scout sbom",
-            "docker scout cves --only-severity critical,high --exit-code",
+            TRIVY_IMAGE,
+            "--format spdx-json",
+            "--severity HIGH,CRITICAL --exit-code 1 --format sarif",
+            "trivy_image = $trivyImage",
             "docker export",
             "forbidden runtime files",
             "--read-only",
@@ -78,6 +81,7 @@ class ProductionImagePolicyTest(unittest.TestCase):
             "--untracked-files=all",
         ):
             self.assertIn(control, text)
+        self.assertNotIn("docker scout", text.lower())
         self.assertNotIn("golang:1.27.1", "\n".join(path.read_text(encoding="utf-8") for path in DOCKERFILES.values()))
 
     def test_context_excludes_secrets_tests_and_local_state(self):
