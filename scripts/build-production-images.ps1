@@ -108,12 +108,13 @@ try {
         $secondBuild = Get-Content -Raw $rebuildMetadataPath | ConvertFrom-Json
         $firstDigest = $firstBuild.'containerimage.digest'
         $secondDigest = $secondBuild.'containerimage.digest'
+        $firstMaterials = $firstBuild.'buildx.build.provenance'.materials | ConvertTo-Json -Depth 8 -Compress
+        $secondMaterials = $secondBuild.'buildx.build.provenance'.materials | ConvertTo-Json -Depth 8 -Compress
+        Remove-Item -Force $rebuildOCIPath
         if (!$firstBuild.'buildx.build.provenance' -or !$secondBuild.'buildx.build.provenance' -or
-            !$firstDigest -or !$secondDigest -or $imageID -ne $rebuildImageID -or $firstDigest -ne $secondDigest -or
-            $ociHash -ne $rebuildOCIHash) {
+            !$firstDigest -or !$secondDigest -or $imageID -ne $rebuildImageID -or $firstMaterials -ne $secondMaterials) {
             throw "$name same-input rebuild differs; promotion is blocked."
         }
-        Remove-Item -Force $rebuildOCIPath
 
         $inspectPath = Join-Path $EvidenceDirectory "$name-inspect.json"
         & docker image inspect $tag | Set-Content -Encoding utf8NoBOM $inspectPath
@@ -274,7 +275,7 @@ try {
         sbom = 'pass: SPDX JSON and BuildKit attestation present for every image'
         filesystem_policy = 'pass: forbidden files and tools absent from every flattened image'
         runtime_policy = 'pass: healthy as 65532:65532 with read-only root, bounded resources, CA roots, and declared writable state'
-        reproducibility = 'pass: same-input image IDs and BuildKit result digests match'
+        reproducibility = 'pass: same-input image IDs and provenance materials match; per-invocation attestation envelope digests are recorded'
         images = $images
     } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $EvidenceDirectory 'acceptance-summary.json')
 

@@ -48,10 +48,12 @@ the evidence directory. Preserve that directory unchanged with the Test
 certification record. A rebuild is comparable only when `revision`,
 `source_tree`, `source_date_epoch`, `inputs_sha256`, platform, pinned base
 digests, and Dockerfile version match. Byte identity is required from the
-trimmed static binaries and fixed source epoch. The gate compares image IDs,
-BuildKit result digests, and OCI archive SHA-256 values and blocks on any
-mismatch. Retain both provenance files for independent review; only the first
-identical OCI archive is kept in the sealed evidence directory.
+trimmed static binaries and fixed source epoch. The gate requires image IDs and
+provenance materials to match. BuildKit attestation envelopes include a unique
+build reference and invocation timestamps, so their index/archive digests are
+expected to differ and both values are recorded rather than treated as image
+drift. Retain both provenance files for independent review; only the first OCI
+archive is kept in the sealed evidence directory.
 
 The script deliberately does not publish. Ticket 10 assigns registry digests
 only after Test certification and promotes those exact digests to Release.
