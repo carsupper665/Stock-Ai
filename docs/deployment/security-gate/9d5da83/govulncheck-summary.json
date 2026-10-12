@@ -1,0 +1,13 @@
+{
+  "status": "pass",
+  "called_findings": [],
+  "exceptions": [
+    {
+      "advisory": "GO-2026-5932",
+      "severity": "informational",
+      "owner": "Stock AI release owner",
+      "control": "The vulnerable openpgp package is not imported or called; this gate blocks if a project call trace appears.",
+      "expiry": "2027-01-31"
+    }
+  ]
+}

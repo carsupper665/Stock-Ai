@@ -1,0 +1,11 @@
+{
+  "revision": "9d5da8350c43c25fdea7ef836fdfe46f186c5256",
+  "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "git": "git version 2.43.0",
+  "go": "go version go1.27.2 linux/amd64",
+  "node": "v24.21.0",
+  "npm": "11.19.0",
+  "govulncheck": "Go: go1.27.2\nScanner: govulncheck@v1.9.0\nDB: https://vuln.go.dev\nDB updated: 2026-10-08 22:31:09 +0000 UTC",
+  "gitleaks_install": "github.com/zricethezav/gitleaks/v8@v8.24.2",
+  "gitleaks_binary_sha256": "35ac0466b17b82c959fcb96651fbdd4ea8c311063a8626efe3f0e68eb87fbd59"
+}
