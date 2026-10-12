@@ -16,7 +16,7 @@ function New-EphemeralSecret {
     return [Convert]::ToBase64String($bytes)
 }
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
 $gitSafeDirectory = $root.Replace('\', '/')
 Push-Location $root
 try {
