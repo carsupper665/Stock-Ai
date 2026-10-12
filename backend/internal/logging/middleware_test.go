@@ -39,6 +39,36 @@ func TestAccessLogRecordsRealStatusCode(t *testing.T) {
 	}
 }
 
+func TestAccessLogExcludesQueryValuesAndCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	l, dir := newTestLogger(t, 1000)
+
+	engine := gin.New()
+	engine.Use(RequestID())
+	engine.Use(AccessLog(l))
+	engine.GET("/health", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	request := httptest.NewRequest(http.MethodGet, "/health?access_token=access-secret&client_secret=client-secret", nil)
+	request.Header.Set("Authorization", "Bearer internal-service-secret")
+	request.Header.Set("X-Provider-Token", "provider-secret")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	data, err := os.ReadFile(logFiles(t, dir)[0])
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "/health") {
+		t.Fatalf("access log lost request path: %q", content)
+	}
+	for _, secret := range []string{"access-secret", "client-secret", "internal-service-secret", "provider-secret"} {
+		if strings.Contains(content, secret) {
+			t.Fatalf("access log disclosed %q: %q", secret, content)
+		}
+	}
+}
+
 func TestRequestIDIsSetInHeaderAndLoggedWithRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	l, dir := newTestLogger(t, 1000)

@@ -351,11 +351,14 @@ func TestConsoleServesOnlySafePublicPaths(t *testing.T) {
 	handler, _ := consoleFixture(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("public request reached upstream")
 	}))
-	for _, path := range []string{"/.env", "/../.env", "/assets/missing.js"} {
+	for _, path := range []string{"/.env", "/../.env", "/%2e%2e/.env", `/assets\..\secrets`, "/assets/missing.js"} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("%s=%d", path, response.Code)
+		}
+		if response.Header().Get("X-Content-Type-Options") != "nosniff" || response.Header().Get("Referrer-Policy") != "same-origin" {
+			t.Fatalf("%s missing browser security headers: %v", path, response.Header())
 		}
 	}
 	response := httptest.NewRecorder()
