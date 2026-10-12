@@ -57,6 +57,8 @@ class ProductionImagePolicyTest(unittest.TestCase):
         for control in (
             "--provenance=mode=max",
             "--sbom=true",
+            "--driver docker-container",
+            'type=oci,dest=$ociPath',
             "docker scout sbom",
             "docker scout cves --only-severity critical,high --exit-code",
             "docker export",
@@ -67,6 +69,7 @@ class ProductionImagePolicyTest(unittest.TestCase):
             "State.Health.Status",
             "ca-certificates.crt",
             "same-input rebuild differs",
+            "oci_archive_sha256",
             "critical_high_findings = 0",
             "acceptance-summary.json",
             "source_tree",

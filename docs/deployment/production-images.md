@@ -31,8 +31,10 @@ pwsh -NoProfile -File ./scripts/build-production-images.ps1 `
 ```
 
 The command fails unless the checkout is clean and the Docker daemon reports
-Linux mode. For every image it records BuildKit's maximal SLSA provenance and
-SBOM attestations, an SPDX JSON SBOM, the image configuration, the exported
+Linux mode. It creates an ephemeral `docker-container` BuildKit builder because
+the default Docker driver cannot export attestations. For every image it records
+an OCI archive carrying BuildKit's maximal SLSA provenance and SBOM attestations,
+an SPDX JSON SBOM, the image configuration, the exported
 filesystem inventory, constrained runtime acceptance, a same-input rebuild
 comparison, and a Docker Scout SARIF scan. A Critical or High result
 is fatal. It also fails if an exported filesystem contains source, `.env`, a
@@ -46,9 +48,10 @@ the evidence directory. Preserve that directory unchanged with the Test
 certification record. A rebuild is comparable only when `revision`,
 `source_tree`, `source_date_epoch`, `inputs_sha256`, platform, pinned base
 digests, and Dockerfile version match. Byte identity is required from the
-trimmed static binaries and fixed source epoch. The gate compares both image
-IDs and BuildKit result digests and blocks on either mismatch. Retain both
-provenance files for independent review.
+trimmed static binaries and fixed source epoch. The gate compares image IDs,
+BuildKit result digests, and OCI archive SHA-256 values and blocks on any
+mismatch. Retain both provenance files for independent review; only the first
+identical OCI archive is kept in the sealed evidence directory.
 
 The script deliberately does not publish. Ticket 10 assigns registry digests
 only after Test certification and promotes those exact digests to Release.

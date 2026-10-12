@@ -18,6 +18,8 @@ function New-EphemeralSecret {
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
 $gitSafeDirectory = $root.Replace('\', '/')
+$builder = "stock-ai-evidence-$PID"
+$builderCreated = $false
 Push-Location $root
 try {
     if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
@@ -45,6 +47,8 @@ try {
     }
     & docker buildx version | Out-Null
     & docker scout version | Out-Null
+    & docker buildx create --name $builder --driver docker-container --bootstrap | Out-Null
+    $builderCreated = $true
 
     $agentAdmin = New-EphemeralSecret
     $backendUser = New-EphemeralSecret
@@ -74,27 +78,42 @@ try {
         $name = $service.Name
         $tag = "stock-ai/${name}:$Version"
         $metadataPath = Join-Path $EvidenceDirectory "$name-build-metadata.json"
-        & docker buildx build --platform linux/amd64 --file $service.Dockerfile --tag $tag `
+        $ociPath = Join-Path $EvidenceDirectory "$name-image.oci.tar"
+        & docker buildx build --builder $builder --platform linux/amd64 --file $service.Dockerfile --tag $tag `
             --build-arg "BUILD_DATE=$buildDate" --build-arg "REVISION=$revision" `
             --build-arg "VERSION=$Version" --build-arg "SOURCE_DATE_EPOCH=$sourceDateEpoch" `
-            --provenance=mode=max --sbom=true --metadata-file $metadataPath --load .
+            --provenance=mode=max --sbom=true --metadata-file $metadataPath --output "type=oci,dest=$ociPath" .
         if ($LASTEXITCODE -ne 0) { throw "Image build failed: $name" }
 
         $rebuildTag = "stock-ai/${name}:$Version-rebuild"
         $rebuildMetadataPath = Join-Path $EvidenceDirectory "$name-rebuild-metadata.json"
-        & docker buildx build --platform linux/amd64 --file $service.Dockerfile --tag $rebuildTag `
+        $rebuildOCIPath = Join-Path ([IO.Path]::GetTempPath()) "$name-rebuild-$PID.oci.tar"
+        & docker buildx build --builder $builder --platform linux/amd64 --file $service.Dockerfile --tag $tag `
             --build-arg "BUILD_DATE=$buildDate" --build-arg "REVISION=$revision" `
             --build-arg "VERSION=$Version" --build-arg "SOURCE_DATE_EPOCH=$sourceDateEpoch" `
-            --provenance=mode=max --sbom=true --metadata-file $rebuildMetadataPath --load .
+            --provenance=mode=max --sbom=true --metadata-file $rebuildMetadataPath --output "type=oci,dest=$rebuildOCIPath" .
+        $ociHash = (Get-FileHash -Algorithm SHA256 $ociPath).Hash.ToLowerInvariant()
+        $rebuildOCIHash = (Get-FileHash -Algorithm SHA256 $rebuildOCIPath).Hash.ToLowerInvariant()
+        & docker buildx build --builder $builder --platform linux/amd64 --file $service.Dockerfile --tag $tag `
+            --build-arg "BUILD_DATE=$buildDate" --build-arg "REVISION=$revision" `
+            --build-arg "VERSION=$Version" --build-arg "SOURCE_DATE_EPOCH=$sourceDateEpoch" `
+            --provenance=false --sbom=false --load .
+        & docker buildx build --builder $builder --platform linux/amd64 --file $service.Dockerfile --tag $rebuildTag `
+            --build-arg "BUILD_DATE=$buildDate" --build-arg "REVISION=$revision" `
+            --build-arg "VERSION=$Version" --build-arg "SOURCE_DATE_EPOCH=$sourceDateEpoch" `
+            --provenance=false --sbom=false --load .
         $imageID = (& docker image inspect --format '{{.Id}}' $tag).Trim()
         $rebuildImageID = (& docker image inspect --format '{{.Id}}' $rebuildTag).Trim()
         $firstBuild = Get-Content -Raw $metadataPath | ConvertFrom-Json
         $secondBuild = Get-Content -Raw $rebuildMetadataPath | ConvertFrom-Json
         $firstDigest = $firstBuild.'containerimage.digest'
         $secondDigest = $secondBuild.'containerimage.digest'
-        if (!$firstDigest -or !$secondDigest -or $imageID -ne $rebuildImageID -or $firstDigest -ne $secondDigest) {
+        if (!$firstBuild.'buildx.build.provenance' -or !$secondBuild.'buildx.build.provenance' -or
+            !$firstDigest -or !$secondDigest -or $imageID -ne $rebuildImageID -or $firstDigest -ne $secondDigest -or
+            $ociHash -ne $rebuildOCIHash) {
             throw "$name same-input rebuild differs; promotion is blocked."
         }
+        Remove-Item -Force $rebuildOCIPath
 
         $inspectPath = Join-Path $EvidenceDirectory "$name-inspect.json"
         & docker image inspect $tag | Set-Content -Encoding utf8NoBOM $inspectPath
@@ -216,7 +235,8 @@ try {
 
         $images[$name] = [ordered]@{
             tag = $tag; image_id = $imageID; build_result_digest = $firstDigest; dockerfile = $service.Dockerfile
-            rebuild_tag = $rebuildTag; rebuild_image_id = $rebuildImageID; rebuild_result_digest = $secondDigest
+            oci_archive_sha256 = $ociHash; rebuild_tag = $rebuildTag; rebuild_image_id = $rebuildImageID
+            rebuild_result_digest = $secondDigest; rebuild_oci_archive_sha256 = $rebuildOCIHash
         }
     }
 
@@ -268,5 +288,6 @@ try {
     }
     Write-Host "PASS: four production images built and scanned; evidence: $EvidenceDirectory"
 } finally {
+    if ($builderCreated) { & docker buildx rm $builder | Out-Null }
     Pop-Location
 }
