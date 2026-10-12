@@ -17,14 +17,15 @@ function New-EphemeralSecret {
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$gitSafeDirectory = $root.Replace('\', '/')
 Push-Location $root
 try {
-    if (& git status --porcelain=v1 --untracked-files=all) {
+    if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
         throw 'Production images must be built from a clean checkout.'
     }
-    $revision = (& git rev-parse HEAD).Trim()
-    $tree = (& git rev-parse 'HEAD^{tree}').Trim()
-    $sourceDateEpoch = (& git show -s --format=%ct HEAD).Trim()
+    $revision = (& git -c "safe.directory=$gitSafeDirectory" rev-parse HEAD).Trim()
+    $tree = (& git -c "safe.directory=$gitSafeDirectory" rev-parse 'HEAD^{tree}').Trim()
+    $sourceDateEpoch = (& git -c "safe.directory=$gitSafeDirectory" show -s --format=%ct HEAD).Trim()
     $buildDate = [DateTimeOffset]::FromUnixTimeSeconds([long]$sourceDateEpoch).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
     if (!$EvidenceDirectory) {
         $EvidenceDirectory = Join-Path ([IO.Path]::GetTempPath()) "stock-ai-production-images-$revision"
@@ -262,7 +263,7 @@ try {
         "$hash  $($_.Name)"
     } | Set-Content -Encoding ascii (Join-Path $EvidenceDirectory 'SHA256SUMS')
 
-    if (& git status --porcelain=v1 --untracked-files=all) {
+    if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
         throw 'The production build modified the source checkout.'
     }
     Write-Host "PASS: four production images built and scanned; evidence: $EvidenceDirectory"
