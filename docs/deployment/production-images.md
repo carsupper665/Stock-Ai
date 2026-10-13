@@ -1,8 +1,9 @@
 # Traceable production images
 
 Ticket 07 packages Backend, Agent Server, LLM Provider Server, and Console as
-Linux/amd64 images for Docker Desktop in Linux-container mode. The only final
-base is `scratch`. Each final filesystem contains a statically linked service,
+Linux/amd64 images for Docker Desktop in Linux-container mode. Ticket 09 adds
+the OIDC Gateway to the same traceable image build and runtime gate. The only
+final base is `scratch`. Each final filesystem contains a statically linked service,
 a statically linked health probe and CA roots; Go's pinned `timetzdata` build
 tag embeds the timezone database. Console also has
 the compiled frontend. Build stages use these immutable official-image indexes:
@@ -44,7 +45,7 @@ if an exported filesystem contains source, `.env`, a
 database, a log, an authentication file, compiler, shell, package manager,
 download client, Node, npm, or other forbidden CLI named by the policy.
 
-`provenance.json` binds the four image IDs to the Git revision/tree, commit
+New `provenance.json` output binds all five image IDs to the Git revision/tree, commit
 timestamp, semantic version, target platform, Docker/Buildx versions, the exact
 Trivy image digest and reported version,
 and SHA-256 of every Dockerfile and dependency lock input. `SHA256SUMS` seals
@@ -58,6 +59,11 @@ build reference and invocation timestamps, so their index/archive digests are
 expected to differ and both values are recorded rather than treated as image
 drift. Retain both provenance files for independent review; only the first OCI
 archive is kept in the sealed evidence directory.
+
+The retained Ticket 07 evidence artifact records the four application images
+from its original run. Ticket 09 has not yet produced a new five-image build
+artifact; run the clean-checkout build before certifying or promoting the Test
+Gateway image.
 
 The script deliberately does not publish. Ticket 10 assigns registry digests
 only after Test certification and promotes those exact digests to Release.
@@ -76,16 +82,16 @@ requires separately approved, read-only mounts and a new image/security review.
 Run the images only with the following constraints (Ticket 08 encodes these in
 Compose):
 
-| Constraint | Backend | Agent | LLM | Console |
-|---|---:|---:|---:|---:|
-| read-only root | required | required | required | required |
-| writable volume | `/data` | `/data` | `/data` | none |
-| tmpfs `/tmp` (`noexec,nosuid`, 16 MiB) | required | required | required | required |
-| memory | 512 MiB | 1 GiB | 512 MiB | 128 MiB |
-| CPUs | 1.0 | 2.0 | 1.0 | 0.5 |
-| PIDs | 100 | 200 | 100 | 50 |
-| capabilities | drop all | drop all | drop all | drop all |
-| privilege escalation | forbidden | forbidden | forbidden | forbidden |
+| Constraint | Backend | Agent | LLM | Console | OIDC Gateway |
+|---|---:|---:|---:|---:|---:|
+| read-only root | required | required | required | required | required |
+| writable volume | `/data` | `/data` | `/data` | none | none |
+| tmpfs `/tmp` (`noexec,nosuid`, 16 MiB) | required | required | required | required | required |
+| memory | 512 MiB | 1 GiB | 512 MiB | 128 MiB | 256 MiB |
+| CPUs | 1.0 | 2.0 | 1.0 | 0.5 | 0.5 |
+| PIDs | 100 | 200 | 100 | 50 | 64 |
+| capabilities | drop all | drop all | drop all | drop all | drop all |
+| privilege escalation | forbidden | forbidden | forbidden | forbidden | forbidden |
 
 Backend `/v1/health` verifies its database. Agent `/health` verifies the
 runtime persistence latch. LLM `/healthz` verifies its database-backed server.
@@ -95,7 +101,7 @@ the probes needs a shell or credential.
 ## Review gate
 
 Before accepting a build, verify `SHA256SUMS`, confirm every SARIF report has
-zero Critical/High result, inspect all four filesystem lists, compare the
+zero Critical/High result, inspect all five filesystem lists, compare the
 revision labels to `provenance.json`, and exercise every health check under the
 read-only/resource-limited Compose stack. Missing evidence, a mutable tag, a
 scan database error, or any image-ID mismatch blocks promotion.

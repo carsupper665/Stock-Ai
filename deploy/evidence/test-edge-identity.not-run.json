@@ -1,0 +1,31 @@
+{
+  "schema": "stock-ai.test-edge-evidence.v1",
+  "status": "not_run",
+  "captured_at_utc": "2026-10-13T11:31:25Z",
+  "capture_context": "worktree review; no Test host or Test IdP was accessed",
+  "local_checks": {
+    "policy_unittests": "passed: scripts.test.test_test_edge (13 tests)",
+    "oidc_gateway_go_tests": "passed: go test ./internal/gateway",
+    "issuer_check_go_tests": "passed: GO111MODULE=off go test ./scripts/issuer-check",
+    "external_probe_powershell_parse": "not_run: pwsh is not installed in the worktree environment",
+    "compose_overlay_config_parse": "passed; CLI config validation only, no containers started",
+    "console_role_runtime_test": "not_run: sandbox denied loopback listener creation"
+  },
+  "test_host_checks": {
+    "test_idp_realm_and_client": "not_run",
+    "stable_https_issuer_and_jwks": "not_run",
+    "container_issuer_jwks_reachability": "not_run",
+    "nginx_and_application_startup": "not_run",
+    "external_dns_tls_route_and_port_checks": "not_run",
+    "interactive_test_login_and_logout": "not_run"
+  },
+  "blocking_dependencies": [
+    "Test Windows host and Docker Engine access from this worktree",
+    "Test-only IdP realm or tenant and stock-ai-test client registration",
+    "approved stable Test DNS names and trusted TLS certificates",
+    "Test client secret, cookie key, application secrets, and certificate files on the Test host",
+    "reviewed immutable image references, including the Nginx manifest digest",
+    "independent external network vantage with Nmap for full TCP scan"
+  ],
+  "secret_or_personal_data_retained": false
+}
