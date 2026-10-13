@@ -1,0 +1,229 @@
+name: "${STOCK_AI_INSTANCE:?set STOCK_AI_INSTANCE to an environment-unique slug}"
+
+x-runtime: &runtime
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=16m
+  pids_limit: 256
+  stop_signal: SIGTERM
+  stop_grace_period: 30s
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: "5"
+
+x-healthcheck: &healthcheck
+  interval: 5s
+  timeout: 3s
+  start_period: 10s
+  retries: 12
+
+services:
+  backend:
+    <<: *runtime
+    image: "${BACKEND_IMAGE:?set BACKEND_IMAGE to the approved Backend image reference}"
+    environment:
+      STOCK_AI_ENVIRONMENT: "${STOCK_AI_ENVIRONMENT:?set STOCK_AI_ENVIRONMENT to Test or Release}"
+      ALLOW_STATIC_USER_TOKEN: "${ALLOW_STATIC_USER_TOKEN:-false}"
+      USER_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE:?set STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+      ACCOUNT_TOKEN_KEY_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_backend_account_token_key"
+      OIDC_ISSUER: "${OIDC_ISSUER:-}"
+      OIDC_AUDIENCE: "${OIDC_AUDIENCE:-}"
+      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:-}"
+      OIDC_JWKS_URL: "${OIDC_JWKS_URL:-}"
+      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
+      BACKEND_ADDR: "0.0.0.0:7794"
+      DB_DRIVER: sqlite
+      DB_DSN: /data/backend.db
+      LOG_DIR: /data/logs
+      DEBUG: "false"
+    secrets:
+      - source: backend_user_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+      - source: backend_account_token_key
+        target: "${STOCK_AI_SECRET_NAMESPACE}_backend_account_token_key"
+    volumes:
+      - backend_state:/data
+    networks:
+      application:
+        aliases:
+          - backend
+    expose:
+      - "7794"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:7794/v1/health"]
+    mem_limit: 512m
+    cpus: 1.0
+
+  llm-provider-server:
+    <<: *runtime
+    image: "${LLM_PROVIDER_SERVER_IMAGE:?set LLM_PROVIDER_SERVER_IMAGE to the approved LLM Provider Server image reference}"
+    environment:
+      STOCK_AI_ENVIRONMENT: "${STOCK_AI_ENVIRONMENT}"
+      LLM_SERVER_ADDR: "0.0.0.0:8090"
+      LLM_SERVER_DB_PATH: /data/llm-provider.db
+      LLM_SERVER_ADMIN_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
+      LLM_SERVER_RUNTIME_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+      LLM_SERVER_MASTER_KEY_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_master_key"
+    secrets:
+      - source: llm_admin_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
+      - source: llm_runtime_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+      - source: llm_master_key
+        target: "${STOCK_AI_SECRET_NAMESPACE}_llm_master_key"
+    volumes:
+      - llm_state:/data
+    networks:
+      application:
+        aliases:
+          - llm-provider-server
+    expose:
+      - "8090"
+    depends_on:
+      backend:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:8090/healthz"]
+    mem_limit: 512m
+    cpus: 1.0
+
+  agent-server:
+    <<: *runtime
+    image: "${AGENT_SERVER_IMAGE:?set AGENT_SERVER_IMAGE to the approved Agent Server image reference}"
+    environment:
+      STOCK_AI_ENVIRONMENT: "${STOCK_AI_ENVIRONMENT}"
+      AGENT_SERVER_ADDR: "0.0.0.0:8080"
+      AGENT_SERVER_DB_PATH: /data/agent-server.db
+      AGENT_SERVER_HISTORY_DIR: /data/history
+      AGENT_SERVER_ADMIN_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_agent_admin_token"
+      AGENT_SERVER_BACKEND_URL: http://backend:7794
+      AGENT_SERVER_BACKEND_USER_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+      AGENT_SERVER_GATEWAY_URL: http://llm-provider-server:8090
+      AGENT_SERVER_GATEWAY_RUNTIME_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+    secrets:
+      - source: agent_admin_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_agent_admin_token"
+      - source: backend_user_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+      - source: llm_runtime_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+    volumes:
+      - agent_state:/data
+    networks:
+      application:
+        aliases:
+          - agent-server
+    expose:
+      - "8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+        restart: true
+      llm-provider-server:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:8080/health"]
+    mem_limit: 768m
+    cpus: 1.5
+
+  console:
+    <<: *runtime
+    image: "${CONSOLE_IMAGE:?set CONSOLE_IMAGE to the approved Console image reference}"
+    environment:
+      STOCK_AI_ENVIRONMENT: "${STOCK_AI_ENVIRONMENT}"
+      CONSOLE_ADDR: "0.0.0.0:8088"
+      BACKEND_URL: http://backend:7794
+      AGENT_SERVER_URL: http://agent-server:8080
+      LLM_SERVER_URL: http://llm-provider-server:8090
+      OIDC_ISSUER: "${OIDC_ISSUER:?set the exact environment HTTPS issuer}"
+      OIDC_AUDIENCE: "${OIDC_AUDIENCE:?set the environment API audience}"
+      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the allowed environment subject}"
+      OIDC_JWKS_URL: "${OIDC_JWKS_URL:?set the environment HTTPS JWKS URL}"
+      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
+      AGENT_SERVER_ADMIN_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_agent_admin_token"
+      LLM_SERVER_ADMIN_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
+      LLM_SERVER_RUNTIME_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+    secrets:
+      - source: agent_admin_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_agent_admin_token"
+      - source: llm_admin_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
+      - source: llm_runtime_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+    networks:
+      - application
+      - edge
+    expose:
+      - "8088"
+    depends_on:
+      backend:
+        condition: service_healthy
+        restart: true
+      llm-provider-server:
+        condition: service_healthy
+        restart: true
+      agent-server:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:8088/"]
+    stop_grace_period: 20s
+    mem_limit: 256m
+    cpus: 0.5
+
+networks:
+  application:
+    name: "${STOCK_AI_INSTANCE}_application"
+    labels:
+      stock-ai.environment: "${STOCK_AI_ENVIRONMENT}"
+      stock-ai.boundary: private-application
+  edge:
+    name: "${STOCK_AI_INSTANCE}_edge"
+    labels:
+      stock-ai.environment: "${STOCK_AI_ENVIRONMENT}"
+      stock-ai.boundary: designated-edge
+
+volumes:
+  backend_state:
+    name: "${STOCK_AI_INSTANCE}_backend_state"
+    labels:
+      stock-ai.environment: "${STOCK_AI_ENVIRONMENT}"
+      stock-ai.owner: backend
+  agent_state:
+    name: "${STOCK_AI_INSTANCE}_agent_state"
+    labels:
+      stock-ai.environment: "${STOCK_AI_ENVIRONMENT}"
+      stock-ai.owner: agent-server
+  llm_state:
+    name: "${STOCK_AI_INSTANCE}_llm_state"
+    labels:
+      stock-ai.environment: "${STOCK_AI_ENVIRONMENT}"
+      stock-ai.owner: llm-provider-server
+
+secrets:
+  backend_user_token:
+    file: "${STOCK_AI_SECRETS_DIR:?set STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+  backend_account_token_key:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_backend_account_token_key"
+  agent_admin_token:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_agent_admin_token"
+  llm_admin_token:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
+  llm_runtime_token:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+  llm_master_key:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_llm_master_key"
