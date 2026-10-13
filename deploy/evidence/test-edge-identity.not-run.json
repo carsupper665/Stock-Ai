@@ -1,11 +1,13 @@
 {
   "schema": "stock-ai.test-edge-evidence.v1",
   "status": "not_run",
-  "captured_at_utc": "2026-10-13T10:49:40Z",
+  "captured_at_utc": "2026-10-13T11:12:21Z",
   "capture_context": "worktree review; no Test host or Test IdP was accessed",
   "local_checks": {
-    "policy_unittests": "passed: 23 tests",
-    "oidc_gateway_go_tests": "passed",
+    "policy_unittests": "passed: scripts.test.test_test_edge (9 tests)",
+    "oidc_gateway_go_tests": "passed: go test ./internal/gateway",
+    "issuer_check_compile": "passed: GO111MODULE=off go test ./scripts/issuer-check",
+    "external_probe_powershell_parse": "not_run: pwsh is not installed in the worktree environment",
     "compose_overlay_config_parse": "passed; CLI config validation only, no containers started",
     "console_role_runtime_test": "not_run: sandbox denied loopback listener creation"
   },

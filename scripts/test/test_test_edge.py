@@ -65,7 +65,7 @@ class TestEdgePolicyTest(unittest.TestCase):
             "X-Real-IP $remote_addr",
             "X-Forwarded-For $remote_addr",
             "X-Forwarded-Proto https",
-            "X-Forwarded-Host $host",
+            "X-Forwarded-Host ${TEST_APP_HOST}",
             'Authorization ""',
             'X-Auth-Request-Subject ""',
             'X-Auth-Request-Access-Token ""',
@@ -141,7 +141,10 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertIn("COPY scripts/issuer-check/", gateway_dockerfile)
 
     def test_http_redirect_and_auth_routes_preserve_browser_contract(self):
-        self.assertIn("return 301 https://$host$request_uri;", self.nginx)
+        self.assertIn("return 301 https://${TEST_APP_HOST}$request_uri;", self.nginx)
+        self.assertEqual(self.nginx.count("if ($host != ${TEST_APP_HOST}) { return 421; }"), 2)
+        self.assertNotIn("proxy_set_header Host $host;", self.nginx)
+        self.assertNotIn("proxy_set_header X-Forwarded-Host $host;", self.nginx)
         self.assertIn("location = /oauth2/callback", self.nginx)
         self.assertIn("location = /oauth2/start", self.nginx)
         self.assertIn("location ^~ /oauth2/", self.nginx)
@@ -165,7 +168,11 @@ class TestEdgePolicyTest(unittest.TestCase):
     def test_evidence_distinguishes_local_checks_from_unavailable_test_host(self):
         evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
         self.assertEqual(evidence["status"], "not_run")
-        self.assertEqual(evidence["local_checks"]["policy_unittests"], "passed: 23 tests")
+        self.assertEqual(
+            evidence["local_checks"]["policy_unittests"],
+            "passed: scripts.test.test_test_edge (9 tests)",
+        )
+        self.assertIn("not installed", evidence["local_checks"]["external_probe_powershell_parse"])
         self.assertEqual(evidence["test_host_checks"]["nginx_and_application_startup"], "not_run")
         self.assertFalse(evidence["secret_or_personal_data_retained"])
 
@@ -183,10 +190,13 @@ class TestEdgePolicyTest(unittest.TestCase):
             "cookie",
             "Set-Content -LiteralPath $EvidencePath",
             "failed_stage = $failedStage",
+            "app_dns = [ordered]@{ a = $appIPv4; aaaa = $appIPv6 }",
+            "issuer_dns = [ordered]@{ a = $idpIPv4; aaaa = $idpIPv6 }",
             "tls_chain_and_hostname_validated = $true",
             "Account bearer reaches Console Account validation",
             "public edge health route",
             "anonymous API route",
+            "unrecognized Host header is rejected",
         ):
             self.assertIn(check, script)
         self.assertIn("spoof_values_recorded = $false", script)

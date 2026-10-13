@@ -4,12 +4,14 @@ upstream stock_ai_gateway { server oidc-gateway:4180; keepalive 8; }
 server {
     listen 8080 default_server;
     server_name ${TEST_APP_HOST};
-    return 301 https://$host$request_uri;
+    if ($host != ${TEST_APP_HOST}) { return 421; }
+    return 301 https://${TEST_APP_HOST}$request_uri;
 }
 
 server {
     listen 8443 ssl default_server;
     server_name ${TEST_APP_HOST};
+    if ($host != ${TEST_APP_HOST}) { return 421; }
 
     ssl_certificate /run/test-tls/fullchain.pem;
     ssl_certificate_key /run/test-tls/privkey.pem;
@@ -30,14 +32,14 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_gateway;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Cookie $http_cookie;
         proxy_set_header Origin $http_origin;
         proxy_set_header Accept $http_accept;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header X-Forwarded-Port "";
         proxy_set_header X-Forwarded-Server "";
         proxy_set_header X-Forwarded-Prefix "";
@@ -56,14 +58,14 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_gateway;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Cookie $http_cookie;
         proxy_set_header Origin $http_origin;
         proxy_set_header Accept $http_accept;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header X-Forwarded-Port "";
         proxy_set_header X-Forwarded-Server "";
         proxy_set_header X-Forwarded-Prefix "";
@@ -82,14 +84,14 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_gateway;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Cookie $http_cookie;
         proxy_set_header Origin $http_origin;
         proxy_set_header Accept $http_accept;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header X-Forwarded-Port "";
         proxy_set_header X-Forwarded-Server "";
         proxy_set_header X-Forwarded-Prefix "";
@@ -110,13 +112,13 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header Cookie $http_cookie;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Origin $http_origin;
         proxy_set_header Accept $http_accept;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header X-Forwarded-Port "";
         proxy_set_header X-Forwarded-Server "";
         proxy_set_header X-Forwarded-Prefix "";
@@ -149,13 +151,13 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_console;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Accept $http_accept;
         proxy_set_header User-Agent $http_user_agent;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
     }
 
     location ~ ^/v1(?:/|$) {
@@ -168,7 +170,7 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_console;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Accept $http_accept;
         proxy_set_header Content-Type $content_type;
         proxy_set_header Content-Length $content_length;
@@ -177,7 +179,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header Authorization $console_authorization;
         proxy_set_header X-Auth-Request-Subject $oidc_subject;
         proxy_set_header X-Auth-Request-User $oidc_user;
@@ -193,13 +195,13 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header Cookie $http_cookie;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Origin $http_origin;
         proxy_set_header Accept $http_accept;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header X-Forwarded-Port "";
         proxy_set_header X-Forwarded-Server "";
         proxy_set_header X-Forwarded-Prefix "";
@@ -224,7 +226,7 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_console;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Accept $http_accept;
         proxy_set_header Content-Type $content_type;
         proxy_set_header Content-Length $content_length;
@@ -233,7 +235,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header Authorization "";
         proxy_set_header X-Auth-Request-Subject $oidc_subject;
         proxy_set_header X-Auth-Request-User $oidc_user;
@@ -252,7 +254,7 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_console;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Accept $http_accept;
         proxy_set_header Content-Type $content_type;
         proxy_set_header Content-Length $content_length;
@@ -261,7 +263,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header Authorization "";
         proxy_set_header X-Auth-Request-Subject $oidc_subject;
         proxy_set_header X-Auth-Request-User $oidc_user;
@@ -280,7 +282,7 @@ server {
         proxy_pass_request_headers off;
         proxy_pass http://stock_ai_console;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host ${TEST_APP_HOST};
         proxy_set_header Accept $http_accept;
         proxy_set_header Content-Type $content_type;
         proxy_set_header Content-Length $content_length;
@@ -289,7 +291,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
         proxy_set_header X-Forwarded-Port "";
         proxy_set_header X-Forwarded-Server "";
         proxy_set_header X-Forwarded-Prefix "";

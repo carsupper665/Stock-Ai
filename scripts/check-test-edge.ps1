@@ -44,6 +44,10 @@ function Get-OpenTcpPorts([string] $HostName, [bool] $IPv6) {
 
 $appAddresses = @()
 $idpAddresses = @()
+$appIPv4 = @()
+$appIPv6 = @()
+$idpIPv4 = @()
+$idpIPv6 = @()
 $probeFailed = $false
 $failedStage = $null
 try {
@@ -66,6 +70,8 @@ Add-Check 'HTTP redirects to HTTPS' ($http.StatusCode -eq 301 -and $httpLocation
 
 $app = Get-HttpResponse "https://$AppHost/"
 Add-Check 'HTTPS root requires login' ($app.StatusCode -eq 302 -and [string] $app.Headers.Location -eq '/oauth2/start') ([ordered]@{ status = $app.StatusCode; location = [string] $app.Headers.Location; tls_chain_and_hostname_validated = $true })
+$badHost = Get-HttpResponse "https://$AppHost/" @{ Host = 'attacker.invalid' }
+Add-Check 'unrecognized Host header is rejected' ($badHost.StatusCode -eq 421) ([ordered]@{ status = $badHost.StatusCode; supplied_host_recorded = $false })
 $health = Get-HttpResponse "https://$AppHost/healthz"
 Add-Check 'public edge health route' ($health.StatusCode -eq 200 -and [string] $health.Content -match '^ok') ([ordered]@{ status = $health.StatusCode })
 $asset = Get-HttpResponse "https://$AppHost/assets/app.js"
@@ -174,8 +180,8 @@ $report = [ordered]@{
     vantage_host = [Environment]::MachineName
     app_host = $AppHost
     issuer = $Issuer.TrimEnd('/')
-    app_dns_a = $appAddresses
-    issuer_dns_a = $idpAddresses
+    app_dns = [ordered]@{ a = $appIPv4; aaaa = $appIPv6 }
+    issuer_dns = [ordered]@{ a = $idpIPv4; aaaa = $idpIPv6 }
     failed_stage = $failedStage
     checks = @($checks)
     passed = (-not $probeFailed -and @($checks | Where-Object { -not $_.passed }).Count -eq 0)

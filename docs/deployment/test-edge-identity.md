@@ -30,7 +30,9 @@ Register only the confidential stock-ai-test client in the Test realm:
 The Test certificate mounted at TEST_TLS_DIR must have a complete chain in
 fullchain.pem and its matching private key in privkey.pem. The certificate SAN
 must cover TEST_APP_HOST; the issuer hostname must independently present a
-browser-trusted certificate. Do not copy a private key into this repository.
+browser-trusted certificate. Nginx rejects unexpected Host values with 421 and
+uses the configured app hostname in redirects and upstream Host headers. Do
+not copy a private key into this repository.
 
 Nginx disables forwarding of inbound request headers at every upstream
 boundary, then sets a small allowlist with connection-derived forwarding
