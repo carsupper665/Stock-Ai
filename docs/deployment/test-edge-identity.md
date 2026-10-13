@@ -111,8 +111,12 @@ probe from that independent network (PowerShell 7):
 
     pwsh -NoProfile -File ./scripts/check-test-edge.ps1 -AppHost app-test.example -Issuer https://idp-test.example/realms/stock-ai-test -EvidencePath C:/ProgramData/StockAI/Test/evidence/test-edge-external.json -FullPortScan
 
-The independent probe needs Nmap installed. The script checks DNS,
-browser-trusted HTTPS, redirect/client/cookie configuration, response headers,
+The independent probe needs Nmap installed. It connects to each resolved app
+address individually for TCP checks and Nmap scans. A trusted TLS handshake
+against each resolved app and IdP address validates the expected hostname and
+system certificate chain, then records only the peer certificate issuer and
+NotAfter timestamp. The script checks DNS, browser-trusted HTTPS,
+redirect/client/cookie configuration, response headers,
 anonymous assets and health, 401 behavior on anonymous API routes, Account
 Bearer routing to Console, rejection of Account Bearers on Agent/LLM routes,
 spoofed-header rejection, request-size and login-rate limits, IdP discovery and
@@ -122,7 +126,7 @@ before returning a failure status. Complete an interactive Test login and
 logout separately and record that outcome without retaining browser cookies.
 Explicitly probe Gateway and application ports such as 4180, 8088, 7794, 8080,
 and 8090 and confirm they are closed. The script's full TCP scan expects only
-ports 80 and 443 to be open on the app hostname. Record timestamp, probe
+ports 80 and 443 to be open at every resolved app address. Record timestamp, probe
 vantage, DNS answers, tested hostnames/ports, TLS issuer/expiry, status codes,
 and pass/fail results in a sanitized JSON file under the Test host's evidence directory. Exclude tokens,
 cookies, client secrets, private keys, user PII, and IdP response bodies.

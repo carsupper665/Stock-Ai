@@ -122,6 +122,56 @@ class TestEdgePolicyTest(unittest.TestCase):
             self.assertIn(policy, config)
         self.assertGreaterEqual(self.nginx.count("limit_req zone="), 4)
 
+    def test_nginx_access_log_never_formats_request_query(self):
+        config = NGINX_MAIN.read_text(encoding="utf-8")
+        match = re.search(r"log_format edge_sanitized '([^']+)';", config)
+        self.assertIsNotNone(match)
+        log_format = match.group(1)
+        self.assertIn("$request_method", log_format)
+        self.assertIn("$uri", log_format)
+        self.assertIn("$status", log_format)
+        self.assertTrue(log_format.endswith("$request_time"))
+        variables = re.findall(r"\$[a-z0-9_]+", log_format)
+        for query_bearing_variable in ("$request", "$request_uri", "$args", "$query_string", "$arg_code", "$arg_state"):
+            self.assertNotIn(query_bearing_variable, variables)
+        self.assertIn("access_log /dev/stdout edge_sanitized;", config)
+
+        marker = "query-marker-must-not-be-logged"
+        values = {
+            "$remote_addr": "192.0.2.4",
+            "$time_iso8601": "2026-10-13T12:00:00+00:00",
+            "$request_method": "GET",
+            "$uri": "/oauth2/callback",
+            "$server_protocol": "HTTP/1.1",
+            "$status": "302",
+            "$body_bytes_sent": "0",
+            "$request_time": "0.002",
+            "$request_uri": f"/oauth2/callback?code={marker}&state={marker}",
+            "$args": f"code={marker}&state={marker}",
+            "$query_string": f"code={marker}&state={marker}",
+            "$arg_code": marker,
+            "$arg_state": marker,
+        }
+        rendered = re.sub(r"\$[a-z0-9_]+", lambda found: values.get(found.group(), ""), log_format)
+        self.assertIn('"GET /oauth2/callback HTTP/1.1" 302', rendered)
+        self.assertNotIn(marker, rendered)
+
+    def test_issuer_checker_policy_has_negative_unit_cases(self):
+        checks = (ROOT / "scripts/issuer-check/main_test.go").read_text(encoding="utf-8")
+        self.assertIn("func TestValidateIssuerURL", checks)
+        self.assertIn("func TestValidateJWKSURLRequiresSameOriginAndRealmPath", checks)
+        for case in (
+            'name: "userinfo"',
+            'name: "localhost"',
+            'name: "IPv4 loopback"',
+            'name: "IPv6 loopback"',
+            'name: "foreign origin"',
+            'name: "different port"',
+            'name: "outside realm"',
+            'name: "traversal"',
+        ):
+            self.assertIn(case, checks)
+
     def test_live_probe_covers_matrix_route_classes_and_role_rejection(self):
         script = EXTERNAL_CHECK.read_text(encoding="utf-8")
         gateway_dockerfile = (ROOT / "docker/oidc-gateway.Dockerfile").read_text(encoding="utf-8")
@@ -170,7 +220,7 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertEqual(evidence["status"], "not_run")
         self.assertEqual(
             evidence["local_checks"]["policy_unittests"],
-            "passed: scripts.test.test_test_edge (9 tests)",
+            "passed: scripts.test.test_test_edge (12 tests)",
         )
         self.assertIn("not installed", evidence["local_checks"]["external_probe_powershell_parse"])
         self.assertEqual(evidence["test_host_checks"]["nginx_and_application_startup"], "not_run")
@@ -201,6 +251,26 @@ class TestEdgePolicyTest(unittest.TestCase):
             self.assertIn(check, script)
         self.assertIn("spoof_values_recorded = $false", script)
         self.assertNotIn("Set-Cookie", script.split("$report =", 1)[-1])
+
+    def test_external_probe_validates_issuer_and_records_per_address_tls_metadata(self):
+        script = EXTERNAL_CHECK.read_text(encoding="utf-8")
+        for required in (
+            "$issuerUri.UserInfo",
+            "$issuerUri.IsLoopback",
+            "$issuerHost.EndsWith('.localhost')",
+            "$issuerHost.EndsWith('.local')",
+            "function Get-TlsMetadata",
+            "$stream.AuthenticateAsClient($HostName)",
+            "-Address $address -Port $issuerUri.Port",
+            "certificate_issuer = $certificate.Issuer",
+            "not_after_utc = $certificate.NotAfter.ToUniversalTime().ToString('o')",
+            "app_tls_certificates = $appTlsCertificates",
+            "issuer_tls_certificates = $idpTlsCertificates",
+            "Get-OpenTcpPorts -Address $address -IPv6 $isIPv6",
+            "Test-Tcp -Address $address -Port $port",
+        ):
+            self.assertIn(required, script)
+        self.assertNotIn("Get-OpenTcpPorts -HostName", script)
 
 
 if __name__ == "__main__":

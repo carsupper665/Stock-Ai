@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,9 +29,8 @@ func main() {
 	}
 	environment := os.Args[1]
 	issuer := strings.TrimSuffix(os.Args[2], "/")
-	expectedPath := "/realms/stock-ai-" + strings.ToLower(environment)
-	u, err := url.Parse(issuer)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.Path != expectedPath {
+	issuerURL, err := validateIssuerURL(environment, issuer)
+	if err != nil {
 		fatal("issuer must be the exact stable HTTPS realm URL for this environment")
 	}
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -39,12 +39,9 @@ func main() {
 	if config.Issuer != issuer {
 		fatal("discovery issuer does not exactly match configured issuer")
 	}
-	jwksURL, err := url.Parse(config.JWKSURI)
-	if err != nil || jwksURL.Scheme != "https" || jwksURL.Host == "" || jwksURL.User != nil || jwksURL.Fragment != "" {
-		fatal("discovery returned an invalid HTTPS JWKS URL")
-	}
-	if !strings.HasPrefix(jwksURL.Path, u.Path+"/") {
-		fatal("discovery JWKS URL is outside the configured realm")
+	jwksURL, err := validateJWKSURL(issuerURL, config.JWKSURI)
+	if err != nil {
+		fatal("discovery returned an invalid same-origin HTTPS JWKS URL")
 	}
 	var keys jwks
 	getJSON(client, config.JWKSURI, &keys)
@@ -52,6 +49,52 @@ func main() {
 		fatal("JWKS document has no keys")
 	}
 	fmt.Printf("issuer=%s jwks_host=%s jwks_key_count=%d\n", issuer, jwksURL.Host, len(keys.Keys))
+}
+
+func validateIssuerURL(environment, raw string) (*url.URL, error) {
+	if environment != "Test" && environment != "Release" {
+		return nil, fmt.Errorf("unsupported environment")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	expectedPath := "/realms/stock-ai-" + strings.ToLower(environment)
+	if u.Scheme != "https" || u.Host == "" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Path != expectedPath || !safeDNSHost(u.Hostname()) {
+		return nil, fmt.Errorf("issuer URL violates stable HTTPS realm policy")
+	}
+	return u, nil
+}
+
+func validateJWKSURL(issuer *url.URL, raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != "https" || u.Host == "" || u.User != nil || u.Opaque != "" || u.Fragment != "" ||
+		!strings.EqualFold(u.Host, issuer.Host) || !strings.HasPrefix(u.Path, issuer.Path+"/") ||
+		pathHasTraversal(u.Path) {
+		return nil, fmt.Errorf("JWKS URL violates same-origin realm policy")
+	}
+	return u, nil
+}
+
+func safeDNSHost(host string) bool {
+	name := strings.TrimSuffix(strings.ToLower(host), ".")
+	if name == "" || name == "localhost" || strings.HasSuffix(name, ".localhost") || strings.HasSuffix(name, ".local") {
+		return false
+	}
+	ip := net.ParseIP(strings.SplitN(name, "%", 2)[0])
+	return ip == nil
+}
+
+func pathHasTraversal(path string) bool {
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "." || segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func getJSON(client *http.Client, endpoint string, target any) {

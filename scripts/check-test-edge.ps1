@@ -8,7 +8,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $issuerUri = [Uri] $Issuer
-if ($issuerUri.Scheme -ne 'https' -or $issuerUri.AbsolutePath -ne '/realms/stock-ai-test' -or $issuerUri.Query -or $issuerUri.Fragment) {
+$issuerHost = $issuerUri.DnsSafeHost.TrimEnd('.').ToLowerInvariant()
+$localIssuerHost = $issuerUri.IsLoopback -or $issuerHost -eq 'localhost' -or $issuerHost.EndsWith('.localhost') -or $issuerHost.EndsWith('.local')
+if ($issuerUri.Scheme -ne 'https' -or $issuerUri.UserInfo -or $localIssuerHost -or $issuerUri.AbsolutePath -ne '/realms/stock-ai-test' -or $issuerUri.Query -or $issuerUri.Fragment) {
     throw 'Issuer must be the exact HTTPS Test realm URL.'
 }
 if ($AppHost -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$' -or $AppHost -match '\.\.|localhost|127\.0\.0\.1|\[::1\]') {
@@ -23,27 +25,56 @@ function Add-Check([string] $Name, [bool] $Passed, [object] $Details) {
 function Get-HttpResponse([string] $Uri, [hashtable] $Headers = @{}) {
     Invoke-WebRequest -Uri $Uri -Headers $Headers -MaximumRedirection 0 -SkipHttpErrorCheck -TimeoutSec 15
 }
-function Test-Tcp([string] $HostName, [int] $Port) {
+function Test-Tcp([string] $Address, [int] $Port) {
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
-        $task = $client.ConnectAsync($HostName, $Port)
+        $task = $client.ConnectAsync($Address, $Port)
         return $task.Wait(3000) -and $client.Connected
     }
     catch { return $false }
     finally { $client.Dispose() }
 }
-function Get-OpenTcpPorts([string] $HostName, [bool] $IPv6) {
+function Get-OpenTcpPorts([string] $Address, [bool] $IPv6) {
     $arguments = @('-Pn', '-p-', '--open', '-oX', '-')
     if ($IPv6) { $arguments = @('-6') + $arguments }
-    $arguments += $HostName
+    $arguments += $Address
     $xmlText = (& nmap @arguments) -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'nmap full TCP scan failed.' }
     $document = [xml] $xmlText
-    return @($document.nmaprun.host.ports.port | Where-Object { $_.state.state -eq 'open' } | ForEach-Object { [int] $_.portid } | Sort-Object -Unique)
+    $ports = @($document.nmaprun.host.ports.port | Where-Object { $_.state.state -eq 'open' } | ForEach-Object { [int] $_.portid } | Sort-Object -Unique)
+    return [ordered]@{ address = $Address; open_tcp_ports = $ports }
+}
+function Get-TlsMetadata([string] $HostName, [string] $Address, [int] $Port) {
+    $client = [System.Net.Sockets.TcpClient]::new()
+    $stream = $null
+    $certificate = $null
+    try {
+        $client.Connect($Address, $Port)
+        $stream = [System.Net.Security.SslStream]::new($client.GetStream(), $false)
+        $stream.AuthenticateAsClient($HostName)
+        if (-not $stream.RemoteCertificate) { throw 'TLS peer did not provide a certificate.' }
+        $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($stream.RemoteCertificate)
+        return [ordered]@{
+            address = $Address
+            port = $Port
+            validated_hostname = $HostName
+            hostname_validation = 'passed by SslStream system validation'
+            chain_validation = 'passed by SslStream system trust'
+            certificate_issuer = $certificate.Issuer
+            not_after_utc = $certificate.NotAfter.ToUniversalTime().ToString('o')
+        }
+    }
+    finally {
+        if ($certificate) { $certificate.Dispose() }
+        if ($stream) { $stream.Dispose() }
+        $client.Dispose()
+    }
 }
 
 $appAddresses = @()
 $idpAddresses = @()
+$appTlsCertificates = @()
+$idpTlsCertificates = @()
 $appIPv4 = @()
 $appIPv6 = @()
 $idpIPv4 = @()
@@ -62,6 +93,16 @@ try {
     if ($idpAddresses.Count -eq 0) { throw 'No Test IdP A or AAAA records were returned.' }
     Add-Check 'app DNS A and AAAA records' $true $appAddresses
     Add-Check 'IdP DNS A and AAAA records' $true $idpAddresses
+
+    $stage = 'Trusted app and IdP TLS certificate checks'
+    foreach ($address in $appAddresses) {
+        $appTlsCertificates += Get-TlsMetadata -HostName $AppHost -Address $address -Port 443
+    }
+    foreach ($address in $idpAddresses) {
+        $idpTlsCertificates += Get-TlsMetadata -HostName $issuerUri.Host -Address $address -Port $issuerUri.Port
+    }
+    Add-Check 'app TLS certificate trust and hostname' ($appTlsCertificates.Count -eq $appAddresses.Count) $appTlsCertificates
+    Add-Check 'IdP TLS certificate trust and hostname' ($idpTlsCertificates.Count -eq $idpAddresses.Count) $idpTlsCertificates
 
     $stage = 'HTTP redirect and Test app TLS'
 $http = Get-HttpResponse "http://$AppHost/"
@@ -149,24 +190,27 @@ $jwks = Invoke-RestMethod -Uri $jwksUri.AbsoluteUri -TimeoutSec 15
 Add-Check 'Test issuer and JWKS reachable with trusted HTTPS' (@($jwks.keys).Count -gt 0) ([ordered]@{ issuer = $discovery.issuer; jwks_host = $jwksUri.Host; jwks_key_count = @($jwks.keys).Count; tls_chain_and_hostname_validated = $true })
 
 $stage = 'Test host external TCP ports'
-foreach ($port in @(80, 443)) {
-    $open = Test-Tcp $AppHost $port
-    Add-Check "public edge port $port reachable" $open ([ordered]@{ host = $AppHost; port = $port; reachable = $open })
-}
-foreach ($port in @(4180, 8088, 7794, 8080, 8090)) {
-    $open = Test-Tcp $AppHost $port
-    Add-Check "private port $port closed" (-not $open) ([ordered]@{ host = $AppHost; port = $port; reachable = $open })
+foreach ($address in $appAddresses) {
+    foreach ($port in @(80, 443)) {
+        $open = Test-Tcp -Address $address -Port $port
+        Add-Check "public edge port $port reachable at resolved address" $open ([ordered]@{ address = $address; port = $port; reachable = $open })
+    }
+    foreach ($port in @(4180, 8088, 7794, 8080, 8090)) {
+        $open = Test-Tcp -Address $address -Port $port
+        Add-Check "private port $port closed at resolved address" (-not $open) ([ordered]@{ address = $address; port = $port; reachable = $open })
+    }
 }
 $stage = 'Nmap full IPv4/IPv6 TCP scan'
 if (-not (Get-Command nmap -ErrorAction SilentlyContinue)) { throw 'nmap is required for the external full TCP port check.' }
-    $openPorts = @()
-    if ($appIPv4.Count -gt 0) { $openPorts += @(Get-OpenTcpPorts -HostName $AppHost -IPv6 $false) }
-    if ($appIPv6.Count -gt 0) { $openPorts += @(Get-OpenTcpPorts -HostName $AppHost -IPv6 $true) }
-    $openPorts = @($openPorts | Sort-Object -Unique)
+$portScans = @()
+foreach ($address in $appAddresses) {
+    $isIPv6 = $address.Contains(':')
+    $portScans += Get-OpenTcpPorts -Address $address -IPv6 $isIPv6
+}
 $expectedPorts = @(80, 443)
-$unexpectedPorts = @($openPorts | Where-Object { $_ -notin $expectedPorts })
-$missingPorts = @($expectedPorts | Where-Object { $_ -notin $openPorts })
-    Add-Check 'full TCP scan finds only intended edge ports' ($unexpectedPorts.Count -eq 0 -and $missingPorts.Count -eq 0) ([ordered]@{ open_tcp_ports = $openPorts; scanned_families = @($(if ($appIPv4.Count -gt 0) { 'IPv4' }; if ($appIPv6.Count -gt 0) { 'IPv6' })); expected = $expectedPorts })
+$unexpectedPorts = @($portScans | ForEach-Object { $_.open_tcp_ports | Where-Object { $_ -notin $expectedPorts } })
+$missingAddressScans = @($portScans | Where-Object { @($_.open_tcp_ports | Where-Object { $_ -in $expectedPorts }).Count -ne $expectedPorts.Count } | ForEach-Object { $_.address })
+Add-Check 'full TCP scan finds only intended edge ports at every resolved address' ($unexpectedPorts.Count -eq 0 -and $missingAddressScans.Count -eq 0 -and $portScans.Count -eq $appAddresses.Count) ([ordered]@{ address_scans = $portScans; addresses_missing_expected_ports = $missingAddressScans; expected = $expectedPorts })
 }
 catch {
     $probeFailed = $true
@@ -182,6 +226,8 @@ $report = [ordered]@{
     issuer = $Issuer.TrimEnd('/')
     app_dns = [ordered]@{ a = $appIPv4; aaaa = $appIPv6 }
     issuer_dns = [ordered]@{ a = $idpIPv4; aaaa = $idpIPv6 }
+    app_tls_certificates = $appTlsCertificates
+    issuer_tls_certificates = $idpTlsCertificates
     failed_stage = $failedStage
     checks = @($checks)
     passed = (-not $probeFailed -and @($checks | Where-Object { -not $_.passed }).Count -eq 0)
