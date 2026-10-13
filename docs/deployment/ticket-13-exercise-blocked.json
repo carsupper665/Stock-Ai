@@ -9,6 +9,9 @@
   "measured_rpo_hours": null,
   "measured_rto_minutes": null,
   "restore_validation": "not-run",
+  "restore_ownership_runtime": "not-run",
+  "restore_acl_runtime": "not-run",
+  "recovery_policy_pester_fixtures": "added-not-run-no-powershell-per-operator-instruction",
   "windows_scheduled_retention": "not-run",
   "note": "No recovery timing or successful restore is fabricated. Run the documented exercise on isolated Windows Test and replace this blocked record with sanitized measured evidence."
 }

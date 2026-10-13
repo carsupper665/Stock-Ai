@@ -99,11 +99,45 @@ is stale.
 
 First verify the chosen set. Prepare the exact environment and image references
 from that backup on the recovery host, with the named volumes newly created and
-empty. Restore refuses to overwrite any non-empty `/data` mount. It stops the
-stack, creates containers without starting services, copies the complete
+empty. Restore refuses existing data, with the allowlisted image-owned empty
+scaffolding described below as the only exception. It stops the stack,
+creates containers without starting services, copies the complete
 service state into the empty named volumes, and exports the archived Compose
 file, environment file, and secrets to a separate recovery directory. The
 exported environment file is rewritten to point at its exported secrets.
+
+Fresh volumes may contain only the Docker image's empty copy-up scaffolding:
+`backend:/data/logs` and `agent-server:/data/history`. Those exact directories
+must be empty; the LLM Provider volume must contain nothing. Any file, populated
+scaffold, symlink, database, or unknown path blocks restore. After copying each
+volume, restore runs the immutable helper image
+`golang:1.27.2-alpine3.23@sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079`
+with no network, a read-only container root, `CHOWN` plus `DAC_OVERRIDE`
+capabilities for the ownership pass, and `DAC_OVERRIDE` for the read-only
+ownership verification. It
+rejects symlinks, sets every `/data` entry to `65532:65532`, then verifies every
+entry using a separate read-only mount. This matches the service UID/GID in
+the application images; missing helper image or any chown/verification error
+aborts restore.
+
+Before decrypted content is extracted, and again before secrets are written to
+`RestoreDirectory`, the script protects the directory DACL against inheritance,
+sets the operator as directory owner, then verifies that only the current
+operator, SYSTEM, and local Administrators have Full Control. It applies and
+verifies the same ACL to the `secrets` child
+before copying any of the six secret files. Any unexpected principal or ACL
+failure aborts before secret files are written.
+
+The fixture regressions are in `scripts/test/RecoveryPolicy.Tests.ps1`. They
+exercise allowed empty scaffolding, populated/unknown data rejection, ACL
+allow/deny behavior, and successful/failing UID/GID restoration command paths.
+They require Pester on Windows; this Linux worktree does not have PowerShell and
+the prior operator instruction prohibits attempting it here. Run them on the
+Windows Test host with:
+
+```powershell
+Invoke-Pester -Path 'scripts/test/RecoveryPolicy.Tests.ps1' -CI
+```
 
 ```powershell
 $Recovery = 'C:\ProgramData\Stock AI\Release\restore-20261013'

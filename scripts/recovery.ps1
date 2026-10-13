@@ -16,6 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'recovery-policy.psm1') -Force
 $Services = @('backend', 'llm-provider-server', 'agent-server', 'console')
 $Volumes = [ordered]@{
     backend = 'backend_state'
@@ -155,7 +156,7 @@ function Test-EmptyVolumes([object]$Containers, [string]$Scratch) {
         $destination = Join-Path $Scratch "empty-$service"
         New-Item -ItemType Directory -Path $destination | Out-Null
         Invoke-Docker @('cp', "$($Containers[$service]):/data/.", $destination) | Out-Null
-        if (Get-ChildItem -LiteralPath $destination -Force -Recurse | Select-Object -First 1) { throw "Restore target volume for $service is not empty; refusing to overwrite user data." }
+        Assert-RecoveryVolumeScaffolding -Service $service -Path $destination
     }
 }
 
@@ -214,6 +215,7 @@ function Invoke-Verify {
     $temp = Join-Path $env:TEMP ('stock-ai-verify-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $temp | Out-Null
     try {
+        Set-RecoveryDirectoryAcl -Path $temp
         $zip = Join-Path $temp 'backup.zip'
         Unprotect-Archive $BackupFile $zip
         $expanded = Join-Path $temp 'contents'
@@ -230,6 +232,7 @@ function Invoke-Restore {
     $temp = Join-Path $env:TEMP ('stock-ai-restore-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $temp | Out-Null
     try {
+        Set-RecoveryDirectoryAcl -Path $temp
         $zip = Join-Path $temp 'backup.zip'; Unprotect-Archive $BackupFile $zip
         $expanded = Join-Path $temp 'contents'; [IO.Compression.ZipFile]::ExtractToDirectory($zip, $expanded)
         $manifest = Get-Content -LiteralPath (Join-Path $expanded 'manifest.json') -Raw | ConvertFrom-Json
@@ -249,9 +252,15 @@ function Invoke-Restore {
         Invoke-Compose @('create') | Out-Null
         $containers = Get-Containers; Test-EmptyVolumes $containers $temp
         foreach ($service in $Volumes.Keys) { Invoke-Docker @('cp', "$(Join-Path $expanded $service)/.", "$($containers[$service]):/data/") | Out-Null }
+        $dockerInvoker = { param([string[]]$DockerArguments) Invoke-Docker $DockerArguments | Out-Null }
+        foreach ($service in $Volumes.Keys) {
+            Invoke-RecoveryVolumeOwnership -VolumeName "${Stack}_$($Volumes[$service])" -DockerInvoker $dockerInvoker
+        }
         New-Item -ItemType Directory -Path $RestoreDirectory -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $expanded 'config/compose.yaml') -Destination (Join-Path $RestoreDirectory 'compose.yaml') -Force
+        Set-RecoveryDirectoryAcl -Path $RestoreDirectory
         $restoredSecrets = Join-Path $RestoreDirectory 'secrets'; New-Item -ItemType Directory -Path $restoredSecrets -Force | Out-Null
+        Set-RecoveryDirectoryAcl -Path $restoredSecrets
+        Copy-Item -LiteralPath (Join-Path $expanded 'config/compose.yaml') -Destination (Join-Path $RestoreDirectory 'compose.yaml') -Force
         foreach ($secret in $Secrets) { Copy-Item -LiteralPath (Join-Path $expanded "secrets/$secret") -Destination (Join-Path $restoredSecrets "${Namespace}_${secret}") -Force }
         $restoredEnv = [Collections.Generic.List[string]]::new()
         foreach ($line in [IO.File]::ReadAllLines((Join-Path $expanded 'config/compose.env'))) {
