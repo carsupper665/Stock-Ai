@@ -23,6 +23,24 @@ class ComposeSQLiteEvidenceTest(unittest.TestCase):
         self.assertEqual(len(evidence["schema_sha256"]), 64)
         self.assertNotIn("must-not-leak", str(evidence))
 
+    def test_spaced_wal_database_is_checked_from_a_local_copy(self):
+        with tempfile.TemporaryDirectory(prefix="sqlite evidence with spaces ") as directory:
+            path = Path(directory) / "state.db"
+            connection = sqlite3.connect(path)
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA wal_autocheckpoint=0")
+            connection.execute("CREATE TABLE records (id INTEGER PRIMARY KEY)")
+            connection.execute("INSERT INTO records DEFAULT VALUES")
+            connection.commit()
+            wal_path = Path(f"{path}-wal")
+            self.assertTrue(wal_path.exists())
+
+            evidence = inspect_database("fixture", path)
+            connection.close()
+
+        self.assertEqual(evidence["integrity_check"], "ok")
+        self.assertEqual(evidence["table_counts"], {"records": 1})
+
     def test_missing_database_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "missing or empty"):

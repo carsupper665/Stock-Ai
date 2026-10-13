@@ -1,0 +1,127 @@
+{
+  "captured_at_utc": "2026-10-13T11:05:30.826660+00:00",
+  "compose_project": "kit-t12-ops-smoke",
+  "crash_recovery": {
+    "agent-server": true,
+    "backend": true,
+    "llm-provider-server": true
+  },
+  "docker_desktop_restart": {
+    "completed": true,
+    "engine_after": "linux 29.5.2",
+    "engine_before": "linux 29.5.2"
+  },
+  "persistence": {
+    "checkpoints": [
+      "before-compose-restart",
+      "after-compose-restart",
+      "after-stop-start",
+      "after-down-up",
+      "before-docker-restart",
+      "after-docker-restart"
+    ],
+    "history_entries": 0,
+    "history_manifest_equal_at_every_checkpoint": true,
+    "history_manifest_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "sqlite_databases": {
+      "agent-server": {
+        "integrity_check": "ok",
+        "schema_sha256": "508a7a8e8ff76e2e6382855687cd028ddac609e19209913f933587429c9e947a",
+        "table_counts": {
+          "event_log": 0,
+          "events": 0,
+          "memories": 0,
+          "pending_triggers": 0,
+          "run_history_files": 0,
+          "runs": 0,
+          "sessions": 0
+        }
+      },
+      "backend": {
+        "integrity_check": "ok",
+        "schema_sha256": "0f54389f2c631fe276bed956e259208417d04d40ac5ab01afcbf617649fcc796",
+        "table_counts": {
+          "accounts": 0,
+          "ledger_entries": 0,
+          "message_tags": 0,
+          "messages": 0,
+          "orders": 0,
+          "positions": 0,
+          "trades": 0
+        }
+      },
+      "llm-provider-server": {
+        "integrity_check": "ok",
+        "schema_sha256": "4e76abec38309d889eb8889ff0cb8bd5fde46a7498a85ce017b7e3d69f557c61",
+        "table_counts": {
+          "model_catalog": 0,
+          "provider_tokens": 0,
+          "providers": 0
+        }
+      }
+    },
+    "sqlite_fingerprints_equal_at_every_checkpoint": true
+  },
+  "personal_or_secret_values_included": false,
+  "phases": {
+    "AfterDockerRestart": {
+      "completed_at_utc": "2026-10-13T11:04:06.6829726Z",
+      "docker_server": "linux 29.5.2",
+      "healthy": true,
+      "host_ports_absent": true,
+      "phase": "AfterDockerRestart",
+      "sqlite_integrity": "ok"
+    },
+    "BeforeDockerRestart": {
+      "completed_at_utc": "2026-10-13T11:02:53.9819488Z",
+      "docker_server": "linux 29.5.2",
+      "healthy": true,
+      "host_ports_absent": true,
+      "phase": "BeforeDockerRestart",
+      "sqlite_integrity": "recorded"
+    },
+    "Exercise": {
+      "completed_at_utc": "2026-10-13T11:01:51.0190753Z",
+      "docker_server": "linux 29.5.2",
+      "healthy": true,
+      "host_ports_absent": true,
+      "phase": "Exercise",
+      "sqlite_integrity": "ok"
+    }
+  },
+  "post_restart_services": {
+    "kit-t12-ops-smoke-agent-server-1": {
+      "healthy": true,
+      "state": "Up About a minute"
+    },
+    "kit-t12-ops-smoke-backend-1": {
+      "healthy": true,
+      "state": "Up About a minute"
+    },
+    "kit-t12-ops-smoke-console-1": {
+      "healthy": true,
+      "state": "Up About a minute"
+    },
+    "kit-t12-ops-smoke-llm-provider-server-1": {
+      "healthy": true,
+      "state": "Up About a minute"
+    },
+    "stock-ai-test-t08-live-agent-server-1": {
+      "healthy": true,
+      "state": "Up 2 minutes"
+    },
+    "stock-ai-test-t08-live-backend-1": {
+      "healthy": true,
+      "state": "Up 2 minutes"
+    },
+    "stock-ai-test-t08-live-console-1": {
+      "healthy": true,
+      "state": "Up 2 minutes"
+    },
+    "stock-ai-test-t08-live-llm-provider-server-1": {
+      "healthy": true,
+      "state": "Up 2 minutes"
+    }
+  },
+  "schema": "stock-ai.ticket-12-compose-acceptance.v1"
+}

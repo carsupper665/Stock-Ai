@@ -97,32 +97,40 @@ function Save-StoppedState([string]$Name) {
         'agent-server' = 'agent-server.db'
         'llm-provider-server' = 'llm-provider.db'
     }
-    $arguments = @()
-    foreach ($entry in $databaseFiles.GetEnumerator()) {
-        $identifier = Get-ServiceContainer $entry.Key
-        $target = Join-Path $destination $entry.Value
-        Invoke-Docker @('cp', "${identifier}:/data/$($entry.Value)", $target) | Out-Null
-        $arguments += @('--database', "$($entry.Key)=$target")
-    }
-    $agent = Get-ServiceContainer 'agent-server'
-    $history = Join-Path $destination 'history'
-    Invoke-Docker @('cp', "${agent}:/data/history", $history) | Out-Null
-    $historyEvidence = @(
-        Get-ChildItem -LiteralPath $history -File -Recurse | Sort-Object FullName | ForEach-Object {
-            [ordered]@{
-                relative_path = [IO.Path]::GetRelativePath($history, $_.FullName)
-                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            }
+    $localDirectory = Join-Path ([IO.Path]::GetTempPath()) "stock-ai-sqlite-$PID-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $localDirectory | Out-Null
+    try {
+        $arguments = @()
+        foreach ($entry in $databaseFiles.GetEnumerator()) {
+            $identifier = Get-ServiceContainer $entry.Key
+            $localTarget = Join-Path $localDirectory $entry.Value
+            Invoke-Docker @('cp', "${identifier}:/data/$($entry.Value)", $localTarget) | Out-Null
+            Copy-Item -LiteralPath $localTarget -Destination (Join-Path $destination $entry.Value)
+            $arguments += @('--database', "$($entry.Key)=$localTarget")
         }
-    )
-    ConvertTo-Json -InputObject @($historyEvidence) -Depth 4 | Set-Content -LiteralPath (Join-Path $destination 'history.json') -Encoding utf8NoBOM
+        $agent = Get-ServiceContainer 'agent-server'
+        $history = Join-Path $destination 'history'
+        Invoke-Docker @('cp', "${agent}:/data/history", $history) | Out-Null
+        $historyEvidence = @(
+            Get-ChildItem -LiteralPath $history -File -Recurse | Sort-Object FullName | ForEach-Object {
+                [ordered]@{
+                    relative_path = [IO.Path]::GetRelativePath($history, $_.FullName)
+                    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            }
+        )
+        ConvertTo-Json -InputObject @($historyEvidence) -Depth 4 | Set-Content -LiteralPath (Join-Path $destination 'history.json') -Encoding utf8NoBOM
 
-    $python = Get-PythonCommand
-    $tool = Join-Path $PSScriptRoot 'compose_sqlite_evidence.py'
-    $fingerprint = Join-Path $destination 'sqlite.json'
-    $pythonArguments = @($python.Prefix) + @($tool) + $arguments + @('--output', $fingerprint)
-    & $python.Command @pythonArguments | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "SQLite evidence failed for $Name" }
+        $python = Get-PythonCommand
+        $tool = Join-Path $PSScriptRoot 'compose_sqlite_evidence.py'
+        $localFingerprint = Join-Path $localDirectory 'sqlite.json'
+        $pythonArguments = @($python.Prefix) + @($tool) + $arguments + @('--output', $localFingerprint)
+        & $python.Command @pythonArguments | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "SQLite evidence failed for $Name" }
+        Copy-Item -LiteralPath $localFingerprint -Destination (Join-Path $destination 'sqlite.json')
+    } finally {
+        Remove-Item -LiteralPath $localDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
     return $destination
 }
 

@@ -6,39 +6,51 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 
 def inspect_database(label: str, path: Path) -> dict[str, object]:
     if not path.is_file() or path.stat().st_size == 0:
         raise ValueError(f"{label}: database is missing or empty")
-    connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
-    try:
-        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
-        if integrity != "ok":
-            raise ValueError(f"{label}: SQLite integrity_check failed")
-        tables = [
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    # Windows SQLite does not reliably lock databases through a WSL UNC path.
+    # Inspect a private local copy instead, preserving sidecars for WAL databases.
+    with tempfile.TemporaryDirectory(prefix="stock-ai-sqlite-evidence-") as directory:
+        local_path = Path(directory) / path.name
+        shutil.copy2(path, local_path)
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = Path(f"{path}{suffix}")
+            if sidecar.is_file():
+                shutil.copy2(sidecar, Path(f"{local_path}{suffix}"))
+
+        connection = sqlite3.connect(f"file:{local_path.as_posix()}?mode=ro", uri=True)
+        try:
+            integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+            if integrity != "ok":
+                raise ValueError(f"{label}: SQLite integrity_check failed")
+            tables = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+            ]
+            counts = {
+                table: connection.execute(
+                    f'SELECT COUNT(*) FROM "{table.replace(chr(34), chr(34) * 2)}"'
+                ).fetchone()[0]
+                for table in tables
+            }
+            schema = "\n".join(
+                row[0] or ""
+                for row in connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name"
+                )
             )
-        ]
-        counts = {
-            table: connection.execute(
-                f'SELECT COUNT(*) FROM "{table.replace(chr(34), chr(34) * 2)}"'
-            ).fetchone()[0]
-            for table in tables
-        }
-        schema = "\n".join(
-            row[0] or ""
-            for row in connection.execute(
-                "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name"
-            )
-        )
-    finally:
-        connection.close()
+        finally:
+            connection.close()
     return {
         "integrity_check": "ok",
         "schema_sha256": hashlib.sha256(schema.encode("utf-8")).hexdigest(),
