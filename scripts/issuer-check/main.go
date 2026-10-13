@@ -60,7 +60,8 @@ func validateIssuerURL(environment, raw string) (*url.URL, error) {
 		return nil, err
 	}
 	expectedPath := "/realms/stock-ai-" + strings.ToLower(environment)
-	if u.Scheme != "https" || u.Host == "" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Path != expectedPath || !safeDNSHost(u.Hostname()) {
+	port := u.Port()
+	if u.Scheme != "https" || u.Host == "" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Path != expectedPath || (port != "" && port != "443") || !safeDNSHost(u.Hostname()) {
 		return nil, fmt.Errorf("issuer URL violates stable HTTPS realm policy")
 	}
 	return u, nil
@@ -72,16 +73,30 @@ func validateJWKSURL(issuer *url.URL, raw string) (*url.URL, error) {
 		return nil, err
 	}
 	if u.Scheme != "https" || u.Host == "" || u.User != nil || u.Opaque != "" || u.Fragment != "" ||
-		!strings.EqualFold(u.Host, issuer.Host) || !strings.HasPrefix(u.Path, issuer.Path+"/") ||
+		!sameHTTPSOrigin(issuer, u) || !strings.HasPrefix(u.Path, issuer.Path+"/") ||
 		pathHasTraversal(u.Path) {
 		return nil, fmt.Errorf("JWKS URL violates same-origin realm policy")
 	}
 	return u, nil
 }
 
+func sameHTTPSOrigin(a, b *url.URL) bool {
+	return a.Scheme == "https" && b.Scheme == "https" &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) && effectiveHTTPSPort(a) == effectiveHTTPSPort(b)
+}
+
+func effectiveHTTPSPort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	return "443"
+}
+
 func safeDNSHost(host string) bool {
 	name := strings.TrimSuffix(strings.ToLower(host), ".")
-	if name == "" || name == "localhost" || strings.HasSuffix(name, ".localhost") || strings.HasSuffix(name, ".local") {
+	if name == "" || strings.HasSuffix(name, ".") || !strings.Contains(name, ".") ||
+		name == "localhost" || name == "loopback" || strings.HasSuffix(name, ".localhost") ||
+		strings.HasSuffix(name, ".loopback") || strings.HasSuffix(name, ".local") {
 		return false
 	}
 	ip := net.ParseIP(strings.SplitN(name, "%", 2)[0])

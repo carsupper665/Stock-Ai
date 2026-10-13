@@ -1,10 +1,10 @@
 {
   "schema": "stock-ai.test-edge-evidence.v1",
   "status": "not_run",
-  "captured_at_utc": "2026-10-13T11:24:11Z",
+  "captured_at_utc": "2026-10-13T11:31:25Z",
   "capture_context": "worktree review; no Test host or Test IdP was accessed",
   "local_checks": {
-    "policy_unittests": "passed: scripts.test.test_test_edge (12 tests)",
+    "policy_unittests": "passed: scripts.test.test_test_edge (13 tests)",
     "oidc_gateway_go_tests": "passed: go test ./internal/gateway",
     "issuer_check_go_tests": "passed: GO111MODULE=off go test ./scripts/issuer-check",
     "external_probe_powershell_parse": "not_run: pwsh is not installed in the worktree environment",

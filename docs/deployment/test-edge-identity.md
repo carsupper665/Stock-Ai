@@ -12,8 +12,8 @@ Release or production accounts, keys, sessions, clients, or secrets.
 
 Choose stable DNS names, for example app-test.example and idp-test.example;
 replace these examples with the approved Test names in the machine-local
-Compose env file. The issuer must remain the exact same HTTPS URL from browsers,
-the Gateway, Console, and Backend, for example
+Compose env file. The issuer must remain the exact same HTTPS URL on TCP 443
+from browsers, the Gateway, Console, and Backend, for example
 https://idp-test.example/realms/stock-ai-test. Docker DNS, localhost, and
 host-specific aliases must never replace the issuer claim or JWKS URL.
 
@@ -99,7 +99,8 @@ host. The Gateway image includes an issuer-check command for this purpose:
     docker compose --env-file C:\ProgramData\StockAI\Test\compose.env -f deploy/compose/compose.yaml -f deploy/compose/compose.test-edge.yaml exec -T oidc-gateway /issuer-check Test https://idp-test.example/realms/stock-ai-test
 
 Use the actual configured issuer in the command. It fails on DNS/TLS/HTTP
-errors, issuer mismatch, a JWKS URL outside the realm, or an empty key set. A
+errors, a non-443 or local/IP-literal issuer, issuer mismatch, a cross-origin
+or out-of-realm JWKS URL, or an empty key set. A
 successful output records the exact issuer, JWKS host, and key count without
 recording key material.
 

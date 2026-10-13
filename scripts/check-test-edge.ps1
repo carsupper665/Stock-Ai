@@ -7,13 +7,29 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+function Test-StableDnsHostname([string] $Name) {
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    $normalized = $Name.ToLowerInvariant()
+    if ($normalized.EndsWith('..')) { return $false }
+    if ($normalized.EndsWith('.')) { $normalized = $normalized.Substring(0, $normalized.Length - 1) }
+    $parsedAddress = $null
+    if ([System.Net.IPAddress]::TryParse($normalized, [ref] $parsedAddress)) { return $false }
+    if ($normalized -eq 'localhost' -or $normalized -eq 'loopback' -or $normalized.EndsWith('.localhost') -or $normalized.EndsWith('.loopback') -or $normalized.EndsWith('.local')) { return $false }
+    $labels = $normalized.Split('.')
+    if ($labels.Count -lt 2 -or $normalized.Length -gt 253) { return $false }
+    foreach ($label in $labels) {
+        if ($label.Length -gt 63 -or $label -notmatch '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$') { return $false }
+    }
+    return $true
+}
+
 $issuerUri = [Uri] $Issuer
-$issuerHost = $issuerUri.DnsSafeHost.TrimEnd('.').ToLowerInvariant()
-$localIssuerHost = $issuerUri.IsLoopback -or $issuerHost -eq 'localhost' -or $issuerHost.EndsWith('.localhost') -or $issuerHost.EndsWith('.local')
-if ($issuerUri.Scheme -ne 'https' -or $issuerUri.UserInfo -or $localIssuerHost -or $issuerUri.AbsolutePath -ne '/realms/stock-ai-test' -or $issuerUri.Query -or $issuerUri.Fragment) {
+$issuerHost = $issuerUri.DnsSafeHost
+$issuerUriPort = if ($issuerUri.IsDefaultPort) { 443 } else { $issuerUri.Port }
+if ($issuerUri.Scheme -ne 'https' -or $issuerUriPort -ne 443 -or $issuerUri.UserInfo -or -not (Test-StableDnsHostname $issuerHost) -or $issuerUri.AbsolutePath -ne '/realms/stock-ai-test' -or $issuerUri.Query -or $issuerUri.Fragment) {
     throw 'Issuer must be the exact HTTPS Test realm URL.'
 }
-if ($AppHost -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$' -or $AppHost -match '\.\.|localhost|127\.0\.0\.1|\[::1\]') {
+if (-not (Test-StableDnsHostname $AppHost)) {
     throw 'AppHost must be a stable non-local DNS hostname.'
 }
 if (-not $FullPortScan) { throw 'Run the independent external probe with -FullPortScan.' }
@@ -99,7 +115,7 @@ try {
         $appTlsCertificates += Get-TlsMetadata -HostName $AppHost -Address $address -Port 443
     }
     foreach ($address in $idpAddresses) {
-        $idpTlsCertificates += Get-TlsMetadata -HostName $issuerUri.Host -Address $address -Port $issuerUri.Port
+        $idpTlsCertificates += Get-TlsMetadata -HostName $issuerUri.Host -Address $address -Port 443
     }
     Add-Check 'app TLS certificate trust and hostname' ($appTlsCertificates.Count -eq $appAddresses.Count) $appTlsCertificates
     Add-Check 'IdP TLS certificate trust and hostname' ($idpTlsCertificates.Count -eq $idpAddresses.Count) $idpTlsCertificates

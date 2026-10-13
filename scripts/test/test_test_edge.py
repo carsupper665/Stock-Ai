@@ -162,7 +162,12 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertIn("func TestValidateJWKSURLRequiresSameOriginAndRealmPath", checks)
         for case in (
             'name: "userinfo"',
+            'name: "nonstandard port"',
+            'name: "stable issuer with explicit 443"',
             'name: "localhost"',
+            'name: "loopback name"',
+            'name: "loopback subdomain"',
+            'name: "single-label host"',
             'name: "IPv4 loopback"',
             'name: "IPv6 loopback"',
             'name: "foreign origin"',
@@ -220,7 +225,7 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertEqual(evidence["status"], "not_run")
         self.assertEqual(
             evidence["local_checks"]["policy_unittests"],
-            "passed: scripts.test.test_test_edge (12 tests)",
+            "passed: scripts.test.test_test_edge (13 tests)",
         )
         self.assertIn("not installed", evidence["local_checks"]["external_probe_powershell_parse"])
         self.assertEqual(evidence["test_host_checks"]["nginx_and_application_startup"], "not_run")
@@ -255,13 +260,9 @@ class TestEdgePolicyTest(unittest.TestCase):
     def test_external_probe_validates_issuer_and_records_per_address_tls_metadata(self):
         script = EXTERNAL_CHECK.read_text(encoding="utf-8")
         for required in (
-            "$issuerUri.UserInfo",
-            "$issuerUri.IsLoopback",
-            "$issuerHost.EndsWith('.localhost')",
-            "$issuerHost.EndsWith('.local')",
             "function Get-TlsMetadata",
             "$stream.AuthenticateAsClient($HostName)",
-            "-Address $address -Port $issuerUri.Port",
+            "-Address $address -Port 443",
             "certificate_issuer = $certificate.Issuer",
             "not_after_utc = $certificate.NotAfter.ToUniversalTime().ToString('o')",
             "app_tls_certificates = $appTlsCertificates",
@@ -271,6 +272,25 @@ class TestEdgePolicyTest(unittest.TestCase):
         ):
             self.assertIn(required, script)
         self.assertNotIn("Get-OpenTcpPorts -HostName", script)
+
+    def test_powershell_hosts_and_issuer_are_stable_dns_on_port_443(self):
+        script = EXTERNAL_CHECK.read_text(encoding="utf-8")
+        helper = script.split("function Test-StableDnsHostname", 1)[1].split("$issuerUri =", 1)[0]
+        for required in (
+            "[System.Net.IPAddress]::TryParse",
+            "$normalized.EndsWith('..')",
+            "$normalized -eq 'localhost'",
+            "$normalized -eq 'loopback'",
+            "$normalized.EndsWith('.localhost')",
+            "$normalized.EndsWith('.loopback')",
+            "$normalized.EndsWith('.local')",
+            "$labels.Count -lt 2",
+        ):
+            self.assertIn(required, helper)
+        self.assertIn("$issuerUriPort -ne 443", script)
+        self.assertIn("Test-StableDnsHostname $issuerHost", script)
+        self.assertIn("Test-StableDnsHostname $AppHost", script)
+        self.assertIn("Get-TlsMetadata -HostName $issuerUri.Host -Address $address -Port 443", script)
 
 
 if __name__ == "__main__":
