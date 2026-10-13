@@ -40,4 +40,5 @@ __pycache__/
 .claude/*
 .opencode/*
 .scratch/*
+/.ticket 12 validation/
 /frontend/design_handoff_agent_console/*

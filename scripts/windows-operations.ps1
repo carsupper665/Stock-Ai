@@ -20,6 +20,9 @@ $script:ImageVariables = [ordered]@{
     'agent-server' = 'AGENT_SERVER_IMAGE'
     console = 'CONSOLE_IMAGE'
 }
+$script:DigestRequiredEnvironments = @('Release')
+$script:ImmutableImageReferenceRegex = '^[^\s@]+@(?<digest>sha256:[0-9a-f]{64})$'
+$script:ChecksumLinePrefixRegex = '^([0-9a-fA-F]{64})\s+\*?'
 $script:ComposePath = (Resolve-Path -LiteralPath $ComposeFile -ErrorAction Stop).ProviderPath
 $script:EnvPath = (Resolve-Path -LiteralPath $EnvFile -ErrorAction Stop).ProviderPath
 $script:EvidencePath = [IO.Path]::GetFullPath($EvidenceDirectory)
@@ -74,11 +77,24 @@ function Assert-IsolatedCompose([object]$Config, [switch]$RequireDigests) {
         $service = $Config.services.$name
         if ($service.ports -or $service.network_mode) { throw "$name has an unsupported host port or network mode." }
         if ($service.build) { throw "$name uses a local build; only promoted images are allowed." }
-        if ($RequireDigests -and $service.image -notmatch '@sha256:[0-9a-f]{64}$') { throw "$name image is not pinned to an immutable SHA256 digest." }
+        if ($RequireDigests -and $service.image -notmatch $script:ImmutableImageReferenceRegex) { throw "$name image is not pinned to an immutable SHA256 digest." }
     }
     foreach ($name in @('backend', 'llm-provider-server', 'agent-server')) {
         if ($Config.services.$name.networks.PSObject.Properties.Name -contains 'edge') { throw "$name unexpectedly joins the public edge network." }
     }
+}
+
+function Assert-EnvironmentCompose([object]$Config, [string]$Environment, [switch]$RequireDigests) {
+    if ($Environment -notin @('Test', 'Release')) { throw 'STOCK_AI_ENVIRONMENT must be Test or Release.' }
+    $digestRequired = ($script:DigestRequiredEnvironments -contains $Environment) -or $RequireDigests
+    if ($digestRequired) { Assert-IsolatedCompose $Config -RequireDigests }
+    else { Assert-IsolatedCompose $Config }
+}
+
+function Get-ConfiguredImageDigest([string]$ImageReference) {
+    $match = [regex]::Match($ImageReference, $script:ImmutableImageReferenceRegex)
+    if ($match.Success) { return $match.Groups['digest'].Value }
+    return $null
 }
 
 function Get-ContainerId([string]$Service) {
@@ -151,7 +167,7 @@ function Get-Promotion([string]$Path) {
     $promoted = [ordered]@{}
     foreach ($service in $script:Services) {
         $reference = [string]$manifest.images.$service
-        if ($reference -notmatch '^[^\s@]+@sha256:[0-9a-f]{64}$') { throw "Promotion entry for $service is not an immutable image digest." }
+        if ($reference -notmatch $script:ImmutableImageReferenceRegex) { throw "Promotion entry for $service is not an immutable image digest." }
         $promoted[$service] = $reference
     }
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -160,7 +176,7 @@ function Get-Promotion([string]$Path) {
     $leaf = [IO.Path]::GetFileName($manifestPath)
     $verified = $false
     foreach ($line in [IO.File]::ReadAllLines($sidecar)) {
-        if ($line -match ('^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($leaf) + '$')) {
+        if ($line -match ($script:ChecksumLinePrefixRegex + [regex]::Escape($leaf) + '$')) {
             $verified = $Matches[1].ToLowerInvariant() -eq $manifestHash
         }
     }
@@ -218,7 +234,7 @@ function Test-Preflight {
     try { $config = Get-ComposeConfig }
     catch { $issues.Add("Compose configuration could not be resolved ($($_.Exception.GetType().Name)).") }
     if ($config) {
-        try { Assert-IsolatedCompose $config }
+        try { Assert-EnvironmentCompose $config ([string]$values['STOCK_AI_ENVIRONMENT']) }
         catch { $issues.Add($_.Exception.Message) }
     }
     $namespace = [string]$values['STOCK_AI_SECRET_NAMESPACE']
@@ -251,27 +267,27 @@ function Test-Preflight {
 
 function Get-SafeStatus {
     $config = Get-ComposeConfig
-    Assert-IsolatedCompose $config
+    $values = Read-EnvironmentFile
+    Assert-EnvironmentCompose $config ([string]$values['STOCK_AI_ENVIRONMENT'])
     $services = @()
     foreach ($service in $script:Services) {
         $container = Get-Container $service
         if (!$container) { $services += [ordered]@{ service = $service; container_id = $null; state = 'missing'; health = 'unknown'; digest = $null; image_reference = [string]$config.services.$service.image; restart_count = 0; disk_bytes = 0; volume_names = @() }; continue }
         $health = if ($container.State.Health) { $container.State.Health.Status } else { 'none' }
-        $digest = @($container.RepoDigests | Where-Object { $_ -match '@sha256:' })
+        $imageReference = [string]$config.services.$service.image
         $volumes = @($container.Mounts | Where-Object { $_.Type -eq 'volume' } | ForEach-Object { $_.Name } | Sort-Object -Unique)
         $services += [ordered]@{
             service = $service
             container_id = $container.Id.Substring(0, 12)
             state = $container.State.Status
             health = $health
-            digest = if ($digest.Count) { $digest[0] } else { $null }
-            image_reference = [string]$config.services.$service.image
+            digest = Get-ConfiguredImageDigest $imageReference
+            image_reference = $imageReference
             restart_count = $container.RestartCount
             disk_bytes = [int64]$container.SizeRw
             volume_names = $volumes
         }
     }
-    $values = Read-EnvironmentFile
     $issuer = [string]$values['OIDC_ISSUER']
     $issuerReachable = $false
     if ($issuer -match '^https://') {
@@ -313,7 +329,8 @@ switch ($Action) {
     'Preflight' { Test-Preflight; Write-Host "Preflight passed; report=$(Join-Path $script:EvidencePath 'preflight.json')" }
     'Start' {
         Test-Preflight
-        $config = Get-ComposeConfig; Assert-IsolatedCompose $config
+        $values = Read-EnvironmentFile
+        $config = Get-ComposeConfig; Assert-EnvironmentCompose $config ([string]$values['STOCK_AI_ENVIRONMENT'])
         $result = Invoke-Compose @('up', '-d', '--wait', '--wait-timeout', "$HealthTimeoutSeconds") -AllowFailure
         if ($result.ExitCode -ne 0) {
             try { Write-Diagnostics (Join-Path $script:EvidencePath 'diagnostics.json') } catch { }
@@ -358,7 +375,7 @@ switch ($Action) {
         $rollback | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $rollbackPath -Encoding utf8NoBOM
         Set-ImageAssignments $script:EnvPath $promotion.Images
         try {
-            $updated = Get-ComposeConfig; Assert-IsolatedCompose $updated
+            $updated = Get-ComposeConfig; Assert-EnvironmentCompose $updated ([string]$rollback.environment) -RequireDigests
             foreach ($service in $script:Services) { if ($updated.services.$service.image -ne $promotion.Images[$service]) { throw "Updated Compose image mismatch for $service." } }
             $result = Invoke-Compose @('up', '-d', '--wait', '--wait-timeout', "$HealthTimeoutSeconds") -AllowFailure
             if ($result.ExitCode -ne 0) { throw 'Compose update did not reach healthy state.' }

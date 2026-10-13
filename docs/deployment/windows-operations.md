@@ -5,8 +5,11 @@ Linux-container Compose deployment. It operates only on
 `deploy/compose/compose.yaml` and its explicit environment file. The legacy
 mixed Windows/Linux distribution is excluded: this workflow never launches
 the distribution `.exe` files and rejects Compose files with a different
-service set, host-published application ports, local image builds, or mutable
-image tags.
+service set, host-published application ports, or local image builds. Release
+preflight, Start, and Status require every application image to use an
+immutable digest. Isolated Test deployments may use temporary tags while they
+are being exercised; Update always requires promoted immutable digests from
+Ticket 10.
 
 ## Install and preflight
 
@@ -45,17 +48,18 @@ and the diagnostics file location on timeout. Stop sends graceful Compose
 stops in dependency order: Console, Agent Server, LLM Provider Server, then
 Backend. It verifies that no application container remains running. It does
 not remove volumes. Status writes `status.json` with short container ID,
-image digest/reference, health, restart count, writable container disk bytes,
-volume names, Docker disk usage, certificate
+the digest parsed from an immutable configured image reference (or `null` for
+a temporary Test tag), image reference, health, restart count, writable
+container disk bytes, volume names, Docker disk usage, certificate
 expiry for certificates under `STOCK_AI_SECRETS_DIR`, HTTPS IdP issuer
 reachability, and the latest file in optional `STOCK_AI_BACKUP_DIR`. To include
 certificates stored elsewhere, set non-secret `STOCK_AI_CERTIFICATE_FILES` to
 a semicolon-separated list of certificate paths. It does
 not serialize environment values, container environment, logs, secret values,
-or certificate contents. If the local daemon has no `RepoDigest`, `digest` is
-`null` and `image_reference` reports the configured tag. Diagnose writes only service names, short container
-IDs, health/state, exit codes, restart counts, and whether Docker reported an
-error.
+or certificate contents. For a Test tag, `digest` is `null` and
+`image_reference` reports the configured tag. Diagnose writes only service
+names, short container IDs, health/state, exit codes, restart counts, and
+whether Docker reported an error.
 
 The Compose stack uses `restart: unless-stopped`; after Windows or Docker
 Desktop restarts, run Status to inspect recovery and Start to bring up any
@@ -127,7 +131,9 @@ real Docker Desktop restart; the sanitized reports and persistent-state
 fingerprints are recorded in
 [`ticket-12-windows-evidence.md`](ticket-12-windows-evidence.md) and
 [`ticket-12-evidence/formal-compose-acceptance.json`](ticket-12-evidence/formal-compose-acceptance.json).
-Successful Update and metadata-driven Rollback remain pending because no valid
-Ticket 10 promotion manifest is available. Do not treat the invalid-checksum
-rejection fixture as successful update evidence; run those two actions with a
-real promoted manifest when Ticket 10 provides one.
+The official Exercise, `BeforeDockerRestart`, and `AfterDockerRestart` runs
+passed. Release mode rejects mutable image references; Test mode permits its
+temporary tags. Successful Update and metadata-driven Rollback remain pending
+because no valid Ticket 10 promotion manifest is available. The invalid
+checksum fixture proves rejection only; run Update and Rollback with the real
+promoted manifest when Ticket 10 provides one.
