@@ -19,6 +19,20 @@ function Assert-RecoveryVolumeScaffolding {
     }
 }
 
+function Initialize-RecoveryBackupDirectory {
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (!(Test-Path -LiteralPath $fullPath)) { New-Item -ItemType Directory -Path $fullPath -Force | Out-Null }
+    Set-RecoveryDirectoryAcl -Path $fullPath
+    foreach ($entry in Get-ChildItem -LiteralPath $fullPath -Force -Recurse) {
+        if ($entry.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) { throw 'Backup directory contains a reparse point; refusing to stage plaintext.' }
+        if ($entry.PSIsContainer) { Set-RecoveryDirectoryAcl -Path $entry.FullName }
+        else { Set-RecoveryFileAcl -Path $entry.FullName }
+    }
+    return $fullPath
+}
+
 function Set-RecoveryDirectoryAcl {
     param([Parameter(Mandatory = $true)] [string]$Path)
 
@@ -78,6 +92,64 @@ function Assert-RecoveryDirectoryAcl {
     }
 }
 
+function Set-RecoveryFileAcl {
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    $file = Get-Item -LiteralPath $Path -Force
+    if ($file.PSIsContainer -or $file.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) { throw 'Recovery file ACL target must be a regular file.' }
+    $operatorSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $sids = @($operatorSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object -Unique
+    $acl = [Security.AccessControl.FileSecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner([Security.Principal.SecurityIdentifier]::new($operatorSid))
+    foreach ($sidText in $sids) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new($sidText),
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow
+        )
+        $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+    Assert-RecoveryFileAcl -Path $Path -ExpectedSids $sids
+}
+
+function Assert-RecoveryFileAcl {
+    param([Parameter(Mandatory = $true)] [string]$Path, [string[]]$ExpectedSids)
+
+    if (!$ExpectedSids) { $ExpectedSids = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544') }
+    $acl = Get-Acl -LiteralPath $Path
+    if (!$acl.AreAccessRulesProtected) { throw 'Recovery file ACL still inherits access rules.' }
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) { throw 'Recovery file owner must be the current operator.' }
+    $actual = @($acl.Access)
+    if ($actual.Count -ne $ExpectedSids.Count) { throw 'Recovery file ACL contains unexpected entries.' }
+    $expected = @($ExpectedSids | Sort-Object -Unique)
+    foreach ($rule in $actual) {
+        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($sid -notin $expected -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or $rule.IsInherited) {
+            throw 'Recovery file ACL is not restricted to the operator, SYSTEM, and local Administrators.'
+        }
+    }
+}
+
+function Assert-RecoveryScheduledAccount {
+    param([Parameter(Mandatory = $true)] [string]$ScheduledSid, [Parameter(Mandatory = $true)] [string]$OperatorSid)
+    if ($ScheduledSid -cne $OperatorSid) { throw 'Scheduled backup account must be the current ACL operator account.' }
+}
+
+function Get-RecoveryContainerIds {
+    param([Parameter(Mandatory = $true)] [string[]]$Services, [Parameter(Mandatory = $true)] [scriptblock]$ComposeInvoker)
+
+    $containers = @{}
+    foreach ($service in $Services) {
+        $result = & $ComposeInvoker -ComposeArguments @('ps', '--all', '-q', $service)
+        $id = [string]($result.Output -join '')
+        if (!$id.Trim()) { throw "Compose container is missing for $service." }
+        $containers[$service] = $id.Trim()
+    }
+    return $containers
+}
+
 function Invoke-RecoveryVolumeOwnership {
     param(
         [Parameter(Mandatory = $true)] [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')] [string]$VolumeName,
@@ -92,4 +164,4 @@ function Invoke-RecoveryVolumeOwnership {
     & $DockerInvoker -DockerArguments $verify
 }
 
-Export-ModuleMember -Function Assert-RecoveryVolumeScaffolding, Set-RecoveryDirectoryAcl, Assert-RecoveryDirectoryAcl, Invoke-RecoveryVolumeOwnership
+Export-ModuleMember -Function Assert-RecoveryVolumeScaffolding, Initialize-RecoveryBackupDirectory, Set-RecoveryDirectoryAcl, Assert-RecoveryDirectoryAcl, Set-RecoveryFileAcl, Assert-RecoveryFileAcl, Assert-RecoveryScheduledAccount, Get-RecoveryContainerIds, Invoke-RecoveryVolumeOwnership

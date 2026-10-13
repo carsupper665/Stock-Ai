@@ -82,6 +82,24 @@ class RecoveryPolicyTest(unittest.TestCase):
         self.assertIn("chown -R 65532:65532 /data", self.policy)
         self.assertIn("Assert-RecoveryDirectoryAcl -Path $fullPath", self.policy)
 
+    def test_sensitive_backup_paths_are_locked_before_logs_or_staging(self):
+        initialize = self.script.index("Initialize-RecoveryBackupDirectory -Path $BackupDirectory")
+        self.assertLess(initialize, self.script.index("$LogPath = Join-Path $BackupDirectory"))
+        self.assertLess(initialize, self.script.index("function Invoke-Backup"))
+        self.assertLess(initialize, self.script.index("function Invoke-Prune"))
+        self.assertLess(initialize, self.script.index("switch ($Action)"))
+        self.assertIn("Set-RecoveryDirectoryAcl -Path $stage", self.script)
+        self.assertIn("Set-RecoveryFileAcl -Path $entry.FullName", self.policy)
+        self.assertIn("must be the current ACL operator account", self.policy)
+        self.assertIn("Assert-RecoveryScheduledAccount -ScheduledSid $scheduledSid", self.script)
+        self.assertIn("locks an existing backup directory and its files before recovery actions use it", self.pester)
+
+    def test_container_lookup_includes_stopped_compose_containers(self):
+        self.assertIn("Get-RecoveryContainerIds -Services $Services", self.script)
+        self.assertIn("@('ps', '--all', '-q', $service)", self.policy)
+        self.assertIn("queries Compose for all containers including stopped and created services", self.pester)
+        self.assertIn("accepts scheduled tasks only for the ACL operator SID", self.pester)
+
     def test_recovery_uid_matches_each_persisted_service_image(self):
         helper = self.policy.split(" = '", 1)[1].split("'", 1)[0]
         for service in ("backend", "agent-server", "llm-provider-server"):

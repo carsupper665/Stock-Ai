@@ -44,7 +44,14 @@ $SecretsDirectory = [IO.Path]::GetFullPath([string]$Values['STOCK_AI_SECRETS_DIR
 $Namespace = [string]$Values['STOCK_AI_SECRET_NAMESPACE']
 $Stack = [string]$Values['STOCK_AI_INSTANCE']
 if (!$Namespace -or !$Stack -or !(Test-Path -LiteralPath $SecretsDirectory -PathType Container)) { throw 'Secret namespace, stack name, or secret directory is invalid.' }
-New-Item -ItemType Directory -Path $BackupDirectory -Force | Out-Null
+if ($Action -eq 'InstallSchedule') {
+    if (!$ScheduledTaskUser) { throw 'InstallSchedule requires -ScheduledTaskUser.' }
+    $RecoveryCredential = Get-Credential -UserName $ScheduledTaskUser -Message 'Enter the dedicated backup account password for Task Scheduler.'
+    $scheduledSid = ([Security.Principal.NTAccount]::new($RecoveryCredential.UserName)).Translate([Security.Principal.SecurityIdentifier]).Value
+    $operatorSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Assert-RecoveryScheduledAccount -ScheduledSid $scheduledSid -OperatorSid $operatorSid
+}
+$BackupDirectory = Initialize-RecoveryBackupDirectory -Path $BackupDirectory
 $LogPath = Join-Path $BackupDirectory ("recovery-{0}.log" -f [DateTime]::UtcNow.ToString('yyyyMMdd'))
 
 function Log-Recovery([string]$Message) {
@@ -142,13 +149,8 @@ function Test-Inventory([string]$Root, [object]$Manifest) {
 }
 
 function Get-Containers {
-    $result = @{}
-    foreach ($service in $Services) {
-        $id = (Invoke-Compose @('ps', '-q', $service)).Output -join ''
-        if (!$id.Trim()) { throw "Compose container is missing for $service." }
-        $result[$service] = $id.Trim()
-    }
-    return $result
+    $composeInvoker = { param([string[]]$ComposeArguments) Invoke-Compose $ComposeArguments }
+    return Get-RecoveryContainerIds -Services $Services -ComposeInvoker $composeInvoker
 }
 
 function Test-EmptyVolumes([object]$Containers, [string]$Scratch) {
@@ -165,6 +167,7 @@ function Invoke-Backup {
     $wasRunning = @((Invoke-Compose @('ps', '--status', 'running', '-q')).Output | Where-Object { $_.Trim() }).Count -gt 0
     $stage = Join-Path $BackupDirectory ('.staging-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage | Out-Null
+    Set-RecoveryDirectoryAcl -Path $stage
     $archive = "$stage.zip"
     try {
         Invoke-Compose @('stop', '--timeout', '30') | Out-Null
@@ -308,9 +311,8 @@ function Invoke-Prune {
 }
 
 function Install-RecoverySchedule {
-    if (!$ScheduledTaskUser) { throw 'InstallSchedule requires -ScheduledTaskUser.' }
     if (!$CertificateThumbprint) { throw 'InstallSchedule requires -CertificateThumbprint.' }
-    $credential = Get-Credential -UserName $ScheduledTaskUser -Message 'Enter the dedicated backup account password for Task Scheduler.'
+    $credential = $RecoveryCredential
     $common = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$PSCommandPath`" -EnvFile `"$EnvPath`" -ComposeFile `"$ComposePath`""
     $backupAction = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument "$common -Action Backup -CertificateThumbprint `"$CertificateThumbprint`""
     $markerPath = Join-Path $BackupDirectory 'offhost-verification.json'

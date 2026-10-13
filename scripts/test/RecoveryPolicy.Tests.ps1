@@ -50,6 +50,24 @@ Describe 'Recovery volume scaffolding checks' {
 }
 
 Describe 'Recovery ACL and restored ownership policy' {
+    It 'locks an existing backup directory and its files before recovery actions use it' {
+        $directory = Join-Path $TestDrive ([Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $directory | Out-Null
+        $existing = Join-Path $directory 'prior-backup.sai-backup'
+        Set-Content -LiteralPath $existing -Value 'ciphertext fixture'
+        $everyone = [Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+        $broadRule = [Security.AccessControl.FileSystemAccessRule]::new($everyone, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)
+        $directoryAcl = Get-Acl -LiteralPath $directory
+        $directoryAcl.AddAccessRule($broadRule)
+        Set-Acl -LiteralPath $directory -AclObject $directoryAcl
+        $fileAcl = Get-Acl -LiteralPath $existing
+        $fileAcl.AddAccessRule($broadRule)
+        Set-Acl -LiteralPath $existing -AclObject $fileAcl
+        Initialize-RecoveryBackupDirectory -Path $directory | Should -Be $directory
+        { Assert-RecoveryDirectoryAcl -Path $directory } | Should -Not -Throw
+        { Assert-RecoveryFileAcl -Path $existing } | Should -Not -Throw
+    }
+
     It 'sets and verifies the protected recovery directory DACL before use' {
         $directory = Join-Path $TestDrive ([Guid]::NewGuid().ToString('N'))
         Set-RecoveryDirectoryAcl -Path $directory
@@ -100,5 +118,29 @@ Describe 'Recovery ACL and restored ownership policy' {
     It 'rejects volume names that could alter Docker mount options' {
         $docker = { param([string[]]$DockerArguments) throw 'Docker must not be called' }
         { Invoke-RecoveryVolumeOwnership -VolumeName 'safe,volume=other' -DockerInvoker $docker } | Should -Throw
+    }
+
+    It 'accepts scheduled tasks only for the ACL operator SID' {
+        { Assert-RecoveryScheduledAccount -ScheduledSid 'S-1-5-21-1' -OperatorSid 'S-1-5-21-1' } | Should -Not -Throw
+        { Assert-RecoveryScheduledAccount -ScheduledSid 'S-1-5-21-2' -OperatorSid 'S-1-5-21-1' } | Should -Throw '*current ACL operator account*'
+    }
+
+    It 'queries Compose for all containers including stopped and created services' {
+        $script:composeCalls = [Collections.Generic.List[object]]::new()
+        $compose = {
+            param([string[]]$ComposeArguments)
+            $script:composeCalls.Add($ComposeArguments)
+            if ($ComposeArguments -contains '--all') {
+                return [pscustomobject]@{ Output = @("$($ComposeArguments[-1])-stopped-id") }
+            }
+            return [pscustomobject]@{ Output = @() }
+        }
+        $services = @('backend', 'llm-provider-server', 'agent-server')
+        $containers = Get-RecoveryContainerIds -Services $services -ComposeInvoker $compose
+        $containers.backend | Should -Be 'backend-stopped-id'
+        $containers.'llm-provider-server' | Should -Be 'llm-provider-server-stopped-id'
+        $containers.'agent-server' | Should -Be 'agent-server-stopped-id'
+        $script:composeCalls.Count | Should -Be 3
+        foreach ($call in $script:composeCalls) { $call | Should -Contain '--all' }
     }
 }

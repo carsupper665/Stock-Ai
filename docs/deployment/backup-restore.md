@@ -27,6 +27,11 @@ New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
 icacls $BackupDir /inheritance:r /grant:r "$($BackupAccount):(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F'
 ```
 
+The script enforces and verifies this protected ACL before creating a log,
+staging directory, or ZIP. It also secures existing child files/directories
+before continuing, then applies a protected ACL to each new plaintext staging
+directory. Its owner/current operator SID is the account running the script.
+
 Set `STOCK_AI_BACKUP_DIR` in the environment file. Run these commands from an
 elevated PowerShell 7 session after confirming the recovery certificate and
 its private-key escrow:
@@ -81,6 +86,10 @@ account after confirming its Docker access and off-host replication schedule:
 
 The installer prompts for the account password and stores it through Task
 Scheduler; it registers daily backup at 02:00 and weekly prune at Sunday 04:00.
+The scheduled account SID must equal the current operator SID that owns the
+backup-directory ACL. Sign in/run setup as that dedicated account; installing
+from a different administrator account is rejected. At task runtime the same
+SID re-applies and verifies the backup ACL before any output is created.
 Run the retention task only after off-host replication verification. Run the
 operation as a dedicated, non-interactive Windows account and inspect the Task
 Scheduler Last Run Result and the current `recovery-YYYYMMDD.log`. A failed run exits
@@ -105,6 +114,8 @@ creates containers without starting services, copies the complete
 service state into the empty named volumes, and exports the archived Compose
 file, environment file, and secrets to a separate recovery directory. The
 exported environment file is rewritten to point at its exported secrets.
+Container lookup uses `docker compose ps --all -q`, so stopped containers from
+Backup and newly created, not-yet-started containers during Restore are found.
 
 Fresh volumes may contain only the Docker image's empty copy-up scaffolding:
 `backend:/data/logs` and `agent-server:/data/history`. Those exact directories
