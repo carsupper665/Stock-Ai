@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "windows-operations.ps1"
 DOC = ROOT / "docs" / "deployment" / "windows-operations.md"
+LOCAL_DOC = ROOT / "docs" / "deployment" / "local-operations.md"
 
 
 class WindowsOperationsPolicyTest(unittest.TestCase):
@@ -15,6 +16,7 @@ class WindowsOperationsPolicyTest(unittest.TestCase):
     def setUpClass(cls):
         cls.script = SCRIPT.read_text(encoding="utf-8")
         cls.doc = DOC.read_text(encoding="utf-8")
+        cls.local_doc = LOCAL_DOC.read_text(encoding="utf-8")
 
     def test_noninteractive_actions_and_compose_path_are_explicit(self):
         for action in ("Install", "Preflight", "Start", "Status", "Stop", "Update", "Rollback", "Diagnose"):
@@ -165,9 +167,10 @@ class WindowsOperationsPolicyTest(unittest.TestCase):
         self.assertIn("if (!$verified) { throw", get_promotion)
 
     def test_legacy_exclusion_and_spaced_path_instructions(self):
-        self.assertIn("C:\\ProgramData\\Stock AI", self.doc)
+        self.assertIn("WSL/Linux", self.doc)
+        self.assertIn("not_run", self.doc)
         self.assertIn("-LiteralPath", self.script)
-        self.assertIn("legacy\nmixed Windows/Linux distribution is excluded", self.doc)
+        self.assertIn("legacy mixed Windows/Linux\ndistribution", self.local_doc)
 
 if __name__ == "__main__":
     unittest.main()
