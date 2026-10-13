@@ -1,0 +1,69 @@
+{
+  "checked_at_utc": "2026-10-13T10:34:35.5621623Z",
+  "services": [
+    {
+      "service": "backend",
+      "container_id": "c7ad042e151b",
+      "state": "running",
+      "health": "healthy",
+      "digest": null,
+      "image_reference": "stock-ai/backend:0.7.0",
+      "restart_count": 0,
+      "disk_bytes": 0,
+      "volume_names": [
+        "kit-t12-ops-smoke_backend_state"
+      ]
+    },
+    {
+      "service": "llm-provider-server",
+      "container_id": "0748b90d99eb",
+      "state": "running",
+      "health": "healthy",
+      "digest": null,
+      "image_reference": "stock-ai/llm-provider-server:0.7.0",
+      "restart_count": 0,
+      "disk_bytes": 0,
+      "volume_names": [
+        "kit-t12-ops-smoke_llm_state"
+      ]
+    },
+    {
+      "service": "agent-server",
+      "container_id": "a848ecbeeeeb",
+      "state": "running",
+      "health": "healthy",
+      "digest": null,
+      "image_reference": "stock-ai/agent-server:0.7.0",
+      "restart_count": 0,
+      "disk_bytes": 0,
+      "volume_names": [
+        "kit-t12-ops-smoke_agent_state"
+      ]
+    },
+    {
+      "service": "console",
+      "container_id": "81330f69a5b8",
+      "state": "running",
+      "health": "healthy",
+      "digest": null,
+      "image_reference": "stock-ai/console:0.7.0",
+      "restart_count": 0,
+      "disk_bytes": 0,
+      "volume_names": []
+    }
+  ],
+  "docker_disk_usage": [
+    "{\"Active\":\"4\",\"Reclaimable\":\"518.8MB (83%)\",\"Size\":\"619MB\",\"TotalCount\":\"8\",\"Type\":\"Images\"}",
+    "{\"Active\":\"8\",\"Reclaimable\":\"0B\",\"Size\":\"0B\",\"TotalCount\":\"8\",\"Type\":\"Containers\"}",
+    "{\"Active\":\"6\",\"Reclaimable\":\"0B (0%)\",\"Size\":\"525kB\",\"TotalCount\":\"6\",\"Type\":\"Local Volumes\"}",
+    "{\"Active\":\"0\",\"Reclaimable\":\"11.95GB\",\"Size\":\"11.95GB\",\"TotalCount\":\"32\",\"Type\":\"Build Cache\"}"
+  ],
+  "idp": {
+    "issuer_host": "idp.test.example",
+    "reachable": false
+  },
+  "certificates": [],
+  "backup": {
+    "available": false
+  }
+}

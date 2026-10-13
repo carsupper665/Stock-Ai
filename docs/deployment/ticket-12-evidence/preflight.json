@@ -1,0 +1,12 @@
+{
+  "checked_at_utc": "2026-10-13T10:38:20.3458769Z",
+  "windows": {
+    "caption": "Microsoft Windows 10 專業版",
+    "build": "19045"
+  },
+  "docker_linux_mode": true,
+  "memory_gib": 63.1,
+  "free_system_drive_gib": 218.5,
+  "issues": [],
+  "passed": true
+}
