@@ -31,12 +31,31 @@ only explicitly attached containers are members.
 
 ## Configuration and state
 
-Copy `deploy/compose/compose.env.example` to a protected, environment-local
-path outside Git. Set a unique `STOCK_AI_INSTANCE` and
+Create a fresh Compose env file in WSL `/tmp`, outside Git, with mode `0600`.
+It contains non-secret settings only; keep the existing verified secret files
+in the Windows secrets directory and reference that directory by path. Set a
+unique `STOCK_AI_INSTANCE` and
 `STOCK_AI_SECRET_NAMESPACE` for Test or Release. Point the image variables at
 approved references and the secrets directory at the output of
 `scripts/production-secrets.ps1`. Compose mounts only each service's allowlisted
 secret files and the application reads them through `_FILE` variables.
+
+For a Test acceptance run, start from the checked-in example, then replace its
+example issuer, subject, and image references with the approved Test values.
+Do not place this env file under `C:\ProgramData` or put secret contents in it.
+Keep the secrets directory reference, for example
+`STOCK_AI_SECRETS_DIR=C:/ProgramData/StockAI/Test/secrets`.
+
+```bash
+compose_env="$(mktemp /tmp/stock-ai-test-compose.XXXXXX.env)"
+chmod 0600 "$compose_env"
+cp deploy/compose/compose.env.example "$compose_env"
+${EDITOR:-vi} "$compose_env"
+compose_env_windows="$(wslpath -w "$compose_env")"
+```
+
+Use the resulting `compose_env_windows` UNC path as `-EnvFile` in the Windows
+commands below. Keep it private and delete the temporary file after acceptance.
 
 Do not run `docker compose down --volumes` or `docker volume rm` during a stop,
 update, or diagnostic operation. The explicit volume names are stable across
@@ -47,7 +66,8 @@ namespaces; reusing either is a release blocker.
 Validate interpolation before touching containers:
 
 ```powershell
-docker compose --env-file C:\ProgramData\StockAI\Test\compose.env `
+$ComposeEnvPath = Read-Host 'Paste the UNC path printed by wslpath -w'
+docker compose --env-file $ComposeEnvPath `
   -f .\deploy\compose\compose.yaml config --quiet
 ```
 
@@ -74,10 +94,11 @@ Docker Desktop in Linux-container mode. The evidence directory must be outside
 Git and new for each run.
 
 ```powershell
+$ComposeEnvPath = Read-Host 'Paste the UNC path printed by wslpath -w'
 pwsh -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\test-compose-stack.ps1 `
   -Phase Exercise `
-  -EnvFile C:\ProgramData\StockAI\Test\compose.env `
+  -EnvFile $ComposeEnvPath `
   -EvidenceDirectory C:\ProgramData\StockAI\Test\evidence\compose-08
 ```
 
@@ -87,23 +108,26 @@ restart, graceful stop/start, `down`/`up`, all three SQLite integrity checks,
 logical table counts, Agent History hashes, and restored health. It never
 removes volumes.
 
-Docker Desktop restart is deliberately a two-phase check because the validating
-process cannot survive stopping its own engine:
+The Ticket 08 acceptance uses the Exercise phase above. Car waived the separate
+Docker Desktop daemon restart check for this ticket; it does not gate
+completion. For deployments that require that additional local check, the
+harness supports two phases because the validating process cannot survive
+stopping its own engine:
 
 ```powershell
+$ComposeEnvPath = Read-Host 'Paste the UNC path printed by wslpath -w'
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-compose-stack.ps1 `
-  -Phase BeforeDockerRestart -EnvFile C:\ProgramData\StockAI\Test\compose.env `
+  -Phase BeforeDockerRestart -EnvFile $ComposeEnvPath `
   -EvidenceDirectory C:\ProgramData\StockAI\Test\evidence\compose-08
 
 # Restart Docker Desktop and wait for its engine to return.
 
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-compose-stack.ps1 `
-  -Phase AfterDockerRestart -EnvFile C:\ProgramData\StockAI\Test\compose.env `
+  -Phase AfterDockerRestart -EnvFile $ComposeEnvPath `
   -EvidenceDirectory C:\ProgramData\StockAI\Test\evidence\compose-08
 ```
 
-Archive the JSON summaries, crash container identities, stopped-database
-fingerprints, and Agent History manifests. A leftover
-`docker-restart-pending.json`, a failed SQLite integrity check, changed logical
-state, a host port binding, or any unhealthy container means Ticket 08 has not
-passed.
+Archive the Exercise JSON summary, crash recovery flags, stopped-database
+fingerprints, and Agent History manifests. A failed SQLite integrity check,
+changed logical state, a host port binding, or any unhealthy container means
+the Exercise did not pass.

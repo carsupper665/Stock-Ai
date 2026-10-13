@@ -1,0 +1,33 @@
+{
+  "source": "C:\\ProgramData\\StockAI\\Ticket08Test\\evidence-run3",
+  "phase": "Exercise",
+  "completed_at_utc": "2026-10-12T11:42:52.3838157Z",
+  "docker_server": "linux 29.5.2",
+  "healthy": true,
+  "host_ports_absent": true,
+  "sqlite_integrity": "ok",
+  "crash_recovery": {
+    "agent-server": true,
+    "llm-provider-server": true,
+    "backend": true
+  },
+  "persistence_checkpoints": [
+    "before-compose-restart",
+    "after-compose-restart",
+    "after-stop-start",
+    "after-down-up"
+  ],
+  "snapshots_unchanged_at_all_checkpoints": true,
+  "snapshot_sha256": {
+    "backend.db": "760636debcec3eb220ffa43942138be40277d58ba4a4b8db3ab010c41c7a1b2e",
+    "agent-server.db": "752518e65497b9d0a1693fe06f6a5959be0e42ff31c25efd9cc0eed9dd0c8240",
+    "llm-provider.db": "9699d6b7ae8ce01f9916fc38859fd9c9d85c1ff5a8c5c87e07159b25f8b69483",
+    "sqlite.json": "024287e752ba9db4388593e6b4b17a2e3542ccf85f2616cbc5b105aa21125628",
+    "history.json": "a5338d955b09046ec0b16f3a9625b7955c763aae07dc722e474e6078745f932f"
+  },
+  "source_file_sha256": {
+    "exercise-summary.json": "a4d264390f4cea9edfbe98d887a1676abcebe37516cda6776143b8270182e7ec",
+    "crash-recovery.json": "f8d2cec45e9ff8c124dbb92978267078751ea3ea0a97129b8c022068d00dc8f7"
+  },
+  "docker_desktop_restart_acceptance": "waived by Car; excluded"
+}

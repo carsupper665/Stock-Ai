@@ -1,6 +1,6 @@
 # Ticket 08 Compose-stack evidence
 
-Date: 2026-10-12 (Asia/Taipei)
+Date: 2026-10-13 (Asia/Taipei)
 
 ## Reviewable implementation evidence
 
@@ -24,29 +24,39 @@ Date: 2026-10-12 (Asia/Taipei)
   counts/schema hashes, hashes Agent History, checks network membership and
   rejects host port bindings.
 
-Commands completed in this worktree:
+Checks completed in this worktree during this task:
 
 ```text
-docker compose -f deploy/compose/compose.yaml config --quiet
 python3 -m unittest scripts.test.test_compose_stack scripts.test.test_compose_sqlite_evidence scripts.test.test_production_images scripts.test.test_production_secrets
-go test ./test -run TestBackendProcessGracefullyClosesSQLiteOnPlatformSignal -count=1
-GOOS=windows GOARCH=amd64 go test -c -o <temporary> ./test
-git diff --check
+GOCACHE=/tmp/wren-t8-go-cache go test ./test -run TestBackendProcessGracefullyClosesSQLiteOnPlatformSignal -count=1
+python3 -m json.tool docs/deployment/ticket-08-evidence-run3.json
+git diff --check master
 ```
 
-Results: Compose interpolation accepted; 23 Python policy/evidence/image/secret tests
-passed; the Backend SIGTERM/SQLite test passed; the Windows test binary
-cross-compiled; whitespace validation passed.
+Results: 23 Python policy/evidence/image/secret tests passed. The Backend
+SIGTERM/SQLite process test passed after using an allowed temporary Go cache
+and permission for its loopback listener. Compose CLI validation is currently
+unavailable through WSL PATH; the static YAML policy tests passed. The actual
+Windows Docker Exercise evidence below independently validates the resolved
+runtime stack. Windows cross-compilation and `git diff --check` passed in the
+preceding implementation session.
 
-## Host acceptance gate
+## Windows Docker Exercise evidence
 
-The current worker sandbox cannot connect to `/var/run/docker.sock`
-(`permission denied`), non-interactive elevated access is unavailable, and
-Windows process interop fails before Docker starts (`UtilBindVsockAnyPort`). No
-live crash/restart/down-up/Docker-restart result is claimed from this host.
+Imported and checksum-verified from
+`C:\ProgramData\StockAI\Ticket08Test\evidence-run3` using the absolute
+Windows PowerShell 7 executable. Only the sanitized summary, recovery flags,
+and file hashes are recorded in
+`ticket-08-evidence-run3.json`; no database contents, compose env file, or
+secrets were read or copied.
 
-Run the commands in `compose-application-stack.md` on the designated Windows
-Test computer and attach the generated evidence before checking the final
-persistence/recovery acceptance item or promoting Ticket 08 to done. This is an
-infrastructure evidence gate, not an implementation omission; the harness and
-success criteria are committed and reproducible.
+Exercise passed on Docker Linux Engine `29.5.2` at `2026-10-12T11:42:52Z`:
+all four services were healthy, application host ports were absent, and
+Agent, LLM Provider, and Backend each recovered after a forced crash. SQLite
+integrity checks passed. SHA256 values for all three database files, the
+logical SQLite fingerprints, and Agent History manifest matched across
+Compose restart, stop/start, and `down`/`up` checkpoints.
+
+Car waived the separate Docker Desktop daemon restart acceptance for Ticket
+08. That check is excluded from the completion gate; no Before/After Docker
+restart evidence is needed or cited here.
