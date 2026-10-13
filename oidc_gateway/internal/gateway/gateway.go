@@ -51,12 +51,17 @@ func New(cfg Config) (*Server, error) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /oauth2/start", s.start)
 	mux.HandleFunc("GET /oauth2/callback", s.callback)
 	mux.HandleFunc("GET /oauth2/auth", s.auth)
 	mux.HandleFunc("GET /oauth2/me", s.me)
 	mux.HandleFunc("POST /oauth2/logout", s.logout)
 	return s.securityHeaders(mux)
+}
+
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {

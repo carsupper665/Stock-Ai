@@ -20,6 +20,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
 $gitSafeDirectory = $root.Replace('\', '/')
 $builder = "stock-ai-evidence-$PID"
 $builderCreated = $false
+$runtimeSecretsDirectory = $null
 $trivyImage = 'aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa'
 $trivyCache = "stock-ai-trivy-cache-$PID"
 $trivyCacheCreated = $false
@@ -63,6 +64,13 @@ try {
     $backendUser = New-EphemeralSecret
     $llmRuntime = New-EphemeralSecret
     $llmAdmin = New-EphemeralSecret
+    $runtimeSecretsDirectory = Join-Path ([IO.Path]::GetTempPath()) "stock-ai-image-secrets-$PID"
+    if (Test-Path -LiteralPath $runtimeSecretsDirectory) { throw 'Refusing to reuse a runtime secret directory.' }
+    New-Item -ItemType Directory -Path $runtimeSecretsDirectory | Out-Null
+    $gatewaySecretPath = Join-Path $runtimeSecretsDirectory 'stock-ai-test_oidc_client_secret'
+    $gatewayCookieKeyPath = Join-Path $runtimeSecretsDirectory 'stock-ai-test_oidc_cookie_key'
+    [IO.File]::WriteAllText($gatewaySecretPath, (New-EphemeralSecret))
+    [IO.File]::WriteAllText($gatewayCookieKeyPath, (New-EphemeralSecret))
     $services = @(
         @{ Name = 'backend'; Dockerfile = 'docker/backend.Dockerfile'; Memory = '512m'; CPUs = '1.0'; PIDs = 100; DataProbe = '/data/backend.db'; HealthURL = 'http://127.0.0.1:7794/v1/health'; Environment = [ordered]@{
             ALLOW_STATIC_USER_TOKEN = 'true'; USER_TOKEN = $backendUser; ACCOUNT_TOKEN_KEY = (New-EphemeralSecret)
@@ -80,6 +88,22 @@ try {
             BACKEND_URL = 'http://backend.invalid'; AGENT_SERVER_URL = 'http://agent.invalid'; LLM_SERVER_URL = 'http://llm.invalid'
             OIDC_ISSUER = 'https://identity.invalid/realms/acceptance'; OIDC_AUDIENCE = 'stock-ai-acceptance'
             OIDC_USER_SUBJECT = 'acceptance-user'; OIDC_JWKS_URL = 'https://identity.invalid/realms/acceptance/keys'
+        } },
+        @{ Name = 'oidc-gateway'; Dockerfile = 'docker/oidc-gateway.Dockerfile'; Memory = '256m'; CPUs = '0.5'; PIDs = 64; DataProbe = $null; HealthURL = 'http://127.0.0.1:4180/healthz'; SecretFiles = [ordered]@{
+            '/run/secrets/stock-ai-test_oidc_client_secret' = $gatewaySecretPath
+            '/run/secrets/stock-ai-test_oidc_cookie_key' = $gatewayCookieKeyPath
+        }; Environment = [ordered]@{
+            STOCK_AI_ENVIRONMENT = 'Test'; OIDC_GATEWAY_ADDR = ':4180'
+            OIDC_ISSUER = 'https://identity.invalid/realms/stock-ai-test'
+            OIDC_AUTHORIZATION_URL = 'https://identity.invalid/realms/stock-ai-test/protocol/openid-connect/auth'
+            OIDC_TOKEN_URL = 'https://identity.invalid/realms/stock-ai-test/protocol/openid-connect/token'
+            OIDC_JWKS_URL = 'https://identity.invalid/realms/stock-ai-test/protocol/openid-connect/certs'
+            OIDC_END_SESSION_URL = 'https://identity.invalid/realms/stock-ai-test/protocol/openid-connect/logout'
+            OIDC_CLIENT_ID = 'stock-ai-test'; OIDC_CLIENT_SECRET_FILE = '/run/secrets/stock-ai-test_oidc_client_secret'
+            OIDC_COOKIE_KEY_FILE = '/run/secrets/stock-ai-test_oidc_cookie_key'
+            OIDC_REDIRECT_URI = 'https://app-test.example/oauth2/callback'
+            OIDC_POST_LOGOUT_URI = 'https://app-test.example/'
+            OIDC_COOKIE_NAME = '__Host-stock-ai-test-session'; OIDC_USER_SUBJECT = 'acceptance-user'
         } }
     )
     $images = [ordered]@{}
@@ -210,6 +234,11 @@ try {
             foreach ($entry in $service.Environment.GetEnumerator()) {
                 $runArgs += @('--env', "$($entry.Key)=$($entry.Value)")
             }
+            if ($service.ContainsKey('SecretFiles')) {
+                foreach ($entry in $service.SecretFiles.GetEnumerator()) {
+                    $runArgs += @('--mount', "type=bind,src=$($entry.Value),dst=$($entry.Key),readonly")
+                }
+            }
             $runArgs += $tag
             & docker @runArgs | Out-Null
             $containerCreated = $true
@@ -276,7 +305,10 @@ try {
 
     $inputs = @(
         '.dockerignore', 'docker/backend.Dockerfile', 'docker/agent-server.Dockerfile',
-        'docker/llm-provider-server.Dockerfile', 'docker/console.Dockerfile', 'docker/healthcheck.go',
+        'docker/llm-provider-server.Dockerfile', 'docker/console.Dockerfile', 'docker/oidc-gateway.Dockerfile', 'docker/healthcheck.go',
+        'oidc_gateway/go.mod', 'oidc_gateway/cmd/gateway/main.go',
+        'oidc_gateway/internal/gateway/config.go', 'oidc_gateway/internal/gateway/gateway.go',
+        'scripts/issuer-check/main.go',
         'backend/go.mod', 'backend/go.sum', 'agent_server/go.mod', 'agent_server/go.sum',
         'llm_provider_server/go.mod', 'llm_provider_server/go.sum',
         'frontend/package.json', 'frontend/package-lock.json'
@@ -321,9 +353,10 @@ try {
     if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
         throw 'The production build modified the source checkout.'
     }
-    Write-Host "PASS: four production images built and scanned by pinned Trivy; evidence: $EvidenceDirectory"
+    Write-Host "PASS: five production and identity images built and scanned by pinned Trivy; evidence: $EvidenceDirectory"
 } finally {
     if ($builderCreated) { & docker buildx rm $builder | Out-Null }
     if ($trivyCacheCreated) { & docker volume rm $trivyCache | Out-Null }
+    if ($runtimeSecretsDirectory -and (Test-Path -LiteralPath $runtimeSecretsDirectory)) { Remove-Item -Recurse -Force -LiteralPath $runtimeSecretsDirectory }
     Pop-Location
 }

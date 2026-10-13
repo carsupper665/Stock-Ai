@@ -1,0 +1,73 @@
+services:
+  oidc-gateway:
+    image: "${OIDC_GATEWAY_IMAGE:?set OIDC_GATEWAY_IMAGE to the approved OIDC Gateway image reference}"
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=16m]
+    pids_limit: 128
+    environment:
+      STOCK_AI_ENVIRONMENT: Test
+      OIDC_GATEWAY_ADDR: ":4180"
+      OIDC_ISSUER: "${OIDC_ISSUER:?set the stable Test HTTPS issuer}"
+      OIDC_AUTHORIZATION_URL: "${OIDC_AUTHORIZATION_URL:?set the Test authorization endpoint}"
+      OIDC_TOKEN_URL: "${OIDC_TOKEN_URL:?set the Test token endpoint}"
+      OIDC_JWKS_URL: "${OIDC_JWKS_URL:?set the stable Test HTTPS JWKS endpoint}"
+      OIDC_END_SESSION_URL: "${OIDC_END_SESSION_URL:?set the Test logout endpoint}"
+      OIDC_CLIENT_ID: stock-ai-test
+      OIDC_CLIENT_SECRET_FILE: /run/secrets/stock-ai-test_oidc_client_secret
+      OIDC_COOKIE_KEY_FILE: /run/secrets/stock-ai-test_oidc_cookie_key
+      OIDC_REDIRECT_URI: "https://${TEST_APP_HOST:?set the Test app DNS hostname}/oauth2/callback"
+      OIDC_POST_LOGOUT_URI: "https://${TEST_APP_HOST}/"
+      OIDC_COOKIE_NAME: __Host-stock-ai-test-session
+      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the approved stable Test subject}"
+    secrets:
+      - source: test_oidc_client_secret
+        target: stock-ai-test_oidc_client_secret
+      - source: test_oidc_cookie_key
+        target: stock-ai-test_oidc_cookie_key
+    networks: [edge]
+    expose: ["4180"]
+    healthcheck:
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:4180/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  nginx:
+    image: "${NGINX_IMAGE:?set NGINX_IMAGE to an approved pinned Nginx image reference}"
+    restart: unless-stopped
+    init: true
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    pids_limit: 128
+    environment:
+      TEST_APP_HOST: "${TEST_APP_HOST:?set the Test app DNS hostname}"
+    command:
+      - /bin/sh
+      - -ec
+      - envsubst '$$TEST_APP_HOST' < /etc/nginx/templates/test-edge.conf.template > /tmp/test-edge.conf; exec nginx -c /etc/nginx/test-nginx.conf -g 'daemon off;'
+    ports:
+      - "${TEST_BIND_ADDRESS:-0.0.0.0}:80:8080"
+      - "${TEST_BIND_ADDRESS:-0.0.0.0}:443:8443"
+    volumes:
+      - ../nginx/test-nginx.conf:/etc/nginx/test-nginx.conf:ro
+      - ../nginx/test-edge.conf.template:/etc/nginx/templates/test-edge.conf.template:ro
+      - "${TEST_TLS_DIR:?set the Test TLS directory}:/run/test-tls:ro"
+    networks: [edge]
+    depends_on:
+      console:
+        condition: service_healthy
+      oidc-gateway:
+        condition: service_healthy
+
+secrets:
+  test_oidc_client_secret:
+    file: "${STOCK_AI_SECRETS_DIR:?set Test secrets directory}/stock-ai-test_oidc_client_secret"
+  test_oidc_cookie_key:
+    file: "${STOCK_AI_SECRETS_DIR}/stock-ai-test_oidc_cookie_key"

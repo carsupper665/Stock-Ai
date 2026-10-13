@@ -71,6 +71,15 @@ func TestSecurityGateHeaders(t *testing.T) {
 	}
 }
 
+func TestHealthEndpointIsUnauthenticatedAndNoContent(t *testing.T) {
+	s, _ := newFixture(t)
+	response := httptest.NewRecorder()
+	s.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway:4180/healthz", nil))
+	if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
+		t.Fatalf("health response = %d %q, want 204 with empty body", response.Code, response.Body.String())
+	}
+}
+
 func (f *fakeIDP) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/realms/stock-ai-test/jwks":
