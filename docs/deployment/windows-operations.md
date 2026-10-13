@@ -106,6 +106,10 @@ Rollback reapplies only the recorded previous digests. It never rebuilds or
 selects a floating tag. Preserve rollback metadata with the corresponding
 deployment evidence.
 
+For database/history recovery, use the separate encrypted full-set workflow in
+[`backup-restore.md`](backup-restore.md). Image rollback does not restore
+volumes or reverse database migrations.
+
 ## Windows and Docker restart acceptance
 
 Run the operator commands from a checkout whose full path contains spaces;
