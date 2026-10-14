@@ -30,7 +30,10 @@ acceptance cases: `secured_product_flow`, `wrong_user`, `expired_session`,
 `docker_restart_failure`, and `test_material_absence`. It also checks issuer and
 audience mismatch, fixture outage, anonymous `/login` and `/login/` redirects,
 exact Release digest consumption, manifest substitution/tampering, and Compose
-build-directive rejection. Each check writes a sanitized JSON result. Failed
+build-directive rejection. Together these form the exact 16-result promotion
+contract shared with the Release operator. The secured flow verifies Backend
+order market/product, side/type, quantity/price, and trade lifecycle gates.
+Each check writes a sanitized JSON result. Failed
 attempts remain recorded in their own timestamped directory; promotion accepts
 only an explicitly selected passed certification whose revision and five image
 digests match the production build evidence.
@@ -47,7 +50,7 @@ metadata for local Test secrets, keys and certificates.
 ## Create and consume the promotion manifest
 
 The promotion generator fails closed unless the build and certification
-sidecars verify, all eight results pass, all five immutable registry digests
+sidecars verify, all 16 results pass, all five immutable registry digests
 match the digests run in Test, and all SBOM, scan, inventory, provenance, and
 acceptance records are present. It packages these artifacts with the sanitized
 result files and emits `stock-ai.promotion-manifest.v1` plus a package-level
