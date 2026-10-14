@@ -1,0 +1,16 @@
+{
+  "details": {
+    "exact_test_digests": true,
+    "manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+    "services": [
+      "backend",
+      "agent-server",
+      "llm-provider-server",
+      "console"
+    ]
+  },
+  "name": "release_exact_digest",
+  "schema": "stock-ai.local-release-gate-result.v1",
+  "status": "passed",
+  "tested_at_utc": "2026-10-14T10:38:54.321792+00:00"
+}

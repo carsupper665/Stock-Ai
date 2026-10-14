@@ -2,9 +2,10 @@
   "details": {
     "anonymous_login_paths": true,
     "auth_error_path_does_not_loop": true,
-    "duration_seconds": 2.211,
+    "duration_seconds": 2.329,
     "navigations": [
       {
+        "anonymous_session": true,
         "browser_status": 200,
         "curl_status": 200,
         "internal_port_exposed": false,
@@ -12,6 +13,7 @@
         "path": "/login"
       },
       {
+        "anonymous_session": true,
         "browser_status": 200,
         "curl_status": 200,
         "internal_port_exposed": false,
@@ -19,17 +21,70 @@
         "path": "/login/"
       },
       {
+        "anonymous_session": true,
         "browser_status": 200,
         "curl_status": 200,
         "internal_port_exposed": false,
         "login_page_reached": true,
         "path": "/login?auth_error=login_denied"
       }
-    ]
+    ],
+    "protected_api_status": 401,
+    "protected_root_browser_status": 200,
+    "protected_root_curl_redirects": [
+      {
+        "target_host": null,
+        "target_path": "/oauth2/start",
+        "target_port": null
+      },
+      {
+        "target_host": "idp.localtest",
+        "target_path": "/realms/stock-ai-test/authorize",
+        "target_port": 9443
+      },
+      {
+        "target_host": "app.localtest",
+        "target_path": "/oauth2/callback",
+        "target_port": null
+      },
+      {
+        "target_host": null,
+        "target_path": "/",
+        "target_port": null
+      }
+    ],
+    "protected_root_curl_status": 200,
+    "protected_root_redirects": [
+      {
+        "status": 302,
+        "target_host": "app.localtest",
+        "target_path": "/oauth2/start",
+        "target_port": null
+      },
+      {
+        "status": 302,
+        "target_host": "idp.localtest",
+        "target_path": "/realms/stock-ai-test/authorize",
+        "target_port": 9443
+      },
+      {
+        "status": 302,
+        "target_host": "app.localtest",
+        "target_path": "/oauth2/callback",
+        "target_port": null
+      },
+      {
+        "status": 303,
+        "target_host": "app.localtest",
+        "target_path": "/",
+        "target_port": null
+      }
+    ],
+    "public_port_chain_only": true
   },
-  "finished_at_utc": "2026-10-14T10:17:56.421361+00:00",
+  "finished_at_utc": "2026-10-14T10:37:20.658879+00:00",
   "name": "public_login_redirects",
   "schema": "stock-ai.local-acceptance-result.v1",
-  "started_at_utc": "2026-10-14T10:17:54.210372+00:00",
+  "started_at_utc": "2026-10-14T10:37:18.214216+00:00",
   "status": "passed"
 }

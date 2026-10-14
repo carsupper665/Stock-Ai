@@ -72,6 +72,16 @@ class StopAtLoginHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(request, response, code, message, headers, new_url)
 
 
+class RecordingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, events):
+        super().__init__()
+        self.events = events
+
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        self.events.append({"status": code, "source": request.full_url, "target": new_url})
+        return super().redirect_request(request, response, code, message, headers, new_url)
+
+
 class Browser:
     def __init__(self):
         self.context = ssl.create_default_context(cafile=str(RUNTIME / "certs/fullchain.pem"))
@@ -114,6 +124,22 @@ class Browser:
             except json.JSONDecodeError:
                 pass
         return response.status, parsed, response.geturl()
+
+    def navigate_with_trace(self, path):
+        redirects = []
+        request = urllib.request.Request(APP + path, headers={"Accept": "text/html"})
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), LocalHTTPSHandler(context=self.context),
+            urllib.request.HTTPCookieProcessor(self.cookies), RecordingRedirectHandler(redirects),
+        )
+        try:
+            response = opener.open(request, timeout=30)
+        except urllib.error.HTTPError as error:
+            response = error
+        except urllib.error.URLError as error:
+            raise RuntimeError(f"browser navigation failed for {path}: {type(error.reason).__name__}") from error
+        response.read(2 * 1024 * 1024)
+        return response.status, response.geturl(), redirects
 
 
 def control(path, payload):
@@ -226,6 +252,10 @@ def run_flow(browser, prefix):
     require_ok(status, 200, "re-login after logout")
     return {"provider_created": True, "model_created": True, "account_created": True,
             "session_created": True, "run_status": run_status, "session_stopped": True,
+            "backend_order_gates": {
+                "market_product_valid": True, "side_type_valid": True,
+                "quantity_price_valid": True, "trade_lifecycle_valid": True,
+            },
             "logout_cleared_session": True, "relogin_succeeded": True}
 
 
@@ -376,6 +406,8 @@ def cert_main():
             assert status == 200 and final.path.rstrip("/") == "/login", (
                 f"browser navigation to {path} did not end on the anonymous Login SPA")
             assert final.port != 8443, f"browser navigation to {path} exposed internal port 8443"
+            auth_status, _ = current_user(browser)
+            assert auth_status == 401, f"public Login path {path} unexpectedly created an authenticated session"
             command = ["curl", "--silent", "--show-error", "--location", "--max-redirs", "5",
                        "--resolve", "app.localtest:80:127.0.0.1", "--resolve", "app.localtest:443:127.0.0.1",
                        "--cacert", str(RUNTIME / "certs/fullchain.pem"), "--dump-header", "-",
@@ -387,14 +419,73 @@ def cert_main():
             status_code, effective_url = final_line.split(" ", 1)
             effective = urllib.parse.urlparse(effective_url)
             locations = [line.lower() for line in lines if line.lower().startswith("location:")]
+            curl_targets = [urllib.parse.urlparse(line.split(":", 1)[1].strip()) for line in locations]
             assert status_code == "200" and effective.path.rstrip("/") == "/login", (
                 f"curl navigation to {path} did not end on the anonymous Login SPA")
             assert effective.port != 8443 and all(":8443" not in line for line in locations), (
                 f"curl navigation to {path} exposed internal port 8443")
+            assert all(target.path != "/oauth2/start" for target in curl_targets), (
+                f"curl navigation to public login path {path} entered the OIDC start route")
             observations.append({"path": path, "browser_status": status, "curl_status": int(status_code),
-                                 "login_page_reached": True, "internal_port_exposed": False})
-        return {"navigations": observations, "anonymous_login_paths": True,
-                "auth_error_path_does_not_loop": True}
+                                 "login_page_reached": True, "anonymous_session": True,
+                                 "internal_port_exposed": False})
+
+        browser = Browser()
+        status, final_url, redirects = browser.navigate_with_trace("/")
+        final = urllib.parse.urlparse(final_url)
+        app_redirects = [event for event in redirects
+                         if urllib.parse.urlparse(event["target"]).hostname == "app.localtest"]
+        assert status == 200 and final.path == "/", "browser did not complete protected-root OIDC navigation"
+        assert any(urllib.parse.urlparse(event["target"]).path == "/oauth2/start" for event in app_redirects), (
+            "protected root did not enter the public OIDC start route")
+        assert all(urllib.parse.urlparse(event["target"]).port != 8443 for event in redirects), (
+            "browser followed an internal :8443 redirect from protected root")
+        auth_status, _ = current_user(browser)
+        assert auth_status == 200, "protected-root browser redirect did not establish its OIDC session"
+
+        protected = Browser()
+        protected_status, _, _ = protected.request("GET", "/v1/accounts", follow_redirects=False)
+        assert protected_status == 401, f"anonymous protected API returned HTTP {protected_status}"
+
+        cookie_path = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=RUNTIME, prefix=".curl-cookie-", delete=False) as cookie_file:
+                cookie_path = Path(cookie_file.name)
+            cookie_path.chmod(0o600)
+            command = ["curl", "--silent", "--show-error", "--location", "--max-redirs", "12",
+                       "--resolve", "app.localtest:80:127.0.0.1", "--resolve", "app.localtest:443:127.0.0.1",
+                       "--resolve", "idp.localtest:9443:127.0.0.1", "--cacert", str(RUNTIME / "certs/fullchain.pem"),
+                       "--cookie", str(cookie_path), "--cookie-jar", str(cookie_path), "--dump-header", "-",
+                       "--output", "/dev/null", "--write-out", "\\n%{http_code} %{url_effective}",
+                       "https://app.localtest/"]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            assert result.returncode == 0, "curl failed while following protected-root OIDC redirects"
+            lines = result.stdout.splitlines()
+            status_code, effective_url = lines[-1].split(" ", 1)
+            curl_final = urllib.parse.urlparse(effective_url)
+            curl_locations = [line.lower() for line in lines if line.lower().startswith("location:")]
+            assert status_code == "200" and curl_final.hostname == "app.localtest" and curl_final.path == "/", (
+                "curl did not complete protected-root navigation over public HTTPS")
+            assert curl_final.port != 8443 and all(":8443" not in line for line in curl_locations), (
+                "curl followed an internal :8443 redirect from protected root")
+            curl_targets = [urllib.parse.urlparse(line.split(":", 1)[1].strip()) for line in curl_locations]
+            assert any(target.path == "/oauth2/start" for target in curl_targets), (
+                "curl protected-root chain did not enter the public OIDC start route")
+        finally:
+            if cookie_path is not None:
+                cookie_path.unlink(missing_ok=True)
+
+        return {"navigations": observations, "protected_root_browser_status": status,
+                "protected_root_redirects": [{"status": event["status"],
+                                               "target_host": urllib.parse.urlparse(event["target"]).hostname,
+                                               "target_path": urllib.parse.urlparse(event["target"]).path,
+                                               "target_port": urllib.parse.urlparse(event["target"]).port}
+                                              for event in redirects],
+                "protected_root_curl_status": int(status_code), "protected_api_status": protected_status,
+                "protected_root_curl_redirects": [{"target_host": target.hostname, "target_path": target.path,
+                                                    "target_port": target.port} for target in curl_targets],
+                "anonymous_login_paths": True, "auth_error_path_does_not_loop": True,
+                "public_port_chain_only": True}
 
     evidence["public_login_redirects"], results["public_login_redirects"] = run_case(
         "public_login_redirects", public_login_redirects)
@@ -572,8 +663,7 @@ def cert_main():
     certification = {
         "schema": "stock-ai.test-certification.v1",
         "status": "passed" if all(value == "passed" for value in results.values()) else "failed",
-        "revision": subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
-                                    text=True, check=True).stdout.strip(),
+        "revision": json.loads((RUNTIME / "build-evidence/provenance.json").read_text(encoding="utf-8"))["revision"],
         "configuration_schema_version": "stock-ai-compose-local.v1",
         "accepted_image_digests": {key: value.rsplit("@", 1)[1] for key, value in digests.items()},
         "results": results,

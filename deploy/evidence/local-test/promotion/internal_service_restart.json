@@ -1,7 +1,7 @@
 {
   "details": {
     "all_healthy": true,
-    "duration_seconds": 53.328,
+    "duration_seconds": 53.132,
     "login_after_restart": true,
     "restarted_services": [
       "backend",
@@ -11,9 +11,9 @@
       "oidc-gateway"
     ]
   },
-  "finished_at_utc": "2026-10-14T10:19:01.281402+00:00",
+  "finished_at_utc": "2026-10-14T10:38:29.840984+00:00",
   "name": "internal_service_restart",
   "schema": "stock-ai.local-acceptance-result.v1",
-  "started_at_utc": "2026-10-14T10:18:12.575158+00:00",
+  "started_at_utc": "2026-10-14T10:37:35.749777+00:00",
   "status": "passed"
 }

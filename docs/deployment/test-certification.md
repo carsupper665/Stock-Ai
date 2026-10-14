@@ -40,6 +40,28 @@ digests match the production build evidence.
 Cookies, account tokens, IdP response bodies, credentials, and fixture keys
 remain in memory or in ignored runtime files and are not written to evidence.
 
+`prepare.py` keeps `.local-test/` host-private (0700). Runtime directories are
+group-readable only as needed, and private TLS/JWKS/application-key files are
+0440 and owned by the host user with its primary group. Compose assigns the
+application, fixture, and edge processes that group while retaining their
+image UIDs. This lets containers read keys without making them world-readable.
+The preparation step validates existing certificate/key pairs and key formats,
+preserves valid bytes across repeated runs, and fails closed on malformed or
+partial pairs; it never silently rotates an existing key. Its focused
+regressions are run from the `scripts/local-test` directory:
+
+```text
+python3 -m unittest test_prepare
+GOCACHE=/tmp/stock-ai-t10-gocache go test ./...
+```
+
+The redirect regression begins at protected `/` with both curl and a
+browser-like redirect client, follows the complete public 443 authorization
+chain, and records sanitized host/path/port targets. It asserts no redirect
+uses the internal `:8443` port. Anonymous `/login`, `/login/`, and
+`/login?auth_error=...` reach the login page without starting another login;
+the protected API remains HTTP 401 without a session.
+
 `capture_build_evidence.py` creates per-image SPDX SBOMs, Trivy SARIF scan
 results, flattened filesystem inventories, BuildKit provenance, and build
 acceptance results. It requires zero Critical/High findings and seals all
@@ -59,6 +81,7 @@ result files and emits `stock-ai.promotion-manifest.v1` plus a package-level
 ```text
 python3 scripts/create_promotion_manifest.py --build-evidence .local-test/build-evidence --test-certification deploy/evidence/local-test/certification/<run>/test-certification.json --registry-references .local-test/registry-references.json --output deploy/evidence/local-test/promotion/promotion.json
 python3 scripts/local-test/verify_promotion.py --manifest deploy/evidence/local-test/promotion/promotion.json --output-dir deploy/evidence/local-test/release-gate/<run>
+python3 scripts/local-test/verify_operator_promotion.py
 ```
 
 Release `Update` and Release preflight require this manifest. They verify the
@@ -67,6 +90,17 @@ and exact digest equality against Test and build acceptance. They reject tags,
 Compose `build` entries, changed digests, and any rebuild or substitution.
 Release consumes the four application digests from the manifest; the OIDC
 Gateway digest remains bound as part of the five-image Test certification.
+`verify_operator_promotion.py` exercises the generated package through the
+actual `scripts.local_operations.Operator.promotion` and `.preflight` path. It
+records exact-digest acceptance plus substitution, checksum-tamper, and build
+directive rejection, then adds those sanitized results to the package
+`SHA256SUMS` and rechecks the completed package with the same operator path.
+
+The accepted five product-image build and SBOM/scan/provenance inputs are from
+revision `906326524f70acf77dcffeff86e9433896830509`. Later fixture, local
+configuration, and certification-harness changes do not alter those image
+inputs; the final promotion truthfully retains that revision and the same five
+accepted digests.
 
 The actual local certification and promotion evidence is retained under
 `deploy/evidence/local-test/`. The older external-Test `not_run` record is

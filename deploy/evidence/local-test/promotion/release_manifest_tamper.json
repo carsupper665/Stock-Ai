@@ -1,12 +1,12 @@
 {
   "details": {
     "checksum_mechanism": "SHA-256",
-    "duration_seconds": 2.175,
+    "duration_seconds": 2.23,
     "manifest_tamper_rejected": true
   },
-  "finished_at_utc": "2026-10-14T10:18:00.710714+00:00",
+  "finished_at_utc": "2026-10-14T10:37:27.226920+00:00",
   "name": "release_manifest_tamper",
   "schema": "stock-ai.local-acceptance-result.v1",
-  "started_at_utc": "2026-10-14T10:17:58.535840+00:00",
+  "started_at_utc": "2026-10-14T10:37:24.996821+00:00",
   "status": "passed"
 }

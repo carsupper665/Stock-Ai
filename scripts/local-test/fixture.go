@@ -71,18 +71,8 @@ func main() {
 		log.Fatal("fixture signing key has invalid type")
 	}
 	f := &fixture{key: key, codes: make(map[string]authorization)}
-	issuerMux := http.NewServeMux()
-	issuerMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	issuerMux.HandleFunc("/realms/stock-ai-test/.well-known/openid-configuration", f.discovery)
-	issuerMux.HandleFunc("/realms/stock-ai-test/authorize", f.authorize)
-	issuerMux.HandleFunc("/realms/stock-ai-test/token", f.token)
-	issuerMux.HandleFunc("/realms/stock-ai-test/jwks", f.jwks)
-	issuerMux.HandleFunc("/realms/stock-ai-test/logout", f.logout)
-	issuerMux.HandleFunc("/__fixture/next", f.nextCase)
-	issuerMux.HandleFunc("/__fixture/outage", f.setOutage)
-	providerMux := http.NewServeMux()
-	providerMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	providerMux.HandleFunc("/v1/chat/completions", f.complete)
+	issuerMux := f.issuerHandler()
+	providerMux := f.providerHandler()
 
 	go func() {
 		log.Print("local fake-provider fixture listening on :18080")
@@ -94,6 +84,26 @@ func main() {
 	if err := http.ListenAndServeTLS(":9443", "/fixture/fullchain.pem", "/fixture/privkey.pem", issuerMux); err != nil {
 		log.Fatalf("OIDC fixture stopped: %v", err)
 	}
+}
+
+func (f *fixture) issuerHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("/realms/stock-ai-test/.well-known/openid-configuration", f.discovery)
+	mux.HandleFunc("/realms/stock-ai-test/authorize", f.authorize)
+	mux.HandleFunc("/realms/stock-ai-test/token", f.token)
+	mux.HandleFunc("/realms/stock-ai-test/jwks", f.jwks)
+	mux.HandleFunc("/realms/stock-ai-test/logout", f.logout)
+	mux.HandleFunc("/__fixture/next", f.nextCase)
+	mux.HandleFunc("/__fixture/outage", f.setOutage)
+	return mux
+}
+
+func (f *fixture) providerHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("/v1/chat/completions", f.complete)
+	return mux
 }
 
 func (f *fixture) down(w http.ResponseWriter) bool {

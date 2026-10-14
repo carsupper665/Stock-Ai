@@ -1,0 +1,24 @@
+{
+  "details": {
+    "account_created": true,
+    "backend_order_gates": {
+      "market_product_valid": true,
+      "quantity_price_valid": true,
+      "side_type_valid": true,
+      "trade_lifecycle_valid": true
+    },
+    "duration_seconds": 5.906,
+    "logout_cleared_session": true,
+    "model_created": true,
+    "provider_created": true,
+    "relogin_succeeded": true,
+    "run_status": "completed",
+    "session_created": true,
+    "session_stopped": true
+  },
+  "finished_at_utc": "2026-10-14T10:32:00.603580+00:00",
+  "name": "secured_product_flow",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:31:54.697292+00:00",
+  "status": "passed"
+}

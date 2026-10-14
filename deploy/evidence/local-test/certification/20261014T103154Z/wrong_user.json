@@ -1,0 +1,12 @@
+{
+  "details": {
+    "duration_seconds": 3.502,
+    "protected_api_rejected": true,
+    "wrong_subject_rejected": true
+  },
+  "finished_at_utc": "2026-10-14T10:32:04.105487+00:00",
+  "name": "wrong_user",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:32:00.603825+00:00",
+  "status": "passed"
+}

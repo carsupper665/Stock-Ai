@@ -1,5 +1,6 @@
 services:
   backend:
+    user: "65532:${LOCAL_TEST_GID:?set the host-private Test container group}"
     environment:
       ALLOW_STATIC_USER_TOKEN: "true"
       OIDC_ISSUER: https://idp.localtest:9443/realms/stock-ai-test
@@ -14,17 +15,20 @@ services:
         condition: service_healthy
 
   agent-server:
+    user: "65532:${LOCAL_TEST_GID:?set the host-private Test container group}"
     volumes:
       - "${LOCAL_TEST_CERT_DIR:?set local Test certificate directory}/fullchain.pem:/run/local-test/root-ca.pem:ro"
     environment:
       SSL_CERT_FILE: /run/local-test/root-ca.pem
 
   llm-provider-server:
+    user: "65532:${LOCAL_TEST_GID:?set the host-private Test container group}"
     depends_on:
       local-fixtures:
         condition: service_healthy
 
   console:
+    user: "65532:${LOCAL_TEST_GID:?set the host-private Test container group}"
     environment:
       OIDC_ISSUER: https://idp.localtest:9443/realms/stock-ai-test
       OIDC_AUDIENCE: stock-ai-api-test
@@ -35,6 +39,7 @@ services:
       - "${LOCAL_TEST_CERT_DIR:?set local Test certificate directory}/fullchain.pem:/run/local-test/root-ca.pem:ro"
 
   oidc-gateway:
+    user: "65532:${LOCAL_TEST_GID:?set the host-private Test container group}"
     environment:
       OIDC_ISSUER: https://idp.localtest:9443/realms/stock-ai-test
       OIDC_AUTHORIZATION_URL: https://idp.localtest:9443/realms/stock-ai-test/authorize
@@ -55,6 +60,7 @@ services:
         condition: service_healthy
 
   local-fixtures:
+    user: "65532:${LOCAL_TEST_GID:?set the host-private Test container group}"
     image: stock-ai/local-test-fixture:local
     restart: unless-stopped
     read_only: true

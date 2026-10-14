@@ -1,6 +1,6 @@
 {
   "details": {
-    "duration_seconds": 3.897,
+    "duration_seconds": 3.759,
     "images_checked": [
       "backend",
       "agent-server",
@@ -11,9 +11,9 @@
     "layers_config_registry_manifests_build_metadata_clear": true,
     "test_fixture_image_promoted": false
   },
-  "finished_at_utc": "2026-10-14T10:19:07.484857+00:00",
+  "finished_at_utc": "2026-10-14T10:38:35.919612+00:00",
   "name": "test_material_absence",
   "schema": "stock-ai.local-acceptance-result.v1",
-  "started_at_utc": "2026-10-14T10:19:03.587617+00:00",
+  "started_at_utc": "2026-10-14T10:38:32.160444+00:00",
   "status": "passed"
 }

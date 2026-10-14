@@ -11,6 +11,7 @@ server {
 server {
     listen 8443 ssl default_server;
     server_name ${TEST_APP_HOST};
+    absolute_redirect off;
     if ($host != ${TEST_APP_HOST}) { return 421; }
 
     ssl_certificate /run/test-tls/fullchain.pem;

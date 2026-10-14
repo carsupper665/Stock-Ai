@@ -6,72 +6,72 @@
     "llm-provider-server": "sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
     "oidc-gateway": "sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
   },
-  "completed_at_utc": "2026-10-14T10:19:07.487206+00:00",
+  "completed_at_utc": "2026-10-14T10:38:35.920105+00:00",
   "configuration_schema_version": "stock-ai-compose-local.v1",
   "evidence": {
     "audience_mismatch": {
       "file": "audience_mismatch.json",
-      "sha256": "27eae55196d9719dec6a778da25d95b53b48a04e9983ae6b41f44e4376ec3da6"
+      "sha256": "3087d3b22e5085844b3d9a9eeabe8a7d87687be568dd878d280311cdaebc9bcf"
     },
     "docker_restart_failure": {
       "file": "docker_restart_failure.json",
-      "sha256": "a2fb152bc1d22378a5af8fa3c3f4b85905a020e49720c779ad3ba0557a7b9f57"
+      "sha256": "6db9eeadb516da44dde5fb827f8141b6f731c86e1707cc89bbfe5ddf48507e2a"
     },
     "expired_session": {
       "file": "expired_session.json",
-      "sha256": "c2b2f54680dfac28c7bcff26283dd31dcc66cf9b809e0a7c015b7d604f59575f"
+      "sha256": "54943bec5dbd648c33e93359a05c7040b43423a7f8e769800c1e336d330d50ea"
     },
     "fixture_outage": {
       "file": "fixture_outage.json",
-      "sha256": "c5b305065d74fb5ef8ee17b54b1d35c992dc513b9486a0a91eabf129ca8949c1"
+      "sha256": "4c644574d5fb9ec93bfda48deb4270fce3fac33f887a8d65684b43dc326c9d4c"
     },
     "idp_denial": {
       "file": "idp_denial.json",
-      "sha256": "b6a1d732ba6a14caf9053fcd2e70be22ef54486baa6bb93e44adc342d2ebbde5"
+      "sha256": "5fccfbf3509cb84d43b6c10a69a41c6bd62d0727f70c2bed55b7d4b65149055a"
     },
     "idp_restart": {
       "file": "idp_restart.json",
-      "sha256": "21fd28be8faee186c0836b47e2ca78ad90756e6a0079bfee2ef35f1bdd8ea010"
+      "sha256": "3d48a67f324e2175b5ab67d48a5ece91aa3b0bd603835288ce8314e41816e061"
     },
     "internal_service_restart": {
       "file": "internal_service_restart.json",
-      "sha256": "506b8e96d5f9545806b32ef1b92093bacc8a95616bfb31eb9100d36b46146419"
+      "sha256": "7794cc4e3ec8c72bef4e370092251c071253b2afb2aead3acaf2be1aaf75d551"
     },
     "issuer_mismatch": {
       "file": "issuer_mismatch.json",
-      "sha256": "a367e1a605fc88fd98aa5f550d4bc9d6eed1da9d4e64161ccf1257fc1c8559da"
+      "sha256": "6c98b51adedf6787439005834d8e25b86dd4917924cc7f7f97c4212f9920c98b"
     },
     "public_login_redirects": {
       "file": "public_login_redirects.json",
-      "sha256": "331ae36f577e7341fec79fd961a700c849d13798a4023c31260d330175356a2c"
+      "sha256": "837251a98b3dba88afe45498e442f86b30f80bf08f9e62a975f86aeede7c4a10"
     },
     "release_build_directive": {
       "file": "release_build_directive.json",
-      "sha256": "86066ec49d766d3cbdf4ef436ce027784d5908cad3b6f57b7ceab78c8b4d7b34"
+      "sha256": "0b43e7cd8c77822535a8c8f4fc527f093cf2cbc4dc801d676032cb4d1d23bcd2"
     },
     "release_exact_digest": {
       "file": "release_exact_digest.json",
-      "sha256": "27c9c86180b9d4103952d715546ef7c18066b64b414052c9425f8bbb2fc21aa9"
+      "sha256": "1ac822252fd9fa6986738388d359ad78464d34b30ddaca4516165f59e48045f5"
     },
     "release_manifest_substitution": {
       "file": "release_manifest_substitution.json",
-      "sha256": "dd3bd688138d6f4f753ca955813041247688068dfab17aed3f433f4e3301193f"
+      "sha256": "07069e41be9e894c730871f6082569f7f35aebfd2aff08c0b29d494f72001090"
     },
     "release_manifest_tamper": {
       "file": "release_manifest_tamper.json",
-      "sha256": "0fdb0f00e7483e4f6112ecb7ed14acc4bde08bf9c8d2733fd1c9bfe3b6bd70f1"
+      "sha256": "318a638242bb184242f904896d1799aa590948740dcd4a9012fba98f67da7d4c"
     },
     "secured_product_flow": {
       "file": "secured_product_flow.json",
-      "sha256": "454197eef2bca92c694fc463e52fcc56a62bb025684a72706edc64432ab278bd"
+      "sha256": "d712b13bdc0cc11ef9abb74626f95259aa8c6e7481b54e34830a4be5e221f4e5"
     },
     "test_material_absence": {
       "file": "test_material_absence.json",
-      "sha256": "b26cccee133d4b28f838c79987d402de6b54fc93ccd34d17b6ff599227dd67be"
+      "sha256": "b8d158178ee95c2403518bd79a1ffc5a44cf95f5ab2aaed53f038204eccc7031"
     },
     "wrong_user": {
       "file": "wrong_user.json",
-      "sha256": "31ad08af8346c10b25d5c9968fc837cfd3502bdfed345b553dc02515596b7482"
+      "sha256": "caf2f364a8b702bad69d2eee2e290f0386f7a9ad91b1498f569d9b680449fd3b"
     }
   },
   "results": {

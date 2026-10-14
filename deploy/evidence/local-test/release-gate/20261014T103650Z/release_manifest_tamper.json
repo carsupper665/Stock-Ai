@@ -1,0 +1,10 @@
+{
+  "details": {
+    "checksum": "SHA-256",
+    "manifest_tamper_rejected": true
+  },
+  "name": "release_manifest_tamper",
+  "schema": "stock-ai.local-release-gate-result.v1",
+  "status": "passed",
+  "tested_at_utc": "2026-10-14T10:38:54.322068+00:00"
+}

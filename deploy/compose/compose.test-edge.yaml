@@ -41,7 +41,7 @@ services:
     image: "${NGINX_IMAGE:?set NGINX_IMAGE to an approved pinned Nginx image reference}"
     restart: unless-stopped
     init: true
-    user: "101:101"
+    user: "101:${LOCAL_TEST_GID:?set the host-private Test container group}"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

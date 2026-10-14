@@ -1,6 +1,6 @@
 {
   "details": {
-    "duration_seconds": 2.161,
+    "duration_seconds": 2.169,
     "exact_test_digests": true,
     "mutable_tags_accepted": false,
     "services_checked": [
@@ -10,9 +10,9 @@
       "console"
     ]
   },
-  "finished_at_utc": "2026-10-14T10:17:56.293060+00:00",
+  "finished_at_utc": "2026-10-14T10:37:22.828496+00:00",
   "name": "release_exact_digest",
   "schema": "stock-ai.local-acceptance-result.v1",
-  "started_at_utc": "2026-10-14T10:17:56.421574+00:00",
+  "started_at_utc": "2026-10-14T10:37:20.659136+00:00",
   "status": "passed"
 }
