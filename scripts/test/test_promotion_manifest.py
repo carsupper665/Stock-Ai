@@ -155,7 +155,7 @@ class PromotionManifestTest(unittest.TestCase):
         for line in sums.read_text(encoding="ascii").splitlines():
             digest, name = line.split("  ", 1)
             entries[name] = digest
-        self.assertEqual(len(entries), 27)
+        self.assertEqual(len(entries), 35)
         for name, digest in entries.items():
             self.assertEqual(hashlib.sha256((output.parent / name).read_bytes()).hexdigest(), digest)
         self.assertIn("oidc-gateway-sbom.spdx.json", entries)

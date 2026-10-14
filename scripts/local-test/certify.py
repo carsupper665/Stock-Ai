@@ -14,6 +14,7 @@ import os
 import socket
 import ssl
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -25,6 +26,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/local-test"))
+from verify_release import ReleaseVerificationError, verify_manifest_bytes, verify_release_configuration
+
+
 RUNTIME = ROOT / ".local-test"
 EVIDENCE = ROOT / "deploy/evidence/local-test/certification"
 APP = "https://app.localtest"
@@ -37,6 +42,9 @@ COMPOSE = ["docker", "compose", "--project-name", PROJECT, "--env-file", str(RUN
 RESULT_NAMES = (
     "secured_product_flow", "wrong_user", "expired_session", "idp_denial",
     "idp_restart", "internal_service_restart", "docker_restart_failure", "test_material_absence",
+    "issuer_mismatch", "audience_mismatch", "fixture_outage", "public_login_redirects",
+    "release_exact_digest", "release_manifest_substitution", "release_manifest_tamper",
+    "release_build_directive",
 )
 IMAGE_NAMES = ("backend", "agent-server", "llm-provider-server", "console", "oidc-gateway")
 
@@ -306,12 +314,158 @@ def cert_main():
         browser = Browser()
         status, result = control("/__fixture/next", {"scenario": "denial"})
         assert status == 200 and result.get("accepted") == "denial", "fixture denial setup failed"
-        browser.request("GET", "/oauth2/start", follow_redirects=False)
+        status, _, final_url = browser.request("GET", "/oauth2/start")
+        final = urllib.parse.urlparse(final_url)
+        assert status == 200 and final.path == "/login" and "auth_error=login_denied" in final.query, (
+            "IdP denial did not reach the public login error page")
+        assert final.port != 8443, "IdP denial exposed the internal edge port"
         status, _ = current_user(browser)
         assert status == 401, f"IdP denial authenticated a user (HTTP {status})"
-        return {"access_denied_rejected": True, "session_status": status}
+        return {"access_denied_rejected": True, "session_status": status,
+                "public_error_page": True, "internal_port_exposed": False}
 
     evidence["idp_denial"], results["idp_denial"] = run_case("idp_denial", idp_denial)
+
+    def validate_oidc_rejection(scenario, description):
+        browser = Browser()
+        login(browser, scenario)
+        status, _ = current_user(browser)
+        assert status == 401, f"{description} obtained an authenticated session (HTTP {status})"
+        _, _, final_url = browser.request("GET", "/login?auth_error=login_failed")
+        final = urllib.parse.urlparse(final_url)
+        assert final.path == "/login" and final.query == "auth_error=login_failed", (
+            f"{description} did not land on the public login error page")
+        assert final.port != 8443, f"{description} exposed the internal edge port in a public redirect"
+        return {"rejected": True, "session_status": status, "public_error_page": True,
+                "internal_port_exposed": False}
+
+    evidence["issuer_mismatch"], results["issuer_mismatch"] = run_case(
+        "issuer_mismatch", lambda: validate_oidc_rejection("issuer-mismatch", "issuer mismatch"))
+    evidence["audience_mismatch"], results["audience_mismatch"] = run_case(
+        "audience_mismatch", lambda: validate_oidc_rejection("audience-mismatch", "audience mismatch"))
+
+    def fixture_outage():
+        status, control_result = control("/__fixture/outage", {"enabled": True})
+        assert status == 200 and control_result.get("outage") is True, "fixture outage setup failed"
+        try:
+            browser = Browser()
+            status, _, final_url = browser.request("GET", "/oauth2/start")
+            assert status == 503, f"fixture outage returned HTTP {status}, expected 503"
+            user_status, _ = current_user(browser)
+            assert user_status == 401, "fixture outage created an authenticated session"
+            final = urllib.parse.urlparse(final_url)
+            assert final.hostname == "idp.localtest", "outage did not reach the local OIDC fixture"
+            return {"fixture_http_status": status, "session_status": user_status,
+                    "login_failed_closed": True}
+        finally:
+            control("/__fixture/outage", {"enabled": False})
+
+    evidence["fixture_outage"], results["fixture_outage"] = run_case("fixture_outage", fixture_outage)
+
+    def public_login_redirects():
+        observations = []
+        for path in ("/login", "/login/", "/login?auth_error=login_denied"):
+            browser = Browser()
+            status, _, final_url = browser.request("GET", path)
+            final = urllib.parse.urlparse(final_url)
+            assert status == 200 and final.path.rstrip("/") == "/login", (
+                f"browser navigation to {path} did not end on the anonymous Login SPA")
+            assert final.port != 8443, f"browser navigation to {path} exposed internal port 8443"
+            command = ["curl", "--silent", "--show-error", "--location", "--max-redirs", "5",
+                       "--resolve", "app.localtest:80:127.0.0.1", "--resolve", "app.localtest:443:127.0.0.1",
+                       "--cacert", str(RUNTIME / "certs/fullchain.pem"), "--dump-header", "-",
+                       "--output", "/dev/null", "--write-out", "\\n%{http_code} %{url_effective}",
+                       "http://app.localtest" + path]
+            response = subprocess.run(command, capture_output=True, text=True, check=True, timeout=30).stdout
+            lines = response.splitlines()
+            final_line = lines[-1]
+            status_code, effective_url = final_line.split(" ", 1)
+            effective = urllib.parse.urlparse(effective_url)
+            locations = [line.lower() for line in lines if line.lower().startswith("location:")]
+            assert status_code == "200" and effective.path.rstrip("/") == "/login", (
+                f"curl navigation to {path} did not end on the anonymous Login SPA")
+            assert effective.port != 8443 and all(":8443" not in line for line in locations), (
+                f"curl navigation to {path} exposed internal port 8443")
+            observations.append({"path": path, "browser_status": status, "curl_status": int(status_code),
+                                 "login_page_reached": True, "internal_port_exposed": False})
+        return {"navigations": observations, "anonymous_login_paths": True,
+                "auth_error_path_does_not_loop": True}
+
+    evidence["public_login_redirects"], results["public_login_redirects"] = run_case(
+        "public_login_redirects", public_login_redirects)
+
+    def test_release_exact_digest():
+        image_refs = json.loads((RUNTIME / "registry-references.json").read_text(encoding="utf-8"))
+        manifest = {
+            "schema": "stock-ai.promotion-manifest.v1", "status": "promoted", "environment": "Test",
+            "images": {name: image_refs[name] for name in IMAGE_NAMES[:-1]},
+            "test_stack_images": image_refs,
+            "artifacts": {name: {"build_digest": image_refs[name].rsplit("@", 1)[1]} for name in IMAGE_NAMES},
+        }
+        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES[:-1]}}
+        accepted = verify_release_configuration(manifest, compose_config)
+        assert accepted == manifest["images"], "local Release did not consume exact Test-accepted digests"
+        return {"services_checked": list(accepted), "exact_test_digests": True,
+                "mutable_tags_accepted": False}
+
+    evidence["release_exact_digest"], results["release_exact_digest"] = run_case(
+        "release_exact_digest", test_release_exact_digest)
+
+    def test_release_manifest_substitution():
+        image_refs = json.loads((RUNTIME / "registry-references.json").read_text(encoding="utf-8"))
+        manifest = {
+            "schema": "stock-ai.promotion-manifest.v1", "status": "promoted", "environment": "Test",
+            "images": {name: image_refs[name] for name in IMAGE_NAMES[:-1]},
+            "test_stack_images": image_refs,
+            "artifacts": {name: {"build_digest": image_refs[name].rsplit("@", 1)[1]} for name in IMAGE_NAMES},
+        }
+        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES[:-1]}}
+        image = compose_config["services"]["backend"]["image"]
+        digest = image.rsplit("@", 1)[1]
+        substitute = "0" * 64 if digest != "sha256:" + "0" * 64 else "1" * 64
+        compose_config["services"]["backend"]["image"] = image.rsplit("@", 1)[0] + "@sha256:" + substitute
+        try:
+            verify_release_configuration(manifest, compose_config)
+        except ReleaseVerificationError:
+            return {"substitution_rejected": True, "service": "backend"}
+        raise AssertionError("local Release accepted a substituted image digest")
+
+    evidence["release_manifest_substitution"], results["release_manifest_substitution"] = run_case(
+        "release_manifest_substitution", test_release_manifest_substitution)
+
+    def test_release_manifest_tamper():
+        raw = json.dumps({"schema": "stock-ai.promotion-manifest.v1", "status": "promoted"},
+                         sort_keys=True, separators=(",", ":")).encode()
+        expected = hashlib.sha256(raw).hexdigest()
+        verify_manifest_bytes(raw, expected)
+        tampered = raw.replace(b"promoted", b"tampered")
+        try:
+            verify_manifest_bytes(tampered, expected)
+        except ReleaseVerificationError:
+            return {"manifest_tamper_rejected": True, "checksum_mechanism": "SHA-256"}
+        raise AssertionError("local Release accepted a manifest changed after its checksum was recorded")
+
+    evidence["release_manifest_tamper"], results["release_manifest_tamper"] = run_case(
+        "release_manifest_tamper", test_release_manifest_tamper)
+
+    def test_release_build_directive():
+        image_refs = json.loads((RUNTIME / "registry-references.json").read_text(encoding="utf-8"))
+        manifest = {
+            "schema": "stock-ai.promotion-manifest.v1", "status": "promoted", "environment": "Test",
+            "images": {name: image_refs[name] for name in IMAGE_NAMES[:-1]},
+            "test_stack_images": image_refs,
+            "artifacts": {name: {"build_digest": image_refs[name].rsplit("@", 1)[1]} for name in IMAGE_NAMES},
+        }
+        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES[:-1]}}
+        compose_config["services"]["backend"]["build"] = {"context": "."}
+        try:
+            verify_release_configuration(manifest, compose_config)
+        except ReleaseVerificationError:
+            return {"build_directive_rejected": True, "service": "backend"}
+        raise AssertionError("local Release accepted a Compose build directive")
+
+    evidence["release_build_directive"], results["release_build_directive"] = run_case(
+        "release_build_directive", test_release_build_directive)
 
     def idp_restart():
         compose("restart", "local-fixtures")
@@ -368,7 +522,7 @@ def cert_main():
             ):
                 inspected = subprocess.run(command, capture_output=True, check=True).stdout
                 lowered = inspected.lower()
-                assert b"stock-ai-test_" not in lowered, f"Test secret path in {service} {description}"
+                assert b"stock-ai-test" not in lowered, f"Test-specific value in {service} {description}"
                 assert b"local-test-oidc-client-secret-only" not in lowered, f"fixture secret in {service} {description}"
                 assert b"local-test-provider-token-only" not in lowered, f"provider fixture token in {service} {description}"
                 assert not any(secret in inspected for secret in private_material), (
@@ -397,9 +551,14 @@ def cert_main():
                                         f"provider fixture token in {service} image layer")
             finally:
                 archive.unlink(missing_ok=True)
-            metadata = (Path("/tmp") / f"stock-ai-t10-{service}-build.json").read_text(encoding="utf-8").lower()
-            assert "local-test-oidc-client-secret-only" not in metadata, f"fixture secret in {service} build manifest"
-        return {"images_checked": list(IMAGE_NAMES), "layers_config_registry_manifests_clear": True,
+            metadata = (Path("/tmp") / f"stock-ai-t10-{service}-build.json").read_bytes()
+            lowered_metadata = metadata.lower()
+            assert b"stock-ai-test" not in lowered_metadata, f"Test-specific value in {service} build manifest"
+            assert b"local-test-oidc-client-secret-only" not in lowered_metadata, f"fixture secret in {service} build manifest"
+            assert b"local-test-provider-token-only" not in lowered_metadata, f"provider fixture token in {service} build manifest"
+            assert not any(secret in metadata for secret in private_material), (
+                f"local Test secret or certificate material in {service} build manifest")
+        return {"images_checked": list(IMAGE_NAMES), "layers_config_registry_manifests_build_metadata_clear": True,
                 "test_fixture_image_promoted": False}
 
     evidence["test_material_absence"], results["test_material_absence"] = run_case(

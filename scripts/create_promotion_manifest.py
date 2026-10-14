@@ -31,6 +31,14 @@ REQUIRED_RESULTS = (
     "internal_service_restart",
     "docker_restart_failure",
     "test_material_absence",
+    "issuer_mismatch",
+    "audience_mismatch",
+    "fixture_outage",
+    "public_login_redirects",
+    "release_exact_digest",
+    "release_manifest_substitution",
+    "release_manifest_tamper",
+    "release_build_directive",
 )
 IMMUTABLE_REFERENCE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")

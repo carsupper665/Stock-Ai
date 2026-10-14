@@ -243,6 +243,31 @@ server {
         proxy_set_header X-Auth-Request-Access-Token $oidc_access_token;
     }
 
+    # The Gateway redirects failed logins to this public frontend route. Keep
+    # /login and /login/ outside auth_request so an IdP error cannot loop back
+    # into /oauth2/start; API locations remain authenticated above.
+    location ~ ^/login/?$ {
+        limit_req zone=per_ip burst=20 nodelay;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_console;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${TEST_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${TEST_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header Forwarded "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header X-Auth-Request-Access-Token "";
+    }
+
     location ^~ /llm/ {
         if ($http_authorization != "") { return 403; }
         limit_req zone=per_ip burst=40 nodelay;

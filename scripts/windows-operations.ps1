@@ -170,7 +170,7 @@ function Get-Promotion([string]$Path) {
     if ($manifest.trust.mechanism -ne 'SHA-256 sidecar' -or $manifest.trust.checksum_file -ne 'SHA256SUMS') {
         throw 'Promotion manifest must declare the supported SHA-256 checksum trust mechanism.'
     }
-    $requiredResults = @('secured_product_flow', 'wrong_user', 'expired_session', 'idp_denial', 'idp_restart', 'internal_service_restart', 'docker_restart_failure', 'test_material_absence')
+    $requiredResults = @('secured_product_flow', 'wrong_user', 'expired_session', 'idp_denial', 'idp_restart', 'internal_service_restart', 'docker_restart_failure', 'test_material_absence', 'issuer_mismatch', 'audience_mismatch', 'fixture_outage', 'public_login_redirects', 'release_exact_digest', 'release_manifest_substitution', 'release_manifest_tamper', 'release_build_directive')
     foreach ($result in $requiredResults) {
         if ($manifest.acceptance_results.$result -ne 'passed') { throw "Promotion acceptance result is missing or failed: $result." }
     }

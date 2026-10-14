@@ -24,13 +24,16 @@ python3 scripts/local-test/capture_build_evidence.py
 python3 scripts/local-test/certify.py
 ```
 
-The certification runner exercises the complete secured flow and eight
+The certification runner exercises the complete secured flow and eight core
 acceptance cases: `secured_product_flow`, `wrong_user`, `expired_session`,
 `idp_denial`, `idp_restart`, `internal_service_restart`,
-`docker_restart_failure`, and `test_material_absence`. Each case writes a
-sanitized JSON result. Failed attempts remain recorded in their own timestamped
-directory; promotion accepts only the explicitly selected passed certification
-whose revision and five image digests match the production build evidence.
+`docker_restart_failure`, and `test_material_absence`. It also checks issuer and
+audience mismatch, fixture outage, anonymous `/login` and `/login/` redirects,
+exact Release digest consumption, manifest substitution/tampering, and Compose
+build-directive rejection. Each check writes a sanitized JSON result. Failed
+attempts remain recorded in their own timestamped directory; promotion accepts
+only an explicitly selected passed certification whose revision and five image
+digests match the production build evidence.
 Cookies, account tokens, IdP response bodies, credentials, and fixture keys
 remain in memory or in ignored runtime files and are not written to evidence.
 
@@ -52,6 +55,7 @@ result files and emits `stock-ai.promotion-manifest.v1` plus a package-level
 
 ```text
 python3 scripts/create_promotion_manifest.py --build-evidence .local-test/build-evidence --test-certification deploy/evidence/local-test/certification/<run>/test-certification.json --registry-references .local-test/registry-references.json --output deploy/evidence/local-test/promotion/promotion.json
+python3 scripts/local-test/verify_promotion.py --manifest deploy/evidence/local-test/promotion/promotion.json --output-dir deploy/evidence/local-test/release-gate/<run>
 ```
 
 Release `Update` and Release preflight require this manifest. They verify the
