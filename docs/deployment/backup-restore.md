@@ -1,205 +1,236 @@
-# Backup, restore, and rollback
+# Local backup, restore, retention, and rollback
 
-`scripts/recovery.ps1` manages encrypted recovery sets for the isolated Compose
-stack. It is designed for Windows PowerShell 7 and Docker Desktop in Linux
-container mode. Backups cover all three SQLite databases, the entire Agent
-History directory, the Compose definition and environment file, and all six
-mounted secrets (including the matching LLM master key). The LLM database and
-master key must always be restored from the same set.
+The authoritative recovery path is `scripts/linux_recovery.py` on WSL/Linux
+with Docker Desktop in Linux-container mode. It creates a consistent encrypted
+set containing all three SQLite databases, Agent History, the Compose file,
+the environment file, and these six namespace-scoped secrets:
 
-## Setup and backup
+- Backend USER token and Account-token encryption key
+- Agent admin token
+- LLM admin token, runtime token, and matching Provider master key
 
-Create an RSA recovery certificate in `LocalMachine\My`; protect and escrow its
-private key separately from the Docker host and grant the operator account read
-access. The certificate thumbprint and private key are required to verify or
-restore. Keep the backup directory on an encrypted volume with an ACL limited
-to the recovery operator and backup administrators. Do not include the private
-key in any recovery set.
+The Provider database and master key are one recovery unit. Never restore one
+without the other. The recovery key is separate from the six application
+secrets and is never included in a backup.
 
-For example, create the directory on a BitLocker-protected data volume and
-remove inherited access before granting the dedicated operator, SYSTEM, and
-local Administrators access. Run elevated and replace the account name:
+## Prerequisites and permissions
 
-```powershell
-$BackupDir = 'D:\Stock AI Recovery\Release'
-$BackupAccount = 'HOSTNAME\stock-ai-backup'
-New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
-icacls $BackupDir /inheritance:r /grant:r "$($BackupAccount):(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F'
+The workflow requires Python 3 with `cryptography`, Docker Compose, and a local
+immutable helper image reference. The helper must be supplied as either
+`sha256:<64 hex>` or `repository@sha256:<64 hex>`; tags are rejected for
+restore and permission preparation. Pre-stage the documented default helper or
+pass a security-approved full local image ID with `--helper-image`.
+
+Keep the environment file, recovery key, backup directory, and recovery
+directories private to the operator:
+
+| Object | Required Linux policy |
+|---|---|
+| Environment and recovery-key files | operator-owned, no group/other access |
+| Backup/recovery/secrets directories | `0700` |
+| Encrypted backup, checksum, metadata | `0600` while operational |
+| Six Compose secret files | `uid 65532`, operator primary GID, `0440`, inside the `0700` directory |
+| Restored volume directories/files | `65532:65532`, `0700`/`0600` before first start |
+
+The split secret ownership is necessary for Linux file-backed Compose secrets:
+the application image runs as uid `65532`, while the operator still needs
+group read access to back up the files. Directory `0700` prevents other group
+members from traversing the host directory. Prepare and verify the six files
+without exposing their values:
+
+```bash
+python3 scripts/linux_recovery.py prepare-secrets \
+  --env-file /srv/stock-ai/test/compose.env \
+  --helper-image sha256:REPLACE_WITH_APPROVED_64_HEX_IMAGE_ID
 ```
 
-The script enforces and verifies this protected ACL before creating a log,
-staging directory, or ZIP. It also secures existing child files/directories
-before continuing, then applies a protected ACL to each new plaintext staging
-directory. Its owner/current operator SID is the account running the script.
+The command rejects missing files, symlinks, unexpected names, mutable helper
+references, or files accessible to `other`. It reports only counts and modes.
+Run the Ticket 02 production-secret value/isolation validation before this
+container-readable permission transition.
+Keep the recovery key as canonical base64 for exactly 32 random bytes and mode
+`0600`; escrow a copy separately from the Docker host and backups.
 
-Set `STOCK_AI_BACKUP_DIR` in the environment file. Run these commands from an
-elevated PowerShell 7 session after confirming the recovery certificate and
-its private-key escrow:
+## Consistent encrypted backup and verification
 
-```powershell
-$Ops = 'C:\Program Files\Stock AI\scripts\recovery.ps1'
-$EnvFile = 'C:\ProgramData\Stock AI\Release\compose.env'
-$Cert = 'REPLACE_WITH_CERTIFICATE_THUMBPRINT'
-& $Ops -Action Backup -EnvFile $EnvFile -CertificateThumbprint $Cert
-$Backup = Get-ChildItem 'C:\ProgramData\Stock AI\Release\backups\*.sai-backup' | Sort-Object Name -Descending | Select-Object -First 1
-& $Ops -Action Verify -EnvFile $EnvFile -BackupFile $Backup.FullName -CertificateThumbprint $Cert
+Backup validates all six secrets and Compose metadata, requires every
+application image reference to be either a full local `sha256:<64 hex>` ID or
+`repository@sha256:<64 hex>` digest, records those exact references, stops the
+stack, and copies `/data` from the stopped containers. Mutable tags are rejected
+before the stack is stopped. Restore revalidates the archived references and
+requires the rendered restored Compose configuration to match them exactly.
+It restarts the stack only when it was running before the operation. Stopping
+all services means each SQLite main file and any WAL/journal state are copied
+at one consistent recovery point rather than from an actively mutating file.
+
+```bash
+python3 scripts/linux_recovery.py backup \
+  --env-file /srv/stock-ai/test/compose.env \
+  --compose-file deploy/compose/compose.yaml \
+  --key-file /srv/stock-ai/recovery/recovery.key \
+  --evidence-file /srv/stock-ai/recovery/evidence/backup.json
+
+BACKUP=/srv/stock-ai/test/backups/stock-ai-test-YYYYMMDDTHHMMSSZ.sai-backup
+python3 scripts/linux_recovery.py verify \
+  --backup-file "$BACKUP" \
+  --key-file /srv/stock-ai/recovery/recovery.key \
+  --evidence-file /srv/stock-ai/recovery/evidence/verify.json
 ```
 
-Backup gracefully stops the stack before copying volume data from the stopped
-containers, so SQLite main files and WAL state are captured consistently. It
-restarts the stack if it was running before the operation. The output is a
-timestamped AES-256-GCM authenticated envelope; its data key is wrapped with
-RSA-OAEP-SHA256 for the recovery certificate. A SHA-256 sidecar detects
-transfer/storage damage before decryption, and an internal per-file SHA-256
-inventory is checked after decryption. `Verify` decrypts into a temporary
-directory, checks the inventory and required files, then removes its temporary
-plaintext. Recovery logs contain operation, file, timing, and failure type,
-never secret values. Daily `recovery-YYYYMMDD.log` files are retained for 90
-days; Task Scheduler's Last Run Result remains the immediate failure signal.
+The archive uses AES-256-GCM with a fresh nonce. A `*.sha256` sidecar detects
+transfer/storage corruption before decryption, and the authenticated archive
+contains a per-file SHA-256 inventory. `verify` decrypts only into a private
+temporary directory, performs safe extraction, checks all required content,
+runs `PRAGMA integrity_check`, and reports schema hashes and table counts. It
+also records a whole-history fingerprint and file count. Temporary plaintext
+is deleted at exit. Command failures are nonzero and diagnostics never include
+secret or environment values.
 
-The sample retention policy is 14 most recent daily sets plus one set from
-each of the 12 most recent months. Set local/off-host retention to match legal
-and business requirements; keep at least one verified copy off-host. Run
-`-Action Prune` only after off-host replication has verified both the encrypted
-file and sidecar:
+## Safe retention
 
-```powershell
-$BackupFile = Get-ChildItem 'D:\Stock AI Recovery\Release\*.sai-backup' | Sort-Object Name -Descending | Select-Object -First 1
-$Hash = (Get-FileHash -LiteralPath $BackupFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-# Only write this attestation after the off-host copy and its sidecar were independently verified.
-@{ backup_file = $BackupFile.Name; sha256 = $Hash; verified_at_utc = [DateTime]::UtcNow.ToString('o') } |
-  ConvertTo-Json | Set-Content 'D:\Stock AI Recovery\Release\offhost-verification.json' -Encoding utf8NoBOM
-& $Ops -Action Prune -EnvFile $EnvFile -OffHostVerificationMarker 'D:\Stock AI Recovery\Release\offhost-verification.json' -KeepDaily 14 -KeepMonthly 12
+Keep at least one independently verified off-host copy of both the encrypted
+file and its checksum. Retention refuses to delete anything unless a mode-0600
+attestation names a local set, matches its SHA-256, and is no more than seven
+days old:
+
+```json
+{
+  "backup_file": "stock-ai-test-YYYYMMDDTHHMMSSZ.sai-backup",
+  "sha256": "64-lowercase-hex-characters",
+  "verified_at_utc": "RFC3339 timestamp with timezone"
+}
 ```
 
-Prune refuses to run without this marker or if it is older than seven days,
-references a missing set, or has a different local encrypted-file hash. The
-marker is an operator attestation; the copy/remote hash check remains part of
-the off-host replication procedure.
+Create that marker only after independently checking the off-host bytes and
+sidecar. Preview, review, then apply the default 14-daily/12-monthly policy:
 
-Register the daily backup and weekly retention jobs under a dedicated Windows
-account after confirming its Docker access and off-host replication schedule:
+```bash
+python3 scripts/linux_recovery.py prune \
+  --backup-directory /srv/stock-ai/test/backups \
+  --offhost-marker /srv/stock-ai/test/backups/offhost-verification.json \
+  --keep-daily 14 --keep-monthly 12 --dry-run
 
-```powershell
-& $Ops -Action InstallSchedule -EnvFile $EnvFile -ScheduledTaskUser 'HOSTNAME\stock-ai-backup' -CertificateThumbprint $Cert
+python3 scripts/linux_recovery.py prune \
+  --backup-directory /srv/stock-ai/test/backups \
+  --offhost-marker /srv/stock-ai/test/backups/offhost-verification.json \
+  --keep-daily 14 --keep-monthly 12
 ```
 
-The installer prompts for the account password and stores it through Task
-Scheduler; it registers daily backup at 02:00 and weekly prune at Sunday 04:00.
-The scheduled account SID must equal the current operator SID that owns the
-backup-directory ACL. Sign in/run setup as that dedicated account; installing
-from a different administrator account is rejected. At task runtime the same
-SID re-applies and verifies the backup ACL before any output is created.
-Run the retention task only after off-host replication verification. Run the
-operation as a dedicated, non-interactive Windows account and inspect the Task
-Scheduler Last Run Result and the current `recovery-YYYYMMDD.log`. A failed run exits
-nonzero and appends a visible `FAIL` record. Docker Desktop's daemon access is
-effectively administrative: adding an account to `docker-users` grants control
-over the host. Therefore the deployment owner must explicitly approve this
-privilege or provide a separately constrained backup agent before enabling a
-scheduled task; this ticket does not claim the account is least-privileged
-while it can control the Docker daemon. Do not schedule a task that hides this
-boundary. The scheduled task must run Backup, verify replication, then Prune;
-configure Task Scheduler to retry failures and retain task history. The weekly
-prune task checks the same marker and fails visibly when off-host verification
-is stale.
+Every candidate checksum is verified before any deletion. Noncanonical names,
+links, missing sidecars, bad hashes, stale/future attestations, and nonpositive
+retention counts fail closed. The attested set is always retained. Only a
+backup and its matching sidecar are removed; unrelated files are untouched.
+Recovery logs older than 90 days may be removed by the same policy.
 
-## Restore into an empty stack
+Run backup daily and prune only after the replication job has written a fresh
+attestation. A systemd user timer or host scheduler must preserve the nonzero
+exit status and alert on failure. Store logs in an operator-only directory and
+never enable shell tracing around these commands.
 
-First verify the chosen set. Prepare the exact environment and image references
-from that backup on the recovery host, with the named volumes newly created and
-empty. Restore refuses existing data, with the allowlisted image-owned empty
-scaffolding described below as the only exception. It stops the stack,
-creates containers without starting services, copies the complete
-service state into the empty named volumes, and exports the archived Compose
-file, environment file, and secrets to a separate recovery directory. The
-exported environment file is rewritten to point at its exported secrets.
-Container lookup uses `docker compose ps --all -q`, so stopped containers from
-Backup and newly created, not-yet-started containers during Restore are found.
+## Restore only to new disposable volumes
 
-Fresh volumes may contain only the Docker image's empty copy-up scaffolding:
-`backend:/data/logs` and `agent-server:/data/history`. Those exact directories
-must be empty; the LLM Provider volume must contain nothing. Any file, populated
-scaffold, symlink, database, or unknown path blocks restore. After copying each
-volume, restore runs the immutable helper image
-`golang:1.27.2-alpine3.23@sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079`
-with no network, a read-only container root, `CHOWN` plus `DAC_OVERRIDE`
-capabilities for the ownership pass, and `DAC_OVERRIDE` for the read-only
-ownership verification. It
-rejects symlinks, sets every `/data` entry to `65532:65532`, then verifies every
-entry using a separate read-only mount. This matches the service UID/GID in
-the application images; missing helper image or any chown/verification error
-aborts restore.
+Restore never writes over a deployed volume. The destination stack name must
+match `*-restore-<4-to-16-character-suffix>`, differ from the source stack, and
+all three destination volume names must not exist. The workflow creates and
+labels the volumes itself, then copies the authenticated set and verifies every
+entry is owned by `65532:65532` with directories `0700` and files `0600`.
+Failure removes only volumes created by that failed attempt.
 
-Before decrypted content is extracted, and again before secrets are written to
-`RestoreDirectory`, the script protects the directory DACL against inheritance,
-sets the operator as directory owner, then verifies that only the current
-operator, SYSTEM, and local Administrators have Full Control. It applies and
-verifies the same ACL to the `secrets` child
-before copying any of the six secret files. Any unexpected principal or ACL
-failure aborts before secret files are written.
-
-The fixture regressions are in `scripts/test/RecoveryPolicy.Tests.ps1`. They
-exercise allowed empty scaffolding, populated/unknown data rejection, ACL
-allow/deny behavior, and successful/failing UID/GID restoration command paths.
-They require Pester on Windows; this Linux worktree does not have PowerShell and
-the prior operator instruction prohibits attempting it here. Run them on the
-Windows Test host with:
-
-```powershell
-Invoke-Pester -Path 'scripts/test/RecoveryPolicy.Tests.ps1' -CI
+```bash
+python3 scripts/linux_recovery.py restore \
+  --backup-file "$BACKUP" \
+  --key-file /srv/stock-ai/recovery/recovery.key \
+  --restore-stack stock-ai-test-restore-dr01 \
+  --restore-directory /srv/stock-ai/recovery/restore-dr01 \
+  --helper-image sha256:REPLACE_WITH_APPROVED_64_HEX_IMAGE_ID \
+  --evidence-file /srv/stock-ai/recovery/evidence/restore.json
 ```
 
-```powershell
-$Recovery = 'C:\ProgramData\Stock AI\Release\restore-20261013'
-& $Ops -Action Restore -EnvFile $EnvFile -BackupFile 'C:\ProgramData\Stock AI\Release\backups\stock-ai-release-20261013T120000Z.sai-backup' -RestoreDirectory $Recovery -CertificateThumbprint $Cert
+The new recovery directory contains `compose.yaml`, rewritten `compose.env`,
+the six restored secrets, and sanitized restore metadata. The environment
+points only to the new stack and recovery secret directory; image references
+must equal those in the backup. Review these metadata, then create the stack
+and capture a stopped pre-start validation before starting:
+
+```bash
+docker compose \
+  --env-file /srv/stock-ai/recovery/restore-dr01/compose.env \
+  -f /srv/stock-ai/recovery/restore-dr01/compose.yaml create
+
+docker compose \
+  --env-file /srv/stock-ai/recovery/restore-dr01/compose.env \
+  -f /srv/stock-ai/recovery/restore-dr01/compose.yaml \
+  up -d --wait --wait-timeout 180
 ```
 
-Before starting, review the archived config and image digests, secret ACLs,
-certificate/issuer availability, and environment identity. Start with the
-recovered environment and run the operator `Status`/`Diagnose` checks. Confirm
-accounts and sessions, Agent run history and messages, available models, and
-that an authorized Provider credential can be decrypted. Do not point the
-recovered deployment at a different environment's identity provider or
-secrets. Keep the failed/old volumes untouched until business acceptance.
+Acceptance requires both phases:
 
-## Image/config rollback and database migration limits
+1. Before first start, all three database integrity results, schema hashes,
+   table counts, and the Agent History fingerprint equal `verify` evidence.
+2. After start, every service is `running/healthy`, baseline rows remain,
+   Account, Session, Run History, Message, and Model fixtures are readable, and
+   Generate succeeds through the restored encrypted Provider credential.
 
-The Ticket 12 `Update`/`Rollback` actions restore immutable image references
-and deployment metadata only. They intentionally do not change any named
-volume or restore a database snapshot. A database migration may be
-irreversible or incompatible with the prior image; changing the image alone
-does not undo a migration. Before an update, require a verified full backup
-and identify whether every service's schema is backward compatible. If not,
-stop the stack and choose a full-set restore into empty volumes with the exact
-matching config, image digests, and secrets. Never combine an old Provider DB
-with a rotated master key, or restore one database independently while
-leaving the others at a later point.
+Agent startup may legitimately append a `server_recovery` Run to the restored
+history shard. Therefore compare exact stopped state before start; after start,
+verify the baseline Run History through its API and record the additional
+recovery state rather than incorrectly requiring a live database to remain
+byte-for-byte unchanged.
 
-The current deployment stores SQLite and does not provide an automated schema
-downgrade. PostgreSQL, external IdP state, TLS private keys/certificates, and
-off-host services are not included in this application backup and require
-their own coordinated recovery plans. A migration decision must stop if its
-pre-migration backup is absent/unverified, if a downgrade has not been proven
-for every affected schema, if the matching key/config is unavailable, or if
-the intended RPO/RTO cannot be met.
+Destroy the disposable recovery containers and volumes after acceptance. The
+exercise fails unless label-based queries prove that both source and restore
+Compose projects have no containers, exact-name queries prove that both local
+Provider fixture containers are absent, and all six source/restore named
+volumes are absent. Do not delete or repurpose the failed/production source
+volumes as part of this workflow.
 
-## Timed recovery exercise
+## Image/config rollback versus full data restore
 
-Proposed targets pending Data Owner approval: **RPO 24 hours** (daily backup)
-and **RTO 4 hours** for the complete application recovery. Record the selected
-backup timestamp as the recovery point; compare it with the declared loss
-time. Measure RTO from incident declaration through healthy services and
-verified sample business data, not merely through file extraction. Exercise
-the empty-stack procedure on an isolated Test host with representative account,
-session, run, message, model, and encrypted Provider credential records. Save
-sanitized timings and verification results in a dated evidence file. A timing
-exercise without restored data checks is not a recovery pass.
+Ticket 12 `update`/`rollback` is an application rollback. It restores the exact
+previous immutable image assignments and validates configuration hashes; it
+does not touch a named volume, rewind SQLite, or alter Agent History. Use it
+only when the existing schemas are proven backward compatible with the prior
+images.
 
-The current Linux worktree environment has no PowerShell runtime and its
-process cannot access Docker Engine. Therefore no real restore, RPO/RTO result,
-Windows scheduled-task result, or Windows retention execution is claimed by
-this change. The blocked probe record is
-[`ticket-13-exercise-blocked.json`](ticket-13-exercise-blocked.json). The
-exercise must be run and recorded on the isolated Windows Test host before
-Release deployment.
+A full data restore is a different decision: stop the affected deployment,
+select a verified pre-change recovery set, and restore all databases, history,
+configuration, and matching secrets together into new empty volumes. The
+application has no automated schema downgrade. Do not combine an old Provider
+database with another master key, restore one database independently, or use
+image rollback as a substitute for migration rollback.
+
+Stop and choose full restore when any affected schema lacks a proven downgrade,
+the migration partially committed, the pre-change set cannot be verified, or
+the prior image fails against current data. Preserve the failed volumes until
+business acceptance and incident review are complete.
+
+## Timed local exercise and evidence
+
+Run the local deterministic exercise only on a Docker host where it may create
+randomly named disposable stacks. It resolves all application/helper tags to
+full local image IDs, creates an Account, Message, Model, Session, completed
+Run and encrypted Provider token, and executes backup → decrypt/verify → actual
+retention → new-volume restore → healthy startup → business checks → cleanup:
+
+```bash
+python3 scripts/exercise_linux_recovery.py \
+  --evidence-file docs/deployment/ticket-13-local-recovery-evidence.json
+```
+
+The accepted exercise met the proposed **24-hour RPO** and **4-hour RTO**. Its
+sanitized evidence and checksum are:
+
+- [`ticket-13-local-recovery-evidence.json`](ticket-13-local-recovery-evidence.json)
+- [`ticket-13-local-recovery-evidence.json.sha256`](ticket-13-local-recovery-evidence.json.sha256)
+
+RPO is measured from the selected backup recovery point to simulated incident
+declaration. RTO starts at declaration and ends only after healthy services,
+logical database/history checks, and deterministic business-data validation.
+
+## Legacy Windows workflow (not a gate)
+
+`scripts/recovery.ps1`, `scripts/recovery-policy.psm1`, Windows Task Scheduler,
+Pester, and NTFS ACL checks are retained as legacy operator material. They were
+**not run** for this Linux/WSL acceptance and are not gates. External host,
+IdP, DNS, and TLS recovery are also outside this local application recovery
+set and recorded as `not_run_non_gate`; those systems require separate plans.

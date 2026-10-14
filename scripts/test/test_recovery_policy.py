@@ -1,118 +1,232 @@
+import copy
+import hashlib
+import importlib.util
 import json
+import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "recovery.ps1"
-POLICY = ROOT / "scripts" / "recovery-policy.psm1"
-PESTER = ROOT / "scripts" / "test" / "RecoveryPolicy.Tests.ps1"
+LINUX = ROOT / "scripts" / "linux_recovery.py"
+EXERCISE = ROOT / "scripts" / "exercise_linux_recovery.py"
 DOC = ROOT / "docs" / "deployment" / "backup-restore.md"
-EVIDENCE = ROOT / "docs" / "deployment" / "ticket-13-exercise-blocked.json"
+EVIDENCE = ROOT / "docs" / "deployment" / "ticket-13-local-recovery-evidence.json"
+SIDECAR = Path(f"{EVIDENCE}.sha256")
+WINDOWS = ROOT / "scripts" / "recovery.ps1"
+EXERCISE_SPEC = importlib.util.spec_from_file_location(
+    "exercise_linux_recovery", EXERCISE
+)
+assert EXERCISE_SPEC and EXERCISE_SPEC.loader
+exercise_module = importlib.util.module_from_spec(EXERCISE_SPEC)
+EXERCISE_SPEC.loader.exec_module(exercise_module)
 
 
 class RecoveryPolicyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.script = SCRIPT.read_text(encoding="utf-8")
-        cls.policy = POLICY.read_text(encoding="utf-8")
-        cls.pester = PESTER.read_text(encoding="utf-8")
+        cls.linux = LINUX.read_text(encoding="utf-8")
+        cls.exercise = EXERCISE.read_text(encoding="utf-8")
         cls.doc = " ".join(DOC.read_text(encoding="utf-8").split())
+        cls.evidence_bytes = EVIDENCE.read_bytes()
+        cls.evidence = json.loads(cls.evidence_bytes)
 
-    def test_backup_stops_stack_and_captures_all_data_and_secrets(self):
+    def test_backup_is_stopped_and_complete(self):
         for marker in (
-            "backend_state",
-            "llm_state",
-            "agent_state",
-            "agent-server/history",
+            '"backend": "backend_state"',
+            '"llm-provider-server": "llm_state"',
+            '"agent-server": "agent_state"',
+            '"agent-server" / "history"',
+            '"config" / "compose.yaml"',
+            '"config" / "compose.env"',
             "llm_master_key",
-            "config/compose.yaml",
-            "config/compose.env",
-            "Invoke-Compose @('stop', '--timeout', '30')",
-            "Invoke-Docker @('cp'",
+            '"stop", "--timeout", "30"',
+            '"consistency": "compose_stopped"',
         ):
-            self.assertIn(marker, self.script)
-        self.assertIn("Invoke-Compose @('up', '-d', '--wait'", self.script)
+            self.assertIn(marker, self.linux)
+        self.assertEqual(len(re.findall(r'^    "[a-z_]+",$', self.linux, re.MULTILINE)), 6)
 
-    def test_encryption_integrity_and_restricted_retention_are_explicit(self):
+    def test_application_images_are_immutable_at_backup_verify_and_restore(self):
         for marker in (
-            "AesGcm",
-            "OaepSHA256",
-            "SHA256",
-            "certificate_thumbprint",
-            "InstallSchedule",
-            "Register-ScheduledTask",
-            "KeepDaily",
-            "KeepMonthly",
-            "recovery-{0}.log",
-            "OffHostVerificationMarker",
-            "AddDays(-90)",
-            "FAIL action=$Action",
+            "validate_application_images(manifest.get(\"images\"))",
+            "images = validate_application_images(",
+            "restored_images = validate_application_images(",
+            "full local SHA-256 ID or repository digest",
         ):
-            self.assertIn(marker, self.script)
-        self.assertIn("docker-users", self.doc)
-        self.assertIn("Task Scheduler Last Run Result", self.doc)
+            self.assertIn(marker, self.linux)
 
-    def test_restore_requires_empty_volumes_and_preserves_data_boundary(self):
-        self.assertIn("Test-EmptyVolumes", self.script)
-        self.assertIn("Assert-RecoveryVolumeScaffolding", self.script)
-        self.assertIn("refusing to overwrite user data", self.policy)
-        self.assertIn("llm-provider-server/llm-provider.db", self.script)
-        self.assertIn("matching LLM master key", self.script)
-        self.assertIn("do not change any named volume", self.doc)
-        self.assertIn("automated schema", self.doc)
-
-    def test_restore_uses_fixture_policy_for_scaffolding_acl_and_ownership(self):
-        self.assertIn("Assert-RecoveryVolumeScaffolding -Service $service", self.script)
-        self.assertIn("Invoke-RecoveryVolumeOwnership -VolumeName", self.script)
-        self.assertLess(
-            self.script.index("Set-RecoveryDirectoryAcl -Path $restoredSecrets"),
-            self.script.index('Copy-Item -LiteralPath (Join-Path $expanded "secrets/$secret")'),
-        )
-        for behavior in (
-            "allows only the image-owned empty backend logs directory",
-            "rejects files in an otherwise allowed logs scaffold",
-            "rejects database files, history files, and unknown directories",
-            "sets and verifies the protected recovery directory DACL before use",
-            "rejects an unexpected principal in the recovery directory DACL",
-            "chowns every data volume to 65532 and verifies all entries read-only",
-            "fails closed when chown or ownership verification fails",
+    def test_encryption_checksums_and_safe_extraction_are_authenticated(self):
+        for marker in (
+            "algorithms.AES(key), modes.GCM",
+            "encryptor.authenticate_additional_data",
+            "decryptor.authenticate_additional_data",
+            "sha256_file",
+            "verify_checksum",
+            "member.isdir() or member.isfile()",
+            'filter="data"',
+            "Backup internal checksum inventory does not match",
         ):
-            self.assertIn(behavior, self.pester)
-        self.assertIn("chown -R 65532:65532 /data", self.policy)
-        self.assertIn("Assert-RecoveryDirectoryAcl -Path $fullPath", self.policy)
+            self.assertIn(marker, self.linux)
 
-    def test_sensitive_backup_paths_are_locked_before_logs_or_staging(self):
-        initialize = self.script.index("Initialize-RecoveryBackupDirectory -Path $BackupDirectory")
-        self.assertLess(initialize, self.script.index("$LogPath = Join-Path $BackupDirectory"))
-        self.assertLess(initialize, self.script.index("function Invoke-Backup"))
-        self.assertLess(initialize, self.script.index("function Invoke-Prune"))
-        self.assertLess(initialize, self.script.index("switch ($Action)"))
-        self.assertIn("Set-RecoveryDirectoryAcl -Path $stage", self.script)
-        self.assertIn("Set-RecoveryFileAcl -Path $entry.FullName", self.policy)
-        self.assertIn("must be the current ACL operator account", self.policy)
-        self.assertIn("Assert-RecoveryScheduledAccount -ScheduledSid $scheduledSid", self.script)
-        self.assertIn("locks an existing backup directory and its files before recovery actions use it", self.pester)
-
-    def test_container_lookup_includes_stopped_compose_containers(self):
-        self.assertIn("Get-RecoveryContainerIds -Services $Services", self.script)
-        self.assertIn("@('ps', '--all', '-q', $service)", self.policy)
-        self.assertIn("queries Compose for all containers including stopped and created services", self.pester)
-        self.assertIn("accepts scheduled tasks only for the ACL operator SID", self.pester)
-
-    def test_recovery_uid_matches_each_persisted_service_image(self):
-        helper = self.policy.split(" = '", 1)[1].split("'", 1)[0]
+    def test_linux_permissions_cover_operator_secrets_and_volume_owner(self):
+        for marker in (
+            "require_linux_secret_file",
+            "info.st_uid != 65532",
+            "mode != 0o440",
+            "chown -R 65532:65532 /data",
+            "chmod 0700",
+            "chmod 0600",
+            "uid 65532, operator gid",
+        ):
+            self.assertIn(marker, self.linux)
         for service in ("backend", "agent-server", "llm-provider-server"):
-            dockerfile = ROOT / "docker" / f"{service}.Dockerfile"
-            dockerfile_text = dockerfile.read_text(encoding="utf-8")
-            self.assertIn("USER 65532:65532", dockerfile_text)
-            self.assertIn(f"FROM {helper} AS build", dockerfile_text)
+            dockerfile = (ROOT / "docker" / f"{service}.Dockerfile").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("USER 65532:65532", dockerfile)
 
-    def test_exercise_record_does_not_claim_a_recovery_run(self):
-        record = json.loads(EVIDENCE.read_text(encoding="utf-8"))
-        self.assertEqual(record["status"], "not-run")
-        self.assertIsNone(record["measured_rpo_hours"])
-        self.assertIsNone(record["measured_rto_minutes"])
+    def test_restore_allows_only_new_disposable_named_volumes(self):
+        self.assertIn("RESTORE_STACK.fullmatch", self.linux)
+        self.assertIn("Restore requires three brand-new disposable named volumes", self.linux)
+        self.assertLess(
+            self.linux.index("if any(_volume_exists"),
+            self.linux.index("_create_volume(name, digest)"),
+        )
+        self.assertIn("stock-ai.recovery.disposable=true", self.linux)
+        self.assertIn("_remove_volumes(created)", self.linux)
+        self.assertIn("source stack", self.doc.lower())
+
+    def test_verify_records_integrity_schema_counts_and_history(self):
+        for marker in (
+            'PRAGMA integrity_check',
+            '"schema_sha256"',
+            '"table_counts"',
+            '"history_file_count"',
+            '"history_sha256"',
+        ):
+            self.assertIn(marker, self.linux)
+        self.assertTrue(self.evidence["restore"]["pre_start_sqlite_logical_state_equal"])
+        self.assertTrue(self.evidence["restore"]["pre_start_history_equal"])
+        self.assertTrue(self.evidence["restore"]["post_start_baseline_rows_preserved"])
+        self.assertTrue(self.evidence["restore"]["business_checks"]["history_file"])
+
+    def test_retention_is_attested_verified_and_fail_closed(self):
+        for marker in (
+            "Off-host verification marker",
+            "timedelta(days=7)",
+            "verified_backup",
+            "verify_checksum(path)",
+            "keep_daily < 1",
+            "keep_monthly < 1",
+            "checksum_path(path).unlink()",
+        ):
+            self.assertIn(marker, self.linux)
+        self.assertTrue(self.evidence["retention"]["offhost_attestation_required"])
+        self.assertTrue(self.evidence["retention"]["checksum_validated_before_delete"])
+        self.assertEqual(self.evidence["retention"]["removed"], 2)
+
+    def test_actual_exercise_passed_rpo_rto_business_and_cleanup(self):
+        self.assertEqual(self.evidence["status"], "passed")
+        self.assertTrue(self.evidence["objectives"]["rpo_passed"])
+        self.assertTrue(self.evidence["objectives"]["rto_passed"])
+        self.assertGreaterEqual(self.evidence["objectives"]["rpo_achieved_seconds"], 0)
+        self.assertGreater(self.evidence["objectives"]["rto_achieved_seconds"], 0)
+        self.assertTrue(all(self.evidence["restore"]["business_checks"].values()))
+        self.assertTrue(all(value == "running/healthy" for value in self.evidence["restore"]["health"].values()))
+        self.assertTrue(self.evidence["cleanup"]["verified_absent"])
+        for name in (
+            "source_compose_containers_absent",
+            "restore_compose_containers_absent",
+            "source_provider_container_absent",
+            "restore_provider_container_absent",
+            "disposable_containers_removed",
+            "disposable_volumes_removed",
+        ):
+            self.assertTrue(self.evidence["cleanup"][name])
+        self.assertEqual(self.evidence["backup"]["secret_file_count"], 6)
+        self.assertTrue(self.evidence["backup"]["encrypted_plaintext_scan_passed"])
+
+    def test_executable_evidence_gate_rejects_false_pass_claims(self):
+        exercise_module.assert_evidence_acceptance(self.evidence)
+        mutations = (
+            (("backup", "encrypted_plaintext_scan_passed"), "backup.encrypted_plaintext"),
+            (("retention", "passed"), "retention.passed"),
+            (("objectives", "rpo_passed"), "objectives.rpo_passed"),
+            (("objectives", "rto_passed"), "objectives.rto_passed"),
+            (("cleanup", "source_compose_containers_absent"), "cleanup.source_compose"),
+            (("cleanup", "restore_provider_container_absent"), "cleanup.restore_provider"),
+        )
+        for path, expected in mutations:
+            with self.subTest(path=path):
+                candidate = copy.deepcopy(self.evidence)
+                candidate[path[0]][path[1]] = False
+                candidate["status"] = "pending"
+                with self.assertRaisesRegex(exercise_module.ExerciseError, expected):
+                    exercise_module.assert_evidence_acceptance(candidate)
+        self.assertLess(
+            self.exercise.index("assert_evidence_acceptance(evidence)"),
+            self.exercise.index('evidence["status"] = "passed"'),
+        )
+
+    def test_cleanup_verifier_detects_each_resource_class(self):
+        source = "stock-ai-recovery-source-deadbeef"
+        restore = "stock-ai-recovery-restore-deadbeef"
+        source_fixture = f"{source}-provider"
+        restore_fixture = f"{restore}-provider"
+
+        def fake_run(args, *, allow_failure=False):
+            del allow_failure
+            output = ""
+            if args[:3] == ["docker", "ps", "--all"] and "--quiet" in args:
+                if args[-1] == f"label=com.docker.compose.project={source}":
+                    output = "source-container-id\n"
+            elif args[:3] == ["docker", "ps", "--all"]:
+                output = f"{restore_fixture}\n"
+            elif args[:3] == ["docker", "volume", "ls"]:
+                output = f"{restore}_backend_state\n"
+            return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+        with mock.patch.object(exercise_module, "run", side_effect=fake_run):
+            result = exercise_module.verify_cleanup_absence(
+                source, restore, source_fixture, restore_fixture
+            )
+        self.assertFalse(result["source_compose_containers_absent"])
+        self.assertTrue(result["restore_compose_containers_absent"])
+        self.assertTrue(result["source_provider_container_absent"])
+        self.assertFalse(result["restore_provider_container_absent"])
+        self.assertFalse(result["disposable_volumes_removed"])
+        self.assertFalse(result["verified_absent"])
+
+    def test_evidence_sidecar_matches_and_contains_no_secret_payload_fields(self):
+        match = re.fullmatch(
+            r"([0-9a-f]{64})  ticket-13-local-recovery-evidence.json\n",
+            SIDECAR.read_text(encoding="ascii"),
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), hashlib.sha256(self.evidence_bytes).hexdigest())
+        serialized = json.dumps(self.evidence, sort_keys=True)
+        for forbidden in ('"token":', '"secret":', '"environment_values":', 'Bearer '):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_rollback_boundary_and_non_gates_are_explicit(self):
+        for marker in (
+            "does not touch a named volume",
+            "full data restore is a different decision",
+            "no automated schema downgrade",
+            "legacy operator material",
+            "not run",
+            "not_run_non_gate",
+        ):
+            self.assertIn(marker, self.doc.lower())
+        self.assertEqual(
+            self.evidence["scope"]["windows_pester"], "legacy_not_run_non_gate"
+        )
+        self.assertEqual(
+            self.evidence["scope"]["external_host_idp_dns_tls"], "not_run_non_gate"
+        )
+        self.assertTrue(WINDOWS.is_file())
 
 
 if __name__ == "__main__":
