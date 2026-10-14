@@ -1,0 +1,75 @@
+{
+  "schema": "stock-ai.local-release-runtime.v1",
+  "status": "passed",
+  "tested_at_utc": "2026-10-14T21:08:29.210178+00:00",
+  "project": "stock-ai-local-release",
+  "test_project": "stock-ai-t10-cert",
+  "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+  "services": {
+    "nginx": {
+      "image": "127.0.0.1:5000/stock-ai/release-nginx@sha256:1d80f75d3e2990d5dc73f972d725b005d8390c4d2ccccf72d83533bc51001431",
+      "running": true,
+      "health": "healthy"
+    },
+    "console": {
+      "image": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+      "running": true,
+      "health": "healthy"
+    },
+    "agent-server": {
+      "image": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+      "running": true,
+      "health": "healthy"
+    },
+    "llm-provider-server": {
+      "image": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+      "running": true,
+      "health": "healthy"
+    },
+    "backend": {
+      "image": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+      "running": true,
+      "health": "healthy"
+    },
+    "oidc-gateway": {
+      "image": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0",
+      "running": true,
+      "health": "healthy"
+    },
+    "idp": {
+      "image": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1",
+      "running": true,
+      "health": "healthy"
+    }
+  },
+  "published_ingress": [
+    {
+      "service": "nginx",
+      "host_ip": "127.0.0.1",
+      "host_port": "8443",
+      "target": "8443/tcp"
+    }
+  ],
+  "isolation": {
+    "networks": {
+      "disjoint_from_test": true,
+      "release_names": [
+        "stock-ai-local-release_application",
+        "stock-ai-local-release_edge"
+      ]
+    },
+    "volumes": {
+      "disjoint_from_test": true,
+      "release_names": [
+        "stock-ai-local-release_agent_state",
+        "stock-ai-local-release_backend_state",
+        "stock-ai-local-release_llm_state"
+      ]
+    },
+    "binds": {
+      "disjoint_from_test": true
+    }
+  },
+  "all_release_bind_sources_persistent": true,
+  "backend_static_user_token": "disabled"
+}

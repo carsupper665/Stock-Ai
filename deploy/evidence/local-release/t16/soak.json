@@ -1,0 +1,83 @@
+{
+  "container_log_bytes": {
+    "agent-server": 0,
+    "backend": 5301,
+    "console": 0,
+    "idp": 8496,
+    "llm-provider-server": 0,
+    "nginx": 1092,
+    "oidc-gateway": 0
+  },
+  "external_market_calls": 0,
+  "known_runtime_secrets_absent_from_logs": true,
+  "observations": [
+    {
+      "elapsed_seconds": 0.1,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 10.11,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 20.21,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 30.3,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 40.31,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 50.4,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 60.5,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 70.56,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 80.64,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 90.74,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 100.6,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 110.69,
+      "healthy_services": 7,
+      "price": 100
+    },
+    {
+      "elapsed_seconds": 119.64,
+      "healthy_services": 7,
+      "price": 100
+    }
+  ],
+  "per_container_log_growth_limit_bytes": 2097152,
+  "requested_seconds": 120,
+  "status": "passed"
+}

@@ -1,0 +1,129 @@
+{
+  "host_tcp_listeners": [
+    "LISTEN 0      4096       127.0.0.1:8443  0.0.0.0:*",
+    "LISTEN 0      4096       127.0.0.1:9443  0.0.0.0:*",
+    "LISTEN 0      4096   127.0.0.53%lo:53    0.0.0.0:*",
+    "LISTEN 0      128        127.0.0.1:46751 0.0.0.0:*",
+    "LISTEN 0      4096       127.0.0.1:443   0.0.0.0:*",
+    "LISTEN 0      4096       127.0.0.1:80    0.0.0.0:*",
+    "LISTEN 0      4096      127.0.0.54:53    0.0.0.0:*",
+    "LISTEN 0      4096       127.0.0.1:5000  0.0.0.0:*",
+    "LISTEN 0      511        127.0.0.1:7878  0.0.0.0:*",
+    "LISTEN 0      128        127.0.0.1:24284 0.0.0.0:*",
+    "LISTEN 0      128        127.0.0.1:24285 0.0.0.0:*"
+  ],
+  "market_boundary": {
+    "adapter_edge_interface_unreachable": true,
+    "agent_private_backend_adapter": "http://idp:18081",
+    "all_running_digests_match": true,
+    "application_network_internal": true,
+    "backend_certificate_verification": "existing SSL_CERT_FILE; no bypass",
+    "binance_dns_alias": "local-idp-fixture"
+  },
+  "other_projects": "Existing Foreman/registry/Test listeners are recorded, outside this Release certification",
+  "persistent_bind_sources": true,
+  "private_loopback_ports_closed": [
+    4180,
+    7794,
+    8080,
+    8088,
+    8090,
+    18080,
+    18081
+  ],
+  "probes": [
+    {
+      "body_sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "generic_spa_only": false,
+      "path": "/.env",
+      "status": 404
+    },
+    {
+      "body_sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "generic_spa_only": false,
+      "path": "/.git/HEAD",
+      "status": 404
+    },
+    {
+      "body_sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "generic_spa_only": false,
+      "path": "/backend.db",
+      "status": 404
+    },
+    {
+      "body_sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "generic_spa_only": false,
+      "path": "/llm-provider.db",
+      "status": 404
+    },
+    {
+      "body_sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "generic_spa_only": false,
+      "path": "/agent-server.db",
+      "status": 404
+    },
+    {
+      "body_sha256": "0da516b7f161a11f1ee488a038aa96eef2b7034aae49d350ae0662f19d190efa",
+      "generic_spa_only": true,
+      "path": "/logs/",
+      "status": 200
+    },
+    {
+      "body_sha256": "0da516b7f161a11f1ee488a038aa96eef2b7034aae49d350ae0662f19d190efa",
+      "generic_spa_only": true,
+      "path": "/data/",
+      "status": 200
+    },
+    {
+      "body_sha256": "0da516b7f161a11f1ee488a038aa96eef2b7034aae49d350ae0662f19d190efa",
+      "generic_spa_only": true,
+      "path": "/admin/",
+      "status": 200
+    },
+    {
+      "body_sha256": "0da516b7f161a11f1ee488a038aa96eef2b7034aae49d350ae0662f19d190efa",
+      "generic_spa_only": true,
+      "path": "/__fixture/next",
+      "status": 200
+    },
+    {
+      "body_sha256": "0da516b7f161a11f1ee488a038aa96eef2b7034aae49d350ae0662f19d190efa",
+      "generic_spa_only": true,
+      "path": "/__fixture/outage",
+      "status": 200
+    },
+    {
+      "body_sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "generic_spa_only": false,
+      "path": "/assets/index.js.map",
+      "status": 404
+    },
+    {
+      "body_sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0",
+      "generic_spa_only": false,
+      "path": "/_oauth2_auth",
+      "status": 404
+    },
+    {
+      "body_sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0",
+      "generic_spa_only": false,
+      "path": "/oauth2/auth",
+      "status": 404
+    },
+    {
+      "body_sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "generic_spa_only": false,
+      "path": "/assets/index-BJfHJN8l.js.map",
+      "status": 404
+    }
+  ],
+  "published_ports": [
+    {
+      "HostIp": "127.0.0.1",
+      "HostPort": "8443",
+      "service": "nginx",
+      "target": "8443/tcp"
+    }
+  ],
+  "status": "passed"
+}

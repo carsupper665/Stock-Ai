@@ -1,0 +1,22 @@
+{
+  "schema": "stock-ai.t15-evidence-validation.v1",
+  "status": "passed",
+  "all_stores_equal": true,
+  "strict_local_market_provenance": true,
+  "business_flow": "passed",
+  "complete_rollback_rehearsed": true,
+  "product_images_unchanged": true,
+  "evidence_files": [
+    "acceptance.json",
+    "migration.json",
+    "runtime.json",
+    "ingress.json",
+    "rollback.json",
+    "predeployment-backup.json",
+    "accepted-backup.json"
+  ],
+  "historical_revision": "34c5b1dd58b59a4cb650a2ecdb019f0eaeffc9fb",
+  "artifacts_equal_git_revision": true,
+  "auxiliary_approval_from_accepted_revision": true,
+  "scope": "T15 historical acceptance; live updated images are certified by T16"
+}

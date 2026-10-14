@@ -1,0 +1,234 @@
+{
+  "anonymous": {
+    "/agent/api/v1/sessions": 401,
+    "/llm/v1/providers": 401,
+    "/v1/accounts": 401
+  },
+  "audience-mismatch": {
+    "private_api_statuses": {
+      "/agent/api/v1/sessions": 401,
+      "/llm/v1/providers": 401,
+      "/v1/accounts": 401
+    },
+    "redirect_chain": [
+      {
+        "path": "/",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/start",
+        "status": 302
+      },
+      {
+        "path": "/realms/stock-ai-release/authorize",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/callback",
+        "status": 303
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ]
+  },
+  "backend_direct_rejections": {
+    "external_calls": 0,
+    "fixture": "stock-ai-backend-oidc-rejections-v1",
+    "statuses": {
+      "anonymous": 401,
+      "expired": 401,
+      "static-user": 401,
+      "wrong-audience": 401,
+      "wrong-issuer": 401,
+      "wrong-subject": 401
+    },
+    "tokens_disclosed": false
+  },
+  "expired-access-token": {
+    "private_api_statuses": {
+      "/agent/api/v1/sessions": 401,
+      "/llm/v1/providers": 401,
+      "/v1/accounts": 401
+    },
+    "redirect_chain": [
+      {
+        "path": "/",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/start",
+        "status": 302
+      },
+      {
+        "path": "/realms/stock-ai-release/authorize",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/callback",
+        "status": 303
+      },
+      {
+        "path": "/",
+        "status": 200
+      }
+    ]
+  },
+  "expired-token": {
+    "private_api_statuses": {
+      "/agent/api/v1/sessions": 401,
+      "/llm/v1/providers": 401,
+      "/v1/accounts": 401
+    },
+    "redirect_chain": [
+      {
+        "path": "/",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/start",
+        "status": 302
+      },
+      {
+        "path": "/realms/stock-ai-release/authorize",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/callback",
+        "status": 303
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ]
+  },
+  "expired_session": {
+    "/agent/api/v1/sessions": 401,
+    "/llm/v1/providers": 401,
+    "/v1/accounts": 401
+  },
+  "forged_bearer": {
+    "/agent/api/v1/sessions": 403,
+    "/llm/v1/providers": 403,
+    "/v1/accounts": 401
+  },
+  "ingress": {
+    "host_cookie_secure_httponly_samesite_path_no_domain": true,
+    "oversized_body_status": 413,
+    "security_headers": [
+      "content-security-policy",
+      "referrer-policy",
+      "strict-transport-security",
+      "x-content-type-options",
+      "x-frame-options"
+    ],
+    "server_version_hidden": true,
+    "verified_local_tls": true
+  },
+  "issuer-mismatch": {
+    "private_api_statuses": {
+      "/agent/api/v1/sessions": 401,
+      "/llm/v1/providers": 401,
+      "/v1/accounts": 401
+    },
+    "redirect_chain": [
+      {
+        "path": "/",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/start",
+        "status": 302
+      },
+      {
+        "path": "/realms/stock-ai-release/authorize",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/callback",
+        "status": 303
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ]
+  },
+  "positive_redirect_chain": [
+    {
+      "path": "/",
+      "status": 302
+    },
+    {
+      "path": "/oauth2/start",
+      "status": 302
+    },
+    {
+      "path": "/realms/stock-ai-release/authorize",
+      "status": 302
+    },
+    {
+      "path": "/oauth2/callback",
+      "status": 303
+    },
+    {
+      "path": "/",
+      "status": 200
+    }
+  ],
+  "replayed_callback": {
+    "first_login_status": 200,
+    "independent_transaction_cookie_copy": true,
+    "private_api_statuses": {
+      "/agent/api/v1/sessions": 401,
+      "/llm/v1/providers": 401,
+      "/v1/accounts": 401
+    },
+    "replay_redirect_chain": [
+      {
+        "path": "/oauth2/callback",
+        "status": 303
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ]
+  },
+  "spoofed_headers": {
+    "/agent/api/v1/sessions": 401,
+    "/llm/v1/providers": 401,
+    "/v1/accounts": 401
+  },
+  "wrong-subject": {
+    "private_api_statuses": {
+      "/agent/api/v1/sessions": 401,
+      "/llm/v1/providers": 401,
+      "/v1/accounts": 401
+    },
+    "redirect_chain": [
+      {
+        "path": "/",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/start",
+        "status": 302
+      },
+      {
+        "path": "/realms/stock-ai-release/authorize",
+        "status": 302
+      },
+      {
+        "path": "/oauth2/callback",
+        "status": 303
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ]
+  }
+}

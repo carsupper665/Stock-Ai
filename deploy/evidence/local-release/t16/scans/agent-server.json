@@ -1,0 +1,367 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.75.0"
+  },
+  "ReportID": "01a13b9d-f8f5-7aa7-93a1-ce089eaf98c0",
+  "CreatedAt": "2026-10-14T18:12:51.061701807Z",
+  "ArtifactID": "sha256:f00abce9fd2e1407a7f2ea9dc59725c668c256ad87c2c74f44430a21d5d397a7",
+  "ArtifactName": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "Size": 18434560,
+    "ImageID": "sha256:b4d0a8f8c141f465fc2b9d280ab3bc266fd50e983dea2697e5c99cc4baf82ff0",
+    "DiffIDs": [
+      "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc",
+      "sha256:80119e59c8049ef4535f13543c4f423a5d3740251524e386a6788d5920751381",
+      "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6",
+      "sha256:d88c1c2004782f4ae92899816856b3984fb143de1693763d570ba001e45ea178"
+    ],
+    "RepoDigests": [
+      "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42"
+    ],
+    "Reference": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+    "ImageConfig": {
+      "architecture": "amd64",
+      "created": "2026-10-14T10:11:28Z",
+      "history": [
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG BUILD_DATE=2026-10-14T10:11:28Z",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG REVISION=906326524f70acf77dcffeff86e9433896830509",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG VERSION=local-906326524f70",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "LABEL org.opencontainers.image.created=2026-10-14T10:11:28Z org.opencontainers.image.revision=906326524f70acf77dcffeff86e9433896830509 org.opencontainers.image.source=https://github.com/carsupper665/Stock-Ai org.opencontainers.image.title=Stock AI Agent Server org.opencontainers.image.version=local-906326524f70",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY --chown=65532:65532 /out/data /data # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /out/agent-server /agent-server # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /out/healthcheck /healthcheck # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ENV AGENT_SERVER_ADDR=0.0.0.0:8080 AGENT_SERVER_DB_PATH=/data/agent-server.db AGENT_SERVER_HISTORY_DIR=/data/history",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "EXPOSE [8080/tcp]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "USER 65532:65532",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "HEALTHCHECK {Test:[CMD /healthcheck http://127.0.0.1:8080/health] Interval:30s Timeout:5s StartPeriod:10s StartInterval:0s Retries:3}",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ENTRYPOINT [\"/agent-server\"]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        }
+      ],
+      "os": "linux",
+      "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+          "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc",
+          "sha256:80119e59c8049ef4535f13543c4f423a5d3740251524e386a6788d5920751381",
+          "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6",
+          "sha256:d88c1c2004782f4ae92899816856b3984fb143de1693763d570ba001e45ea178"
+        ]
+      },
+      "config": {
+        "Healthcheck": {
+          "Test": [
+            "CMD",
+            "/healthcheck",
+            "http://127.0.0.1:8080/health"
+          ],
+          "Interval": 30000000000,
+          "Timeout": 5000000000,
+          "StartPeriod": 10000000000,
+          "Retries": 3
+        },
+        "Entrypoint": [
+          "/agent-server"
+        ],
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "AGENT_SERVER_ADDR=0.0.0.0:8080",
+          "AGENT_SERVER_DB_PATH=/data/agent-server.db",
+          "AGENT_SERVER_HISTORY_DIR=/data/history"
+        ],
+        "Labels": {
+          "org.opencontainers.image.created": "2026-10-14T10:11:28Z",
+          "org.opencontainers.image.revision": "906326524f70acf77dcffeff86e9433896830509",
+          "org.opencontainers.image.source": "https://github.com/carsupper665/Stock-Ai",
+          "org.opencontainers.image.title": "Stock AI Agent Server",
+          "org.opencontainers.image.version": "local-906326524f70"
+        },
+        "User": "65532:65532",
+        "WorkingDir": "/",
+        "ExposedPorts": {
+          "8080/tcp": {}
+        }
+      }
+    },
+    "Layers": [
+      {
+        "Size": 184832,
+        "DiffID": "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc"
+      },
+      {
+        "Size": 2048,
+        "DiffID": "sha256:80119e59c8049ef4535f13543c4f423a5d3740251524e386a6788d5920751381"
+      },
+      {
+        "Size": 11945984,
+        "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+      },
+      {
+        "Size": 6301696,
+        "DiffID": "sha256:d88c1c2004782f4ae92899816856b3984fb143de1693763d570ba001e45ea178"
+      }
+    ]
+  },
+  "Results": [
+    {
+      "Target": "agent-server",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "stock-ai/agent-server",
+          "Name": "stock-ai/agent-server",
+          "Identifier": {
+            "PURL": "pkg:golang/stock-ai/agent-server",
+            "UID": "cbc4c50df0e134a4"
+          },
+          "Relationship": "root",
+          "DependsOn": [
+            "github.com/dustin/go-humanize@v1.0.1",
+            "github.com/glebarez/go-sqlite@v1.21.2",
+            "github.com/google/uuid@v1.3.0",
+            "github.com/mattn/go-isatty@v0.0.17",
+            "github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
+            "golang.org/x/sys@v0.48.0",
+            "modernc.org/libc@v1.22.5",
+            "modernc.org/mathutil@v1.5.0",
+            "modernc.org/memory@v1.5.0",
+            "modernc.org/sqlite@v1.23.1",
+            "stdlib@v1.27.2"
+          ],
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "55b88752aa38bac5"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/dustin/go-humanize@v1.0.1",
+          "Name": "github.com/dustin/go-humanize",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/dustin/go-humanize@v1.0.1",
+            "UID": "97c03e4ef11d6f46"
+          },
+          "Version": "v1.0.1",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/glebarez/go-sqlite@v1.21.2",
+          "Name": "github.com/glebarez/go-sqlite",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/glebarez/go-sqlite@v1.21.2",
+            "UID": "27cb76130b3e6b5a"
+          },
+          "Version": "v1.21.2",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/google/uuid@v1.3.0",
+          "Name": "github.com/google/uuid",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/google/uuid@v1.3.0",
+            "UID": "bbfaf65ff10bb87"
+          },
+          "Version": "v1.3.0",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/mattn/go-isatty@v0.0.17",
+          "Name": "github.com/mattn/go-isatty",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/mattn/go-isatty@v0.0.17",
+            "UID": "54d9de97aab23a99"
+          },
+          "Version": "v0.0.17",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
+          "Name": "github.com/remyoudompheng/bigfft",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
+            "UID": "e2cfb99689e76cd3"
+          },
+          "Version": "v0.0.0-20230129092748-24d4a6f8daec",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "golang.org/x/sys@v0.48.0",
+          "Name": "golang.org/x/sys",
+          "Identifier": {
+            "PURL": "pkg:golang/golang.org/x/sys@v0.48.0",
+            "UID": "5abb3c1fb346395b"
+          },
+          "Version": "v0.48.0",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/libc@v1.22.5",
+          "Name": "modernc.org/libc",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/libc@v1.22.5",
+            "UID": "2473935e569a1532"
+          },
+          "Version": "v1.22.5",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/mathutil@v1.5.0",
+          "Name": "modernc.org/mathutil",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/mathutil@v1.5.0",
+            "UID": "8ebb2caa55ff0172"
+          },
+          "Version": "v1.5.0",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/memory@v1.5.0",
+          "Name": "modernc.org/memory",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/memory@v1.5.0",
+            "UID": "7331c5ac53cd3271"
+          },
+          "Version": "v1.5.0",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/sqlite@v1.23.1",
+          "Name": "modernc.org/sqlite",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/sqlite@v1.23.1",
+            "UID": "9a2ba04f94d3c652"
+          },
+          "Version": "v1.23.1",
+          "Layer": {
+            "DiffID": "sha256:ed05539561175dfc14363295dfb8e9b1663d8cf03f144e154e7a0907e15ad2a6"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    },
+    {
+      "Target": "healthcheck",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "9eec41744da02b3b"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:d88c1c2004782f4ae92899816856b3984fb143de1693763d570ba001e45ea178"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    }
+  ]
+}

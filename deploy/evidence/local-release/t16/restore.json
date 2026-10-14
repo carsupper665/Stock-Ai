@@ -1,0 +1,232 @@
+{
+  "account_token_decryption": true,
+  "all_rows_schema_ids_history_match_before_writers_start": true,
+  "authenticated_inventory": true,
+  "backup_sha256": "f9cf036687f241e75d92c27fe16c000f94769bdb5a73eaae8b6a36475211d3c1",
+  "baseline": {
+    "databases": {
+      "agent-server": {
+        "foreign_key_check": "ok",
+        "integrity_check": "ok",
+        "schema_sha256": "508a7a8e8ff76e2e6382855687cd028ddac609e19209913f933587429c9e947a",
+        "sqlite_sequences_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "table_counts": {
+          "event_log": 0,
+          "events": 0,
+          "memories": 0,
+          "pending_triggers": 0,
+          "run_history_files": 10,
+          "runs": 38,
+          "sessions": 9
+        },
+        "tables": {
+          "event_log": {
+            "all_records_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "count": 0,
+            "identifiers_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "representative_records_sha256": []
+          },
+          "events": {
+            "all_records_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "count": 0,
+            "identifiers_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "representative_records_sha256": []
+          },
+          "memories": {
+            "all_records_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "count": 0,
+            "identifiers_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "representative_records_sha256": []
+          },
+          "pending_triggers": {
+            "all_records_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "count": 0,
+            "identifiers_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "representative_records_sha256": []
+          },
+          "run_history_files": {
+            "all_records_sha256": "9b2fe1ce1bd527495f6ff2a6fadf16fe97def4a464b9a00958bcea4e459210f4",
+            "count": 10,
+            "identifiers_sha256": "9ec09776146077aacfe0134ef5868094d19bf95c72058246a06fc98570fb2cb7",
+            "representative_records_sha256": [
+              "02574e2a42be76a6d48cc8ceca8cd72e31780241b54faeecaf65d70cccefcb6b",
+              "34e1ab9fdcaea19b839df3ccd197b104389641d5db95e74102f5b3beadaef671",
+              "51a1193a00410ef426c5ef0b543da621ab805b4a447fbfbb2a5aea1bce94df49"
+            ]
+          },
+          "runs": {
+            "all_records_sha256": "1953e015958913fae3bc09c343b532a9a1693aae920bbe8a561ab0c496f79fcb",
+            "count": 38,
+            "identifiers_sha256": "bf4159a7af17ad7f49c2bdec2c4fcf332fe2d20792f0cecf1bb262733a3fe788",
+            "representative_records_sha256": [
+              "08a6f3fadc6c04bfb0f6e118b42ce985f1ea7a6fbbedf761dc06d0c1e4de8369",
+              "12dd534a2c21fbd0214224fb8306c55df03ba6771f197c9fee0ed3060c324b92",
+              "1974c8e508fcc107593561caa838f0a2bdfcabc975141483aae0c2d394ace615"
+            ]
+          },
+          "sessions": {
+            "all_records_sha256": "a9f2dc1b8328002e886dd453b7060dd5c88ff794d6d80586efd5e3934b86c351",
+            "count": 9,
+            "identifiers_sha256": "94133895a34ccba94be6b41994c6ac63fddc0de8c39d45c0f8a3ff233deb7b98",
+            "representative_records_sha256": [
+              "31430f3760bb85880a8bf10aff86d46114ad3e9b9cd809387f6c76a1b6e5aef9",
+              "3bc94604a50a0f8c68df31310abb0691acb66db8db080ace318ef5cf8591b282",
+              "57753398370607b5455b966d52b4aa9f7d71511b65b77bdf9df30dbc483c242e"
+            ]
+          }
+        }
+      },
+      "backend": {
+        "foreign_key_check": "ok",
+        "integrity_check": "ok",
+        "schema_sha256": "0f54389f2c631fe276bed956e259208417d04d40ac5ab01afcbf617649fcc796",
+        "sqlite_sequences_sha256": "f7d22f57a295f07aac1d0b3c9831f5a7604896d0d3e01790094e97b99828d428",
+        "table_counts": {
+          "accounts": 10,
+          "ledger_entries": 74,
+          "message_tags": 0,
+          "messages": 0,
+          "orders": 37,
+          "positions": 9,
+          "trades": 37
+        },
+        "tables": {
+          "accounts": {
+            "all_records_sha256": "9be8acfc04c359bfb2c71874d1e81a7c8ffec7baa23ef4167196f972be8f3462",
+            "count": 10,
+            "identifiers_sha256": "2917ae1e3c798c664d237a8deb9c83cf6fe55eef0f088f9f5010bb5b3c6c7add",
+            "representative_records_sha256": [
+              "0efa7856c9a757d8045d9d270339db85b3e64499b0938883cd7b3c27f6fc36cd",
+              "1f725c9912a515c6f60796f662093f8e455ecfc8872949f7fd03fa3822aec389",
+              "4074e4b09c1608e20d781cfd0760db6d46577fafa54ecdb0608e4c8d991f56c5"
+            ]
+          },
+          "ledger_entries": {
+            "all_records_sha256": "e5f113ba14bfa9becf50827261a7d24074a6e4d72bfd218732fa93bb2db66e65",
+            "count": 74,
+            "identifiers_sha256": "3ef7c57639212cb793f1dbf4fa3ed8af0693ac0c1032814e173283191ac10ca7",
+            "representative_records_sha256": [
+              "00d89173e523e55b45e3b4683de4051f01d1c13718491f7a0cd5c3859448e7a5",
+              "021c8bdf9c2a18ce79ed2530d31e80f494a1ce60f8da6d0f2798af9b2f269392",
+              "06456043ce7010c35ff583b75bcb703a97e3f69ee71d030d24854a5674e05a72"
+            ]
+          },
+          "message_tags": {
+            "all_records_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "count": 0,
+            "identifiers_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "representative_records_sha256": []
+          },
+          "messages": {
+            "all_records_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "count": 0,
+            "identifiers_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "representative_records_sha256": []
+          },
+          "orders": {
+            "all_records_sha256": "620ea49c1b78032471960f96f7eb25b714ab2d3d1b303b781707520098495bca",
+            "count": 37,
+            "identifiers_sha256": "d471997c8a168ebda4882567a22dc9e140638ad63a3a234fcb7d0eaf3650375a",
+            "representative_records_sha256": [
+              "0531f306f195bfda04bd2c24ab9f5845b57722ca62a1b8dc4b6b86ebfc8b5c82",
+              "1016f571997d80234b8631c300187cbd4deafa0350aa386f16a339270a060365",
+              "16a18ac8d19000f5538eacdc2895de48d62bd99ae7d48377f4a5eb42fba2d55c"
+            ]
+          },
+          "positions": {
+            "all_records_sha256": "5c2caa13ad273376e4ed5e82f179ec846338c8bc51e18b5be5c1884de2676870",
+            "count": 9,
+            "identifiers_sha256": "ab1f5c6b1d7dfbf5f5a4d0ed30e3932a06a46de631eb3e14078b656c4c81ea97",
+            "representative_records_sha256": [
+              "120b4b1ff27011103db210ed8897c36fd7bc48869829c500f5d9f6b7a6735063",
+              "20812282b61d5f885cc289aadea3e757ba5385d4f3f69b142bd4e2e186f44aad",
+              "6786ccd388d582e512a8f8ca060e8528d32b9045ee0352a0088cc84a59989358"
+            ]
+          },
+          "trades": {
+            "all_records_sha256": "143106c3461c0eff80eeb7679f7e93d73439dd87bec345fae7dc48d6c944d438",
+            "count": 37,
+            "identifiers_sha256": "dae590cdb52de7fc4b5e089e282bef38d8b9bfbd09206f0f4c1ddff8a721b810",
+            "representative_records_sha256": [
+              "005ecf57e3423373290af1122b303e9d593796057c3b53706c275b18fbe2b913",
+              "01836cebb79af920eeda501a340f44b03bd0890b44bd4c06c6d95b2e8f0ae3c1",
+              "0eafdea66950a08696567dd2133c611a957d6eb37e1fe099f39ea670145b8a02"
+            ]
+          }
+        }
+      },
+      "llm-provider-server": {
+        "foreign_key_check": "ok",
+        "integrity_check": "ok",
+        "schema_sha256": "4e76abec38309d889eb8889ff0cb8bd5fde46a7498a85ce017b7e3d69f557c61",
+        "sqlite_sequences_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "table_counts": {
+          "model_catalog": 1,
+          "provider_tokens": 9,
+          "providers": 9
+        },
+        "tables": {
+          "model_catalog": {
+            "all_records_sha256": "6867f7ab4cb8ba697be560b8e9d25ca9866d4d57b373e86129cea72f3adb7d58",
+            "count": 1,
+            "identifiers_sha256": "af333a4b3cc11aa4e170e2d7b4f75ad31f6a612e587252e0dc8f4b4404076dd4",
+            "representative_records_sha256": [
+              "8d4af61a698c69252b2c46f3689bef7648b1434c0a06bef24163d2390eb8d59c"
+            ]
+          },
+          "provider_tokens": {
+            "all_records_sha256": "e1543fbbf9b5294fa708fbe7e6a6e7eb91148cefca7d55402336d41fd8cfe9dc",
+            "count": 9,
+            "identifiers_sha256": "f3da7b2ed62de1a3ed8c627b6dfb17596431ec174e56fe4ecbb0269a709deace",
+            "representative_records_sha256": [
+              "43e5646330561b1758752441c9fd053856dd2d725c8eb64994ff0ea6c1840912",
+              "4dd144f195a5df7ea5826841a3e241030634c51560bcce59562eeb9a123f3553",
+              "68526449d22b3c715ddd40d96ccce8adb1a4c93f7d8e48af40d3494fff1b7a2e"
+            ]
+          },
+          "providers": {
+            "all_records_sha256": "b3ab3c036b4f7a66512ae6542fb001d90b3ddb90d50c22980c3868c0a12ede88",
+            "count": 9,
+            "identifiers_sha256": "4e10fbd0704014829a3e12185a9d1e48c48d6c8b9554682459316b6757ee7b4e",
+            "representative_records_sha256": [
+              "097044dfff84b1cb26f795236b538806216d8cbe2ef700629761adac73ba32d3",
+              "1b081d5a15104e667bd5bbf84c670c810cd93e47765577154a0d6e4e78126280",
+              "1d414242a9b93d6fdbecb24ff277ed7a748ef5e7f1a7bb685bf9576c2a671516"
+            ]
+          }
+        }
+      }
+    },
+    "history_file_count": 10,
+    "history_sha256": "261d1d702651b49fe373593de529123439b8843df3a43d410138d03c73ff529e"
+  },
+  "disposable_containers_networks_volumes_removed": true,
+  "live_release_volumes_modified": false,
+  "provider_ciphertexts_authenticated": 9,
+  "provider_generation": true,
+  "redirect_chain": [
+    {
+      "path": "/",
+      "status": 302
+    },
+    {
+      "path": "/oauth2/start",
+      "status": 302
+    },
+    {
+      "path": "/realms/stock-ai-release/authorize",
+      "status": 302
+    },
+    {
+      "path": "/oauth2/callback",
+      "status": 303
+    },
+    {
+      "path": "/",
+      "status": 200
+    }
+  ],
+  "restore_project": "stock-ai-t16-restore-20261014210221",
+  "seven_restored_services_healthy": true,
+  "status": "passed"
+}

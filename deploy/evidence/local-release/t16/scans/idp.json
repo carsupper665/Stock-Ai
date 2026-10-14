@@ -1,0 +1,133 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.75.0"
+  },
+  "ReportID": "01a13b9d-ff78-7d71-ba04-77412c4ecda8",
+  "CreatedAt": "2026-10-14T18:12:52.728882602Z",
+  "ArtifactID": "sha256:61ee4e885acd7c0ca378e558158be7713a4b06a9c39230e4215d2e40c888f9b7",
+  "ArtifactName": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "Size": 7964672,
+    "ImageID": "sha256:e2cbaef86ef0269512462cf6b487d4dacbbf39b593a2dfb1a1c4b0c09df2edd9",
+    "DiffIDs": [
+      "sha256:e2a936b30db124dc115cde18e7700c11d8db7f8ae69870814951188b5ce5f0ae"
+    ],
+    "RepoDigests": [
+      "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1"
+    ],
+    "Reference": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1",
+    "ImageConfig": {
+      "architecture": "amd64",
+      "created": "2026-10-14T15:26:20.996792302Z",
+      "history": [
+        {
+          "created": "2026-10-14T15:26:20Z",
+          "created_by": "COPY /local-fixture /local-fixture # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T15:26:20Z",
+          "created_by": "USER 65532:65532",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T15:26:20Z",
+          "created_by": "EXPOSE [18080/tcp 9443/tcp]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T15:26:20Z",
+          "created_by": "HEALTHCHECK {Test:[CMD /local-fixture --healthcheck] Interval:2s Timeout:1s StartPeriod:0s StartInterval:0s Retries:15}",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T15:26:20Z",
+          "created_by": "ENTRYPOINT [\"/local-fixture\"]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        }
+      ],
+      "os": "linux",
+      "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+          "sha256:e2a936b30db124dc115cde18e7700c11d8db7f8ae69870814951188b5ce5f0ae"
+        ]
+      },
+      "config": {
+        "Healthcheck": {
+          "Test": [
+            "CMD",
+            "/local-fixture",
+            "--healthcheck"
+          ],
+          "Interval": 2000000000,
+          "Timeout": 1000000000,
+          "Retries": 15
+        },
+        "Entrypoint": [
+          "/local-fixture"
+        ],
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        ],
+        "User": "65532:65532",
+        "WorkingDir": "/",
+        "ExposedPorts": {
+          "18080/tcp": {},
+          "9443/tcp": {}
+        }
+      }
+    },
+    "Layers": [
+      {
+        "Size": 7964672,
+        "DiffID": "sha256:e2a936b30db124dc115cde18e7700c11d8db7f8ae69870814951188b5ce5f0ae"
+      }
+    ]
+  },
+  "Results": [
+    {
+      "Target": "local-fixture",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "stock-ai/local-test/fixture",
+          "Name": "stock-ai/local-test/fixture",
+          "Identifier": {
+            "PURL": "pkg:golang/stock-ai/local-test/fixture",
+            "UID": "7064b6890161797b"
+          },
+          "Relationship": "root",
+          "DependsOn": [
+            "stdlib@v1.27.2"
+          ],
+          "Layer": {
+            "DiffID": "sha256:e2a936b30db124dc115cde18e7700c11d8db7f8ae69870814951188b5ce5f0ae"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "a2c58a127c050e9"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:e2a936b30db124dc115cde18e7700c11d8db7f8ae69870814951188b5ce5f0ae"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    }
+  ]
+}

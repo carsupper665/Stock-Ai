@@ -1,0 +1,75 @@
+{
+  "accepted-backup": {
+    "report": "accepted-backup.json",
+    "status": "passed"
+  },
+  "accepted_backup_sha256": "9e4230141ba2b2814e54ba8c52e229cd126d7f16e8ea7dce52715913a322a5cf",
+  "accepted_images": {
+    "agent-server": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+    "backend": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+    "console": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+    "idp": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1",
+    "llm-provider-server": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+    "nginx": "127.0.0.1:5000/stock-ai/release-nginx@sha256:1d80f75d3e2990d5dc73f972d725b005d8390c4d2ccccf72d83533bc51001431",
+    "oidc-gateway": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+  },
+  "all_seven_services_healthy": true,
+  "backup": {
+    "report": "backup.json",
+    "status": "passed"
+  },
+  "checkpoint_reruns": [
+    "real-kernel-crash-with-automatic-restart",
+    "post-crash-120-second-soak",
+    "post-crash-complete-snapshot"
+  ],
+  "completed_at_utc": "2026-10-14T21:07:54.944076+00:00",
+  "high_critical_count": 0,
+  "incidents": {
+    "report": "incidents.json",
+    "status": "passed"
+  },
+  "non_gating": [
+    "external IdP",
+    "public DNS/TLS renewal",
+    "Windows/reboot",
+    "long-duration production soak"
+  ],
+  "preflight": {
+    "report": "preflight.json",
+    "status": "passed"
+  },
+  "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+  "rate-limit": {
+    "report": "rate-limit.json",
+    "status": "passed"
+  },
+  "restore": {
+    "report": "restore.json",
+    "status": "passed"
+  },
+  "rollback": {
+    "report": "rollback.json",
+    "status": "passed"
+  },
+  "schema": "stock-ai.local-release-signoff.v1",
+  "scope": "WSL/Linux loopback; local identity, provider, Binance and scoped adapter fixtures",
+  "security": {
+    "report": "security.json",
+    "status": "passed"
+  },
+  "soak": {
+    "report": "soak.json",
+    "status": "passed"
+  },
+  "started_at_utc": "2026-10-14T20:57:36.772293+00:00",
+  "status": "passed",
+  "surface": {
+    "report": "surface.json",
+    "status": "passed"
+  },
+  "versions": {
+    "docker_engine": "29.5.2",
+    "nginx": "nginx version: nginx/1.30.5"
+  }
+}

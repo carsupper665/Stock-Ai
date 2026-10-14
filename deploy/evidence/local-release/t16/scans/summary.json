@@ -1,0 +1,58 @@
+{
+  "schema": "stock-ai.local-release-scan.v1",
+  "status": "passed",
+  "completed_at_utc": "2026-10-14T20:46:19.849684+00:00",
+  "scanner_image": "aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa",
+  "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+  "images": {
+    "agent-server": {
+      "image": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+      "report": "agent-server.json",
+      "sha256": "d37c9a5dfd9605458c64b9c5f347fdcf06d3ae03e5ede91fdaef1e5e73687bb3",
+      "high_critical_count": 0,
+      "findings": []
+    },
+    "backend": {
+      "image": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+      "report": "backend.json",
+      "sha256": "ff52918b06edb9f3fca327768b7a6a2274006f4fbfc8436eeb50cd8eb8c2288e",
+      "high_critical_count": 0,
+      "findings": []
+    },
+    "console": {
+      "image": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+      "report": "console.json",
+      "sha256": "7a537ffb3a127d16d539bdf95f72a392076bb3d70be73047976cfe07e59b0a8e",
+      "high_critical_count": 0,
+      "findings": []
+    },
+    "idp": {
+      "image": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1",
+      "report": "idp.json",
+      "sha256": "eb7b7dbda18150ef98a822da5f38b9c58408bce5b2be6e45247ff4276d9e16d8",
+      "high_critical_count": 0,
+      "findings": []
+    },
+    "llm-provider-server": {
+      "image": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+      "report": "llm-provider-server.json",
+      "sha256": "d1c08b0bf5a8de4754692c5dd2697e6f56a80426224f9ed807c479fc3a9475c7",
+      "high_critical_count": 0,
+      "findings": []
+    },
+    "nginx": {
+      "image": "127.0.0.1:5000/stock-ai/release-nginx@sha256:1d80f75d3e2990d5dc73f972d725b005d8390c4d2ccccf72d83533bc51001431",
+      "report": "nginx.json",
+      "sha256": "bf56ff618b103628a9bf1f7dd6c1a8ae77ec84822f9c4af85249b77d91c8508e",
+      "high_critical_count": 0,
+      "findings": []
+    },
+    "oidc-gateway": {
+      "image": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0",
+      "report": "oidc-gateway.json",
+      "sha256": "da203170bbef664e80704f80fd904be4feb22bdbecd02976e8246f61a0d1554b",
+      "high_critical_count": 0,
+      "findings": []
+    }
+  }
+}

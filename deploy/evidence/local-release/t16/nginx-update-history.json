@@ -1,0 +1,32 @@
+{
+  "status": "resolved",
+  "original_scan": "scans-before-nginx-update/nginx.json",
+  "original_high_critical_count": 43,
+  "intermediate_candidate": {
+    "image": "nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94",
+    "high_critical_count": 3,
+    "raw_report_retained": false,
+    "findings": [
+      {
+        "id": "CVE-2026-93990",
+        "package": "libexpat",
+        "installed": "2.8.4-r0",
+        "fixed": "2.8.5-r0"
+      },
+      {
+        "id": "CVE-2026-103111",
+        "package": "pcre2",
+        "installed": "10.48-r0",
+        "fixed": "10.49-r0"
+      },
+      {
+        "id": "CVE-2026-4775",
+        "package": "tiff",
+        "installed": "4.7.1-r0",
+        "fixed": "4.7.2-r0"
+      }
+    ]
+  },
+  "accepted_scan": "scans/summary.json",
+  "accepted_high_critical_count": 0
+}

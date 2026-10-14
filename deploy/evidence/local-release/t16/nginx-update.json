@@ -1,0 +1,102 @@
+{
+  "after": "127.0.0.1:5000/stock-ai/release-nginx@sha256:1d80f75d3e2990d5dc73f972d725b005d8390c4d2ccccf72d83533bc51001431",
+  "all_seven_healthy": true,
+  "before": "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+  "high_critical_count": 0,
+  "preupdate_complete_backup_sha256": "c919220985f57c5115a884397ea8c7163c28cc053b0b3ce5ac34ac76739cf00b",
+  "status": "passed",
+  "verified_ingress": {
+    "all_redirects_release_port": true,
+    "anonymous_api_status": 401,
+    "authenticated_api_status": 200,
+    "client": "curl with certificate verification",
+    "curl_location_final_status": 200,
+    "curl_location_redirects": 4,
+    "http_observations": [
+      {
+        "attempt": 1,
+        "http_status": 302,
+        "stage": "/"
+      },
+      {
+        "attempt": 1,
+        "http_status": 302,
+        "stage": "/oauth2/start"
+      },
+      {
+        "attempt": 1,
+        "http_status": 302,
+        "stage": "/realms/stock-ai-release/authorize"
+      },
+      {
+        "attempt": 1,
+        "http_status": 303,
+        "stage": "/oauth2/callback"
+      },
+      {
+        "attempt": 1,
+        "http_status": 200,
+        "stage": "/"
+      },
+      {
+        "attempt": 1,
+        "http_status": 200,
+        "stage": "curl --location"
+      },
+      {
+        "attempt": 1,
+        "http_status": 200,
+        "stage": "authenticated API"
+      },
+      {
+        "attempt": 1,
+        "http_status": 401,
+        "stage": "anonymous API"
+      }
+    ],
+    "rate_retry_policy": {
+      "maximum_retries_per_request": 5,
+      "statuses": [
+        429,
+        503
+      ],
+      "wait_seconds": 12
+    },
+    "redirect_chain": [
+      {
+        "host": "app.localrelease",
+        "path": "/",
+        "port": 8443,
+        "status": 302
+      },
+      {
+        "host": "app.localrelease",
+        "path": "/oauth2/start",
+        "port": 8443,
+        "status": 302
+      },
+      {
+        "host": "app.localrelease",
+        "path": "/realms/stock-ai-release/authorize",
+        "port": 8443,
+        "status": 302
+      },
+      {
+        "host": "app.localrelease",
+        "path": "/oauth2/callback",
+        "port": 8443,
+        "status": 303
+      },
+      {
+        "host": "app.localrelease",
+        "path": "/",
+        "port": 8443,
+        "status": 200
+      }
+    ],
+    "schema": "stock-ai.local-release-ingress.v1",
+    "status": "passed",
+    "test_origin_visited": false,
+    "tested_at_utc": "2026-10-14T20:47:06.946424+00:00"
+  }
+}

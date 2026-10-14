@@ -31,6 +31,8 @@ def restore_profile(operator, config, previous, base):
     runtime = operator.env_file.parent
     for name in ("fullchain.pem", "privkey.pem", "jwks-signing-key.pem", "config.json"):
         replace_key(runtime / "certs" / name, (previous / "certs" / name).read_bytes())
+    for source in (previous / "secrets").iterdir():
+        replace_key(runtime / "secrets" / source.name, source.read_bytes())
     replace_key(operator.env_file, (previous / "compose.env").read_bytes())
     bundle = operator.compose_files[0].parents[2]
     shutil.copytree(previous / "deploy", bundle / "deploy", dirs_exist_ok=True)

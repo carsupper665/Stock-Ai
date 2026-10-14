@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "total": 144,
+  "suites": [
+    {
+      "directory": "scripts/test",
+      "tests": 110
+    },
+    {
+      "directory": "scripts/local-release",
+      "tests": 30
+    },
+    {
+      "directory": "scripts/local-test",
+      "tests": 4
+    }
+  ],
+  "runner": "python3 -m unittest discover -s <directory> -p test_*.py"
+}

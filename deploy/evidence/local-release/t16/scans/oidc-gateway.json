@@ -1,0 +1,250 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.75.0"
+  },
+  "ReportID": "01a13b9e-092f-7c80-b1cc-d63291ddfed1",
+  "CreatedAt": "2026-10-14T18:12:55.215822176Z",
+  "ArtifactID": "sha256:6ea67ea193fea895ad4eee9188f541ee1611b69c3834ef4081dfbba9c661f8dd",
+  "ArtifactName": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "Size": 20754944,
+    "ImageID": "sha256:7b2114cbea2328a2c9b16747c2837771b6d11d4480c0710aed6c0f62db6e62fd",
+    "DiffIDs": [
+      "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc",
+      "sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7",
+      "sha256:0ba4c8f498a9209bb31a34ff849cb4a0586851e514c8d5f4ec3333e9a2d5ec4a",
+      "sha256:50ee6dbf6d921608b132f94dc53d919fe0e8d39456dc624715d331a4b3075d06",
+      "sha256:497d666158ac938d17920b1fe81d7630229daea7e0880964746055ffd4277fd0"
+    ],
+    "RepoDigests": [
+      "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+    ],
+    "Reference": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0",
+    "ImageConfig": {
+      "architecture": "amd64",
+      "created": "2026-10-14T10:11:28Z",
+      "history": [
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG BUILD_DATE=2026-10-14T10:11:28Z",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG REVISION=906326524f70acf77dcffeff86e9433896830509",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG VERSION=local-906326524f70",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "LABEL org.opencontainers.image.created=2026-10-14T10:11:28Z org.opencontainers.image.revision=906326524f70acf77dcffeff86e9433896830509 org.opencontainers.image.source=https://github.com/carsupper665/Stock-Ai org.opencontainers.image.title=Stock AI OIDC Gateway org.opencontainers.image.version=local-906326524f70",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /out/oidc-gateway /oidc-gateway # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /out/healthcheck /healthcheck # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /out/issuer-check /issuer-check # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /run/secrets /run/secrets # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "USER 65532:65532",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "EXPOSE [4180/tcp]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "HEALTHCHECK {Test:[CMD /healthcheck http://127.0.0.1:4180/healthz] Interval:30s Timeout:5s StartPeriod:10s StartInterval:0s Retries:3}",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ENTRYPOINT [\"/oidc-gateway\"]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        }
+      ],
+      "os": "linux",
+      "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+          "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc",
+          "sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7",
+          "sha256:0ba4c8f498a9209bb31a34ff849cb4a0586851e514c8d5f4ec3333e9a2d5ec4a",
+          "sha256:50ee6dbf6d921608b132f94dc53d919fe0e8d39456dc624715d331a4b3075d06",
+          "sha256:497d666158ac938d17920b1fe81d7630229daea7e0880964746055ffd4277fd0"
+        ]
+      },
+      "config": {
+        "Healthcheck": {
+          "Test": [
+            "CMD",
+            "/healthcheck",
+            "http://127.0.0.1:4180/healthz"
+          ],
+          "Interval": 30000000000,
+          "Timeout": 5000000000,
+          "StartPeriod": 10000000000,
+          "Retries": 3
+        },
+        "Entrypoint": [
+          "/oidc-gateway"
+        ],
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        ],
+        "Labels": {
+          "org.opencontainers.image.created": "2026-10-14T10:11:28Z",
+          "org.opencontainers.image.revision": "906326524f70acf77dcffeff86e9433896830509",
+          "org.opencontainers.image.source": "https://github.com/carsupper665/Stock-Ai",
+          "org.opencontainers.image.title": "Stock AI OIDC Gateway",
+          "org.opencontainers.image.version": "local-906326524f70"
+        },
+        "User": "65532:65532",
+        "WorkingDir": "/",
+        "ExposedPorts": {
+          "4180/tcp": {}
+        }
+      }
+    },
+    "Layers": [
+      {
+        "Size": 184832,
+        "DiffID": "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc"
+      },
+      {
+        "Size": 7616512,
+        "DiffID": "sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7"
+      },
+      {
+        "Size": 6301696,
+        "DiffID": "sha256:0ba4c8f498a9209bb31a34ff849cb4a0586851e514c8d5f4ec3333e9a2d5ec4a"
+      },
+      {
+        "Size": 6649856,
+        "DiffID": "sha256:50ee6dbf6d921608b132f94dc53d919fe0e8d39456dc624715d331a4b3075d06"
+      },
+      {
+        "Size": 2048,
+        "DiffID": "sha256:497d666158ac938d17920b1fe81d7630229daea7e0880964746055ffd4277fd0"
+      }
+    ]
+  },
+  "Results": [
+    {
+      "Target": "healthcheck",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "9eec41744da02b3b"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:0ba4c8f498a9209bb31a34ff849cb4a0586851e514c8d5f4ec3333e9a2d5ec4a"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    },
+    {
+      "Target": "issuer-check",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "bf4405224791db7b"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:50ee6dbf6d921608b132f94dc53d919fe0e8d39456dc624715d331a4b3075d06"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    },
+    {
+      "Target": "oidc-gateway",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "oidc_gateway",
+          "Name": "oidc_gateway",
+          "Identifier": {
+            "PURL": "pkg:golang/oidc_gateway",
+            "UID": "69a1f53f7504ac23"
+          },
+          "Relationship": "root",
+          "DependsOn": [
+            "stdlib@v1.27.2"
+          ],
+          "Layer": {
+            "DiffID": "sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "c3fc4bb8d53821b9"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    }
+  ]
+}

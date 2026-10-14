@@ -9,6 +9,20 @@ from scripts.local_operations import WorkflowError
 
 
 class DeploymentGateTest(unittest.TestCase):
+    def test_packaged_operator_accepts_its_persistent_deployment_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "deployment"
+            bundle.mkdir()
+            with patch.object(prepare, "ROOT", bundle):
+                self.assertEqual(deploy.persistent(bundle), bundle)
+                self.assertEqual(prepare.persistent_runtime(bundle), bundle)
+            (bundle / ".git").write_text("gitdir: /tmp/disposable-checkout")
+            with patch.object(prepare, "ROOT", bundle):
+                with self.assertRaises(WorkflowError):
+                    deploy.persistent(bundle)
+                with self.assertRaises(WorkflowError):
+                    prepare.persistent_runtime(bundle)
+
     def test_disposable_runtime_is_rejected_before_secret_writes(self):
         for path in (prepare.ROOT / ".local-release", Path("/tmp/profiles/a/worktrees/proj/release")):
             with self.subTest(path=path), patch.object(prepare.material, "_secure_directory") as write:

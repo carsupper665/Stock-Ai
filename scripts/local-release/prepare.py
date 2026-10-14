@@ -30,7 +30,8 @@ AUXILIARY = ROOT / "deploy/local-release/auxiliary-images.json"
 
 def persistent_runtime(path):
     path = path.resolve()
-    if "worktrees" in path.parts or path == ROOT or ROOT in path.parents:
+    checkout = (ROOT / ".git").exists()
+    if "worktrees" in path.parts or (checkout and (path == ROOT or ROOT in path.parents)):
         raise WorkflowError("Release runtime must be outside disposable worktrees")
     return path
 

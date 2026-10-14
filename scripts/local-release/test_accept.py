@@ -29,9 +29,9 @@ class FullProfileRollbackTest(unittest.TestCase):
                     path.chmod(0o440)
                 for suffix in SUFFIXES:
                     path = root / "secrets" / f"stock-ai-release_{suffix}"
-                    # Only the two migrated keys differ; all other secrets were
-                    # retained throughout installation/migration.
-                    path.write_text((tag if suffix in KEYS else "same") + suffix)
+                    # Full disaster recovery must also restore cookie, client,
+                    # admin and provider secrets, even when all nine differ.
+                    path.write_text(tag + suffix)
                     path.chmod(0o440)
             for file in files:
                 file.write_text("new compose")
@@ -57,6 +57,10 @@ class FullProfileRollbackTest(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), (previous / "certs" / name).read_bytes())
                 self.assertEqual(path.stat().st_mode & 0o777, 0o440)
             self.assertEqual(files[0].read_text(), "old compose")
+            for suffix in SUFFIXES:
+                path = runtime / "secrets" / f"stock-ai-release_{suffix}"
+                self.assertEqual(path.read_bytes(), (previous / "secrets" / path.name).read_bytes())
+                self.assertEqual(path.stat().st_mode & 0o777, 0o440)
             start.assert_called_once()
 
 

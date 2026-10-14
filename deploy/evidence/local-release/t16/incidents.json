@@ -1,0 +1,27 @@
+{
+  "backend_api_recovered": true,
+  "backend_crash": {
+    "automatic_restart_count_advanced": true,
+    "manual_compose_start_needed": false,
+    "method": "kernel SIGKILL of inspected Release Backend process from immutable networkless helper",
+    "same_container": true,
+    "status": "passed"
+  },
+  "backend_kill_restart_same_container": true,
+  "identity_outage": {
+    "fresh_login_status": 503,
+    "login_recovered": true,
+    "private_api_statuses": {
+      "/agent/api/v1/sessions": 401,
+      "/llm/v1/providers": 401,
+      "/v1/accounts": 401
+    }
+  },
+  "manual_termination_rehearsal": "docker kill suppressed restart; explicit compose start recovered; corrected kernel crash retested",
+  "provider_outage": {
+    "generation_recovered": true,
+    "method": "pause/unpause shared fixture; collocated IdP, market and adapter also temporarily unavailable",
+    "status": "bounded-client-timeout"
+  },
+  "status": "passed"
+}

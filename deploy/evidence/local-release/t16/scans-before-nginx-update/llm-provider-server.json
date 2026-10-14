@@ -1,0 +1,366 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.75.0"
+  },
+  "ReportID": "01a13b9e-018c-76ec-a10a-6275faac7e18",
+  "CreatedAt": "2026-10-14T18:12:53.26045767Z",
+  "ArtifactID": "sha256:1e2850ca91d9b3d769748fc935f3ba6a4a7325e4e144ca83bd75457fd4da88b6",
+  "ArtifactName": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "Size": 18212864,
+    "ImageID": "sha256:13c7f31a06587a22c749043797ef8f13f3e762259d2c13a0d243b3c7fdba357d",
+    "DiffIDs": [
+      "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc",
+      "sha256:5563d779a5ef786611c738df8ccc926df9d7e81e60247dbc2306acc5f039730e",
+      "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0",
+      "sha256:19bec0380ec776ad80eff72708d6c3135dac7d7f8385222dc9fa35e12ac637f1"
+    ],
+    "RepoDigests": [
+      "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e"
+    ],
+    "Reference": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+    "ImageConfig": {
+      "architecture": "amd64",
+      "created": "2026-10-14T10:11:28Z",
+      "history": [
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG BUILD_DATE=2026-10-14T10:11:28Z",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG REVISION=906326524f70acf77dcffeff86e9433896830509",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ARG VERSION=local-906326524f70",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "LABEL org.opencontainers.image.created=2026-10-14T10:11:28Z org.opencontainers.image.revision=906326524f70acf77dcffeff86e9433896830509 org.opencontainers.image.source=https://github.com/carsupper665/Stock-Ai org.opencontainers.image.title=Stock AI LLM Provider Server org.opencontainers.image.version=local-906326524f70",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY --chown=65532:65532 /out/data /data # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /out/llm-provider-server /llm-provider-server # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "COPY /out/healthcheck /healthcheck # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ENV LLM_SERVER_ADDR=0.0.0.0:8090 LLM_SERVER_DB_PATH=/data/llm-provider.db",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "EXPOSE [8090/tcp]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "USER 65532:65532",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "HEALTHCHECK {Test:[CMD /healthcheck http://127.0.0.1:8090/healthz] Interval:30s Timeout:5s StartPeriod:10s StartInterval:0s Retries:3}",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-14T10:11:28Z",
+          "created_by": "ENTRYPOINT [\"/llm-provider-server\"]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        }
+      ],
+      "os": "linux",
+      "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+          "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc",
+          "sha256:5563d779a5ef786611c738df8ccc926df9d7e81e60247dbc2306acc5f039730e",
+          "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0",
+          "sha256:19bec0380ec776ad80eff72708d6c3135dac7d7f8385222dc9fa35e12ac637f1"
+        ]
+      },
+      "config": {
+        "Healthcheck": {
+          "Test": [
+            "CMD",
+            "/healthcheck",
+            "http://127.0.0.1:8090/healthz"
+          ],
+          "Interval": 30000000000,
+          "Timeout": 5000000000,
+          "StartPeriod": 10000000000,
+          "Retries": 3
+        },
+        "Entrypoint": [
+          "/llm-provider-server"
+        ],
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "LLM_SERVER_ADDR=0.0.0.0:8090",
+          "LLM_SERVER_DB_PATH=/data/llm-provider.db"
+        ],
+        "Labels": {
+          "org.opencontainers.image.created": "2026-10-14T10:11:28Z",
+          "org.opencontainers.image.revision": "906326524f70acf77dcffeff86e9433896830509",
+          "org.opencontainers.image.source": "https://github.com/carsupper665/Stock-Ai",
+          "org.opencontainers.image.title": "Stock AI LLM Provider Server",
+          "org.opencontainers.image.version": "local-906326524f70"
+        },
+        "User": "65532:65532",
+        "WorkingDir": "/",
+        "ExposedPorts": {
+          "8090/tcp": {}
+        }
+      }
+    },
+    "Layers": [
+      {
+        "Size": 184832,
+        "DiffID": "sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc"
+      },
+      {
+        "Size": 1536,
+        "DiffID": "sha256:5563d779a5ef786611c738df8ccc926df9d7e81e60247dbc2306acc5f039730e"
+      },
+      {
+        "Size": 11724800,
+        "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+      },
+      {
+        "Size": 6301696,
+        "DiffID": "sha256:19bec0380ec776ad80eff72708d6c3135dac7d7f8385222dc9fa35e12ac637f1"
+      }
+    ]
+  },
+  "Results": [
+    {
+      "Target": "healthcheck",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "9eec41744da02b3b"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:19bec0380ec776ad80eff72708d6c3135dac7d7f8385222dc9fa35e12ac637f1"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    },
+    {
+      "Target": "llm-provider-server",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Packages": [
+        {
+          "ID": "stock-ai/llm-provider-server",
+          "Name": "stock-ai/llm-provider-server",
+          "Identifier": {
+            "PURL": "pkg:golang/stock-ai/llm-provider-server",
+            "UID": "7b42850a0c5fcca6"
+          },
+          "Relationship": "root",
+          "DependsOn": [
+            "github.com/dustin/go-humanize@v1.0.1",
+            "github.com/glebarez/go-sqlite@v1.21.2",
+            "github.com/google/uuid@v1.3.0",
+            "github.com/mattn/go-isatty@v0.0.17",
+            "github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
+            "golang.org/x/sys@v0.48.0",
+            "modernc.org/libc@v1.22.5",
+            "modernc.org/mathutil@v1.5.0",
+            "modernc.org/memory@v1.5.0",
+            "modernc.org/sqlite@v1.23.1",
+            "stdlib@v1.27.2"
+          ],
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "stdlib@v1.27.2",
+          "Name": "stdlib",
+          "Identifier": {
+            "PURL": "pkg:golang/stdlib@v1.27.2",
+            "UID": "1473b433dc43d189"
+          },
+          "Version": "v1.27.2",
+          "Relationship": "direct",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/dustin/go-humanize@v1.0.1",
+          "Name": "github.com/dustin/go-humanize",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/dustin/go-humanize@v1.0.1",
+            "UID": "20c640e662028312"
+          },
+          "Version": "v1.0.1",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/glebarez/go-sqlite@v1.21.2",
+          "Name": "github.com/glebarez/go-sqlite",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/glebarez/go-sqlite@v1.21.2",
+            "UID": "a46f2d5ded92bee2"
+          },
+          "Version": "v1.21.2",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/google/uuid@v1.3.0",
+          "Name": "github.com/google/uuid",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/google/uuid@v1.3.0",
+            "UID": "db51d5d6ff8d52e3"
+          },
+          "Version": "v1.3.0",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/mattn/go-isatty@v0.0.17",
+          "Name": "github.com/mattn/go-isatty",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/mattn/go-isatty@v0.0.17",
+            "UID": "37eaa310bffdfd71"
+          },
+          "Version": "v0.0.17",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
+          "Name": "github.com/remyoudompheng/bigfft",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
+            "UID": "d4547d2c41e0c43b"
+          },
+          "Version": "v0.0.0-20230129092748-24d4a6f8daec",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "golang.org/x/sys@v0.48.0",
+          "Name": "golang.org/x/sys",
+          "Identifier": {
+            "PURL": "pkg:golang/golang.org/x/sys@v0.48.0",
+            "UID": "c15fadbdbf934a0b"
+          },
+          "Version": "v0.48.0",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/libc@v1.22.5",
+          "Name": "modernc.org/libc",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/libc@v1.22.5",
+            "UID": "866bb75bf241b0b2"
+          },
+          "Version": "v1.22.5",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/mathutil@v1.5.0",
+          "Name": "modernc.org/mathutil",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/mathutil@v1.5.0",
+            "UID": "a7e5fa149824b17e"
+          },
+          "Version": "v1.5.0",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/memory@v1.5.0",
+          "Name": "modernc.org/memory",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/memory@v1.5.0",
+            "UID": "b22264879aa1f24d"
+          },
+          "Version": "v1.5.0",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        },
+        {
+          "ID": "modernc.org/sqlite@v1.23.1",
+          "Name": "modernc.org/sqlite",
+          "Identifier": {
+            "PURL": "pkg:golang/modernc.org/sqlite@v1.23.1",
+            "UID": "7ff02e0ba1a8768a"
+          },
+          "Version": "v1.23.1",
+          "Layer": {
+            "DiffID": "sha256:b8d5fd42346fe175cd2fc664e3623752007a4f2d2b932cad38cba4bd3bf5cda0"
+          },
+          "AnalyzedBy": "gobinary"
+        }
+      ]
+    }
+  ]
+}
