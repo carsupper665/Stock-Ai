@@ -160,15 +160,47 @@ function Get-Promotion([string]$Path) {
     if (!$Path) { throw 'Update requires -PromotionManifest.' }
     $manifestPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.status -ne 'promoted' -or !$manifest.images) { throw 'Promotion manifest must have status=promoted and an images map.' }
+    if ($manifest.schema -ne 'stock-ai.promotion-manifest.v1' -or $manifest.status -ne 'promoted' -or
+        $manifest.environment -ne 'Test' -or !$manifest.images) {
+        throw 'Promotion manifest schema, Test environment, promoted status, or images map is invalid.'
+    }
+    if ($manifest.git_revision -notmatch '^[0-9a-f]{40}$' -or !$manifest.configuration_schema_version) {
+        throw 'Promotion manifest must bind a full Git revision and configuration schema version.'
+    }
+    if ($manifest.trust.mechanism -ne 'SHA-256 sidecar' -or $manifest.trust.checksum_file -ne 'SHA256SUMS') {
+        throw 'Promotion manifest must declare the supported SHA-256 checksum trust mechanism.'
+    }
+    $requiredResults = @('secured_product_flow', 'wrong_user', 'expired_session', 'idp_denial', 'idp_restart', 'internal_service_restart', 'docker_restart_failure', 'test_material_absence')
+    foreach ($result in $requiredResults) {
+        if ($manifest.acceptance_results.$result -ne 'passed') { throw "Promotion acceptance result is missing or failed: $result." }
+    }
     $expected = @($script:Services | Sort-Object) -join ','
     $actual = @($manifest.images.PSObject.Properties.Name | Sort-Object) -join ','
     if ($actual -ne $expected) { throw 'Promotion manifest must contain exactly the four application services.' }
+    $expectedTestImages = @('agent-server', 'backend', 'console', 'llm-provider-server', 'oidc-gateway')
+    $actualTestImages = @($manifest.test_stack_images.PSObject.Properties.Name | Sort-Object) -join ','
+    $expectedTestImageNames = @($expectedTestImages | Sort-Object) -join ','
+    if ($actualTestImages -ne $expectedTestImageNames) { throw 'Promotion manifest must bind all five Test stack image digests.' }
     $promoted = [ordered]@{}
     foreach ($service in $script:Services) {
         $reference = [string]$manifest.images.$service
+        $buildDigest = [string]$manifest.artifacts.$service.build_digest
         if ($reference -notmatch $script:ImmutableImageReferenceRegex) { throw "Promotion entry for $service is not an immutable image digest." }
+        if ($buildDigest -notmatch '^sha256:[0-9a-f]{64}$' -or !$reference.EndsWith("@$buildDigest", [StringComparison]::Ordinal)) { throw "Release image does not match the tested build digest for $service." }
+        if ($manifest.test_stack_images.$service -ne $reference) { throw "Release image does not match the Test accepted digest for $service." }
+        foreach ($artifact in @('sbom', 'scan', 'filesystem_inventory', 'provenance', 'acceptance')) {
+            $record = $manifest.artifacts.$service.$artifact
+            if (!$record.file -or $record.sha256 -notmatch '^[0-9a-f]{64}$') { throw "Promotion manifest has no checksummed $artifact for $service." }
+        }
         $promoted[$service] = $reference
+    }
+    $gateway = $manifest.test_stack_images.'oidc-gateway'
+    if ($gateway -notmatch $script:ImmutableImageReferenceRegex) { throw 'OIDC Gateway Test image is not pinned to an immutable SHA256 digest.' }
+    $gatewayArtifacts = $manifest.artifacts.'oidc-gateway'
+    if ($gatewayArtifacts.build_digest -notmatch '^sha256:[0-9a-f]{64}$' -or !$gateway.EndsWith("@$($gatewayArtifacts.build_digest)", [StringComparison]::Ordinal)) { throw 'OIDC Gateway digest does not match the tested build digest.' }
+    foreach ($artifact in @('sbom', 'scan', 'filesystem_inventory', 'provenance', 'acceptance')) {
+        $record = $gatewayArtifacts.$artifact
+        if (!$record.file -or $record.sha256 -notmatch '^[0-9a-f]{64}$') { throw "Promotion manifest has no checksummed $artifact for oidc-gateway." }
     }
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $sidecar = Join-Path (Split-Path -Parent $manifestPath) 'SHA256SUMS'
@@ -181,6 +213,40 @@ function Get-Promotion([string]$Path) {
         }
     }
     if (!$verified) { throw 'Promotion manifest does not match its SHA256SUMS checksum.' }
+    foreach ($service in @($script:Services) + @('oidc-gateway')) {
+        foreach ($artifact in @('sbom', 'scan', 'filesystem_inventory', 'provenance', 'acceptance')) {
+            $record = $manifest.artifacts.$service.$artifact
+            if ([IO.Path]::GetFileName([string]$record.file) -ne [string]$record.file) { throw "Promotion artifact path is invalid for $service/$artifact." }
+            $artifactPath = Join-Path (Split-Path -Parent $manifestPath) ([string]$record.file)
+            if (!(Test-Path -LiteralPath $artifactPath -PathType Leaf)) { throw "Promotion evidence file is missing: $($record.file)." }
+            $artifactHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($artifactHash -ne $record.sha256) { throw "Promotion evidence hash mismatch: $($record.file)." }
+            $artifactSealed = $false
+            foreach ($line in [IO.File]::ReadAllLines($sidecar)) {
+                if ($line -match ($script:ChecksumLinePrefixRegex + [regex]::Escape([string]$record.file) + '$')) {
+                    $artifactSealed = $Matches[1].ToLowerInvariant() -eq $artifactHash
+                }
+            }
+            if (!$artifactSealed) { throw "Promotion evidence is not sealed by SHA256SUMS: $($record.file)." }
+        }
+    }
+    $certificationRecords = [Collections.Generic.List[object]]::new()
+    $certificationRecords.Add($manifest.certification_evidence)
+    foreach ($result in $requiredResults) { $certificationRecords.Add($manifest.certification_evidence.results.$result) }
+    foreach ($record in $certificationRecords) {
+        if ([IO.Path]::GetFileName([string]$record.file) -ne [string]$record.file) { throw 'Test certification evidence path is invalid.' }
+        $evidencePath = Join-Path (Split-Path -Parent $manifestPath) ([string]$record.file)
+        if (!(Test-Path -LiteralPath $evidencePath -PathType Leaf)) { throw "Test certification evidence is missing: $($record.file)." }
+        $evidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($evidenceHash -ne $record.sha256) { throw "Test certification evidence hash mismatch: $($record.file)." }
+        $evidenceSealed = $false
+        foreach ($line in [IO.File]::ReadAllLines($sidecar)) {
+            if ($line -match ($script:ChecksumLinePrefixRegex + [regex]::Escape([string]$record.file) + '$')) {
+                $evidenceSealed = $Matches[1].ToLowerInvariant() -eq $evidenceHash
+            }
+        }
+        if (!$evidenceSealed) { throw "Test certification evidence is not sealed by SHA256SUMS: $($record.file)." }
+    }
     return [pscustomobject]@{ Path = $manifestPath; Hash = $manifestHash; Images = $promoted }
 }
 
@@ -236,6 +302,16 @@ function Test-Preflight {
     if ($config) {
         try { Assert-EnvironmentCompose $config ([string]$values['STOCK_AI_ENVIRONMENT']) }
         catch { $issues.Add($_.Exception.Message) }
+        if ($values['STOCK_AI_ENVIRONMENT'] -eq 'Release') {
+            try {
+                $releasePromotion = Get-Promotion $PromotionManifest
+                foreach ($service in $script:Services) {
+                    if ([string]$config.services.$service.image -ne [string]$releasePromotion.Images[$service]) {
+                        $issues.Add("Release image does not match the checksummed Test promotion for $service.")
+                    }
+                }
+            } catch { $issues.Add("Release promotion verification failed ($($_.Exception.GetType().Name)).") }
+        }
     }
     $namespace = [string]$values['STOCK_AI_SECRET_NAMESPACE']
     $secretsDirectory = [string]$values['STOCK_AI_SECRETS_DIR']

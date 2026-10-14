@@ -6,7 +6,8 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=16m]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     pids_limit: 128
     environment:
       STOCK_AI_ENVIRONMENT: Test
@@ -44,7 +45,8 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
     pids_limit: 128
     environment:
       TEST_APP_HOST: "${TEST_APP_HOST:?set the Test app DNS hostname}"

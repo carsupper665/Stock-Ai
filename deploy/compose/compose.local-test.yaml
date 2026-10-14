@@ -1,0 +1,79 @@
+services:
+  backend:
+    environment:
+      ALLOW_STATIC_USER_TOKEN: "true"
+      OIDC_ISSUER: https://idp.localtest:9443/realms/stock-ai-test
+      OIDC_AUDIENCE: stock-ai-api-test
+      OIDC_USER_SUBJECT: local-test-user
+      OIDC_JWKS_URL: https://idp.localtest:9443/realms/stock-ai-test/jwks
+      SSL_CERT_FILE: /run/local-test/root-ca.pem
+    volumes:
+      - "${LOCAL_TEST_CERT_DIR:?set local Test certificate directory}/fullchain.pem:/run/local-test/root-ca.pem:ro"
+    depends_on:
+      local-fixtures:
+        condition: service_healthy
+
+  agent-server:
+    volumes:
+      - "${LOCAL_TEST_CERT_DIR:?set local Test certificate directory}/fullchain.pem:/run/local-test/root-ca.pem:ro"
+    environment:
+      SSL_CERT_FILE: /run/local-test/root-ca.pem
+
+  llm-provider-server:
+    depends_on:
+      local-fixtures:
+        condition: service_healthy
+
+  console:
+    environment:
+      OIDC_ISSUER: https://idp.localtest:9443/realms/stock-ai-test
+      OIDC_AUDIENCE: stock-ai-api-test
+      OIDC_USER_SUBJECT: local-test-user
+      OIDC_JWKS_URL: https://idp.localtest:9443/realms/stock-ai-test/jwks
+      SSL_CERT_FILE: /run/local-test/root-ca.pem
+    volumes:
+      - "${LOCAL_TEST_CERT_DIR:?set local Test certificate directory}/fullchain.pem:/run/local-test/root-ca.pem:ro"
+
+  oidc-gateway:
+    environment:
+      OIDC_ISSUER: https://idp.localtest:9443/realms/stock-ai-test
+      OIDC_AUTHORIZATION_URL: https://idp.localtest:9443/realms/stock-ai-test/authorize
+      OIDC_TOKEN_URL: https://idp.localtest:9443/realms/stock-ai-test/token
+      OIDC_JWKS_URL: https://idp.localtest:9443/realms/stock-ai-test/jwks
+      OIDC_END_SESSION_URL: https://idp.localtest:9443/realms/stock-ai-test/logout
+      OIDC_USER_SUBJECT: local-test-user
+      SSL_CERT_FILE: /run/local-test/root-ca.pem
+    volumes:
+      - "${LOCAL_TEST_CERT_DIR:?set local Test certificate directory}/fullchain.pem:/run/local-test/root-ca.pem:ro"
+    depends_on:
+      local-fixtures:
+        condition: service_healthy
+
+  nginx:
+    depends_on:
+      local-fixtures:
+        condition: service_healthy
+
+  local-fixtures:
+    image: stock-ai/local-test-fixture:local
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    pids_limit: 64
+    ports:
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - "${LOCAL_TEST_CERT_DIR:?set local Test certificate directory}:/fixture:ro"
+    healthcheck:
+      test: ["CMD", "/local-fixture", "--healthcheck"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+    networks:
+      edge:
+        aliases: [idp.localtest]
+      application:
+        aliases: [fake-provider.localtest, idp.localtest]

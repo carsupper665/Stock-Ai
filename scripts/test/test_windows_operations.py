@@ -37,6 +37,9 @@ class WindowsOperationsPolicyTest(unittest.TestCase):
             "'STOCK_AI_PUBLIC_PORTS'",
         ):
             self.assertIn(control, self.script)
+        preflight = self.script.split("function Test-Preflight", 1)[1].split("function Get-SafeStatus", 1)[0]
+        self.assertIn("Get-Promotion $PromotionManifest", preflight)
+        self.assertIn("Release image does not match the checksummed Test promotion", preflight)
 
     def test_health_status_and_diagnostics_are_nonsecret_and_actionable(self):
         self.assertIn("function Wait-ForHealth", self.script)
@@ -53,6 +56,7 @@ class WindowsOperationsPolicyTest(unittest.TestCase):
         self.assertLess(stop.index("'agent-server'"), stop.index("'llm-provider-server'"))
         self.assertLess(stop.index("'llm-provider-server'"), stop.index("'backend'"))
         self.assertIn("@sha256:[0-9a-f]{64}", self.script)
+        self.assertIn("if ($service.build)", self.script)
         self.assertIn("SHA256SUMS", self.script)
         self.assertIn("previous_images", self.script)
         self.assertIn("promotion_manifest_sha256", self.script)
@@ -163,6 +167,34 @@ class WindowsOperationsPolicyTest(unittest.TestCase):
         self.assertIn("$script:ImmutableImageReferenceRegex", get_promotion)
         self.assertIn("$script:ChecksumLinePrefixRegex", get_promotion)
         self.assertIn("if (!$verified) { throw", get_promotion)
+
+    def test_release_promotion_requires_certification_and_test_digest_match(self):
+        get_promotion = self.script.split("function Get-Promotion", 1)[1].split(
+            "function Set-ImageAssignments", 1
+        )[0]
+        for control in (
+            "stock-ai.promotion-manifest.v1",
+            "environment -ne 'Test'",
+            "git_revision -notmatch '^[0-9a-f]{40}$'",
+            "configuration_schema_version",
+            "secured_product_flow",
+            "wrong_user",
+            "expired_session",
+            "idp_denial",
+            "idp_restart",
+            "internal_service_restart",
+            "docker_restart_failure",
+            "test_material_absence",
+            "test_stack_images",
+            "certification_evidence.results",
+            "Test certification evidence hash mismatch",
+            "Release image does not match the Test accepted digest",
+            "Release image does not match the tested build digest",
+            "filesystem_inventory",
+            "'filesystem_inventory', 'provenance', 'acceptance'",
+            "$script:ImmutableImageReferenceRegex",
+        ):
+            self.assertIn(control, get_promotion)
 
     def test_legacy_exclusion_and_spaced_path_instructions(self):
         self.assertIn("C:\\ProgramData\\Stock AI", self.doc)
