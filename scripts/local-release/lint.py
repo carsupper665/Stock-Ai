@@ -29,6 +29,12 @@ def strings(value):
 
 
 def validate(config, values, images):
+    if not config.get("networks", {}).get("application", {}).get("internal"):
+        raise WorkflowError("Release market application network must block external routing.")
+    if "api.binance.com" not in config.get("services", {}).get("idp", {}).get("networks", {}).get("application", {}).get("aliases", []):
+        raise WorkflowError("Release market hostname must resolve to its local fixture.")
+    if config.get("services", {}).get("agent-server", {}).get("environment", {}).get("AGENT_SERVER_BACKEND_URL") != "http://idp:18081":
+        raise WorkflowError("Immutable Agent must use the private scoped Backend adapter.")
     if any(FORBIDDEN.search(value) or "${" in value for value in strings(config)):
         raise WorkflowError("Test identifiers, placeholders or unresolved variables detected.")
     if config.get("name") != INSTANCE or values.get("STOCK_AI_INSTANCE") != INSTANCE:
@@ -123,7 +129,7 @@ def validate_material(config, values, runtime, deployment_root=ROOT):
             raise WorkflowError("Release fixture material permissions are invalid.")
     if json.loads((certs / "config.json").read_text()) != fixture_config():
         raise WorkflowError("Release fixture identity policy differs from gateway and API policy.")
-    material._validate_tls_pair(certs / "fullchain.pem", certs / "privkey.pem", ("app.localrelease",))
+    material._validate_tls_pair(certs / "fullchain.pem", certs / "privkey.pem", ("app.localrelease", "api.binance.com"))
     material._openssl_private_key(certs / "jwks-signing-key.pem")
     required = {
         "backend": {"backend_user_token", "backend_account_token_key"},
@@ -131,7 +137,7 @@ def validate_material(config, values, runtime, deployment_root=ROOT):
         "llm-provider-server": {"llm_admin_token", "llm_runtime_token", "llm_master_key"},
         "console": {"agent_admin_token", "llm_admin_token", "llm_runtime_token"},
         "oidc-gateway": {"oidc_client_secret", "oidc_cookie_key"},
-        "idp": {"oidc_client_secret", "fixture_provider_secret"}, "nginx": set(),
+        "idp": {"oidc_client_secret", "fixture_provider_secret", "backend_user_token"}, "nginx": set(),
     }
     for name, service in config["services"].items():
         targets = {mount.get("target") for mount in service.get("secrets", [])}

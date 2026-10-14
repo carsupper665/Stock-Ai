@@ -1,0 +1,24 @@
+{
+  "compose_inputs_sha256": "568d14be77a7e112d43a9bba20e059dc61f9eabec6ed8abd53e261ea1479ff8a",
+  "created_at_utc": "2026-10-14T15:32:13.738824+00:00",
+  "environment": "Release",
+  "non_image_env_sha256": "97c5eec94c1d35efd360636f10f0709c54308c1219eab3887377f8258ff3ae75",
+  "normalized_compose_sha256": "e6ee3356626f5902ebea5e366a7141b8fe2e16f9af92b92ac7f68499b57a3f29",
+  "previous_images": {
+    "agent-server": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+    "backend": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+    "console": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+    "llm-provider-server": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+    "oidc-gateway": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+  },
+  "project": "stock-ai-local-release",
+  "promoted_images": {
+    "agent-server": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+    "backend": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+    "console": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+    "llm-provider-server": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+    "oidc-gateway": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+  },
+  "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+  "schema_version": 2
+}
