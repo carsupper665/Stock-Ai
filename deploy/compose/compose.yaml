@@ -73,6 +73,7 @@ services:
       LLM_SERVER_ADMIN_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
       LLM_SERVER_RUNTIME_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
       LLM_SERVER_MASTER_KEY_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_master_key"
+      LLM_SERVER_MODEL_CATALOG: "${LLM_SERVER_MODEL_CATALOG:-[]}"
     secrets:
       - source: llm_admin_token
         target: "${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
