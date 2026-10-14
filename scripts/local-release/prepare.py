@@ -63,6 +63,9 @@ def fixture_config():
         "logout_uri": f"https://{HOST}/", "key_id": "local-release-signing-key",
         "client_secret_file": f"/run/secrets/{NAMESPACE}_oidc_client_secret",
         "provider_secret_file": f"/run/secrets/{NAMESPACE}_fixture_provider_secret",
+        "market_fixture": True,
+        "backend_adapter": True,
+        "backend_secret_file": f"/run/secrets/{NAMESPACE}_backend_user_token",
     }
 
 
@@ -96,7 +99,7 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None):
     gid = os.getgid()
     for path, mode in ((runtime, 0o700), (certs, 0o750), (secrets, 0o700)):
         material._secure_directory(path, mode, gid)
-    material._ensure_tls_pair(certs / "fullchain.pem", certs / "privkey.pem", gid, ("app.localrelease",))
+    material._ensure_tls_pair(certs / "fullchain.pem", certs / "privkey.pem", gid, ("app.localrelease", "api.binance.com"))
     material._ensure_jwks_key(certs / "jwks-signing-key.pem", gid)
     for suffix in SUFFIXES:
         material._write_secret(f"{NAMESPACE}_{suffix}", gid, secrets)

@@ -44,6 +44,9 @@ class ReleaseConfigurationTest(unittest.TestCase):
 
     def test_fail_closed_mutations(self):
         mutations = {
+            "external_market_routing": lambda c: c["networks"]["application"].update(internal=False),
+            "missing_market_alias": lambda c: c["services"]["idp"]["networks"]["application"].update(aliases=["fake-provider.localrelease"]),
+            "adapter_bypass": lambda c: c["services"]["agent-server"]["environment"].update(AGENT_SERVER_BACKEND_URL="http://backend:7794"),
             "test_subject": lambda c: c["services"]["backend"]["environment"].update(OIDC_USER_SUBJECT="local-test-user"),
             "test_cookie": lambda c: c["services"]["oidc-gateway"]["environment"].update(OIDC_COOKIE_NAME="__Host-stock-ai-test-session"),
             "missing_port": lambda c: c["services"]["nginx"].update(ports=[]),

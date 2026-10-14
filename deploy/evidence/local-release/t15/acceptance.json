@@ -1,0 +1,314 @@
+{
+  "accepted_snapshot_sha256": "92fba17f8502d381f9e7c82e61a57c5a6742f525e2dee386bdb2f20ce3ac46f2",
+  "auxiliary_image": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1",
+  "business": {
+    "account_created": true,
+    "agent_run_completed": true,
+    "backend_oidc_rejections": {
+      "external_calls": 0,
+      "fixture": "stock-ai-backend-oidc-rejections-v1",
+      "statuses": {
+        "anonymous": 401,
+        "expired": 401,
+        "static-user": 401,
+        "wrong-audience": 401,
+        "wrong-issuer": 401,
+        "wrong-subject": 401
+      },
+      "tokens_disclosed": false
+    },
+    "external_and_harness_providers_disabled": true,
+    "fake_provider_verified_generation": true,
+    "fixture_login": true,
+    "fixture_market_read": true,
+    "http_observations": [
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "PATCH",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "POST",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "POST",
+        "status": 201
+      },
+      {
+        "attempt": 1,
+        "method": "POST",
+        "status": 201
+      },
+      {
+        "attempt": 1,
+        "method": "POST",
+        "status": 202
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "POST",
+        "status": 201
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "POST",
+        "status": 200
+      },
+      {
+        "attempt": 1,
+        "method": "POST",
+        "status": 303
+      },
+      {
+        "attempt": 1,
+        "method": "GET",
+        "status": 401
+      }
+    ],
+    "logout_cleared_session": true,
+    "market_boundary": {
+      "adapter_edge_interface_unreachable": true,
+      "agent_private_backend_adapter": "http://idp:18081",
+      "all_running_digests_match": true,
+      "application_network_internal": true,
+      "backend_certificate_verification": "existing SSL_CERT_FILE; no bypass",
+      "binance_dns_alias": "local-idp-fixture"
+    },
+    "market_provenance": {
+      "after": {
+        "external_calls": 0,
+        "fixture": "stock-ai-local-binance-v1",
+        "price": 100,
+        "routes": {
+          "/api/v3/exchangeInfo": 1,
+          "/api/v3/klines": 1,
+          "/api/v3/ticker/price": 32
+        },
+        "symbol": "BTCUSDT"
+      },
+      "before": {
+        "external_calls": 0,
+        "fixture": "stock-ai-local-binance-v1",
+        "price": 100,
+        "routes": {
+          "/api/v3/ticker/price": 30
+        },
+        "symbol": "BTCUSDT"
+      },
+      "external_calls": 0,
+      "price": 100,
+      "symbol": "BTCUSDT",
+      "ticker_info_ohlcv_public_api": true
+    },
+    "migrated_account_token_decrypted": true,
+    "persisted_agent_order_verified": true,
+    "post_comparison_adaptations": [
+      "fixture URL",
+      "fixture credential (original IDs preserved)",
+      "external Provider disablement"
+    ],
+    "private_backend_adapter": {
+      "account_credentials_preserved": true,
+      "after": {
+        "account_credentials_preserved": true,
+        "external_calls": 0,
+        "fixture": "stock-ai-private-backend-oidc-adapter-v1",
+        "privileged_routes": [
+          "GET /v1/accounts/:id",
+          "GET /v1/market/price"
+        ],
+        "routes": {
+          "ACCOUNT GET /v1/market/price": 1,
+          "ACCOUNT POST /v1/orders": 1,
+          "USER GET /v1/accounts/:id": 5
+        },
+        "upstream": "http://backend:7794",
+        "user_token_ttl_seconds": 45
+      },
+      "before": {
+        "account_credentials_preserved": true,
+        "external_calls": 0,
+        "fixture": "stock-ai-private-backend-oidc-adapter-v1",
+        "privileged_routes": [
+          "GET /v1/accounts/:id",
+          "GET /v1/market/price"
+        ],
+        "routes": {
+          "USER GET /v1/accounts/:id": 1
+        },
+        "upstream": "http://backend:7794",
+        "user_token_ttl_seconds": 45
+      },
+      "credential_exchange_scoped": true
+    },
+    "session_stopped": true,
+    "simulated_order_persisted_with_stops": true,
+    "status": "passed"
+  },
+  "checkpoint": "complete",
+  "completed_at_utc": "2026-10-14T15:32:13.739588+00:00",
+  "failed_checkpoint_rollback": {
+    "all_records_and_history_match": true,
+    "all_services_healthy": true,
+    "checkpoint": "post-transfer-before-start",
+    "matching_keys_restored": true,
+    "status": "passed"
+  },
+  "fingerprints": {
+    "compose_inputs_sha256": "568d14be77a7e112d43a9bba20e059dc61f9eabec6ed8abd53e261ea1479ff8a",
+    "created_at_utc": "2026-10-14T15:32:13.738824+00:00",
+    "environment": "Release",
+    "non_image_env_sha256": "97c5eec94c1d35efd360636f10f0709c54308c1219eab3887377f8258ff3ae75",
+    "normalized_compose_sha256": "e6ee3356626f5902ebea5e366a7141b8fe2e16f9af92b92ac7f68499b57a3f29",
+    "previous_images": {
+      "agent-server": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+      "backend": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+      "console": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+      "llm-provider-server": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+      "oidc-gateway": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+    },
+    "project": "stock-ai-local-release",
+    "promoted_images": {
+      "agent-server": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+      "backend": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+      "console": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+      "llm-provider-server": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+      "oidc-gateway": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+    },
+    "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+    "schema_version": 2
+  },
+  "full_profile_failed_checkpoint": {
+    "all_data_history_keys_tls_fixture_env_compose_restored": true,
+    "all_original_services_healthy": true,
+    "named_volumes_preserved": true,
+    "status": "passed"
+  },
+  "migration": "passed",
+  "predeployment_backup_sha256": "05d92dea3f023889c2703b622f0c7ab116eaacf5116cd85839deb6c5e71df0a0",
+  "product_images": {
+    "agent-server": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+    "backend": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+    "console": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+    "llm-provider-server": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+    "oidc-gateway": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+  },
+  "product_images_rebuilt": false,
+  "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+  "schema": "stock-ai.t15-acceptance.v1",
+  "started_at_utc": "2026-10-14T15:29:08.397997+00:00",
+  "status": "passed"
+}
