@@ -1,0 +1,94 @@
+{
+  "schema": "stock-ai.local-release-ingress.v1",
+  "status": "passed",
+  "tested_at_utc": "2026-10-14T10:58:11.365541+00:00",
+  "client": "curl with certificate verification",
+  "redirect_chain": [
+    {
+      "host": "app.localrelease",
+      "port": 8443,
+      "path": "/",
+      "status": 302
+    },
+    {
+      "host": "app.localrelease",
+      "port": 8443,
+      "path": "/oauth2/start",
+      "status": 302
+    },
+    {
+      "host": "app.localrelease",
+      "port": 8443,
+      "path": "/realms/stock-ai-release/authorize",
+      "status": 302
+    },
+    {
+      "host": "app.localrelease",
+      "port": 8443,
+      "path": "/oauth2/callback",
+      "status": 303
+    },
+    {
+      "host": "app.localrelease",
+      "port": 8443,
+      "path": "/",
+      "status": 200
+    }
+  ],
+  "curl_location_final_status": 200,
+  "curl_location_redirects": 4,
+  "all_redirects_release_port": true,
+  "test_origin_visited": false,
+  "authenticated_api_status": 200,
+  "anonymous_api_status": 401,
+  "http_observations": [
+    {
+      "stage": "/",
+      "attempt": 1,
+      "http_status": 302
+    },
+    {
+      "stage": "/oauth2/start",
+      "attempt": 1,
+      "http_status": 302
+    },
+    {
+      "stage": "/realms/stock-ai-release/authorize",
+      "attempt": 1,
+      "http_status": 302
+    },
+    {
+      "stage": "/oauth2/callback",
+      "attempt": 1,
+      "http_status": 303
+    },
+    {
+      "stage": "/",
+      "attempt": 1,
+      "http_status": 200
+    },
+    {
+      "stage": "curl --location",
+      "attempt": 1,
+      "http_status": 200
+    },
+    {
+      "stage": "authenticated API",
+      "attempt": 1,
+      "http_status": 200
+    },
+    {
+      "stage": "anonymous API",
+      "attempt": 1,
+      "http_status": 401
+    }
+  ],
+  "rate_retry_policy": {
+    "statuses": [
+      429,
+      503
+    ],
+    "wait_seconds": 12,
+    "maximum_retries_per_request": 5
+  }
+}

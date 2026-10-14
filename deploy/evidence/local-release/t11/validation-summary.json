@@ -1,0 +1,23 @@
+{
+  "schema": "stock-ai.local-release-validation.v1",
+  "status": "passed",
+  "scope": "Ticket 11 isolated local Release configuration and real ingress acceptance",
+  "tests": [
+    {"command": "python3 -m unittest discover -s scripts/test -p test_*.py", "passed": 110},
+    {"command": "python3 -m unittest discover -s scripts/local-test -p test_prepare.py", "passed": 4},
+    {"command": "python3 -m unittest discover -s scripts/local-release -p test_*.py", "passed": 10},
+    {"command": "go test ./...", "directory": "scripts/local-test", "passed": 4}
+  ],
+  "release_mutations_rejected": 17,
+  "secret_placeholders_and_symlinks_rejected": true,
+  "failed_lint_blocks_startup": true,
+  "release_startup_disables_builds": true,
+  "release_static_user_token_authentication": "disabled",
+  "five_product_images": "exactly T10-promoted; none rebuilt",
+  "auxiliary_fixture": "Test auxiliary build; recorded separately in deploy/local-release/auxiliary-images.json",
+  "release_material": "generated locally into ignored .local-release; private file and directory modes verified",
+  "test_stack": "stock-ai-t10-cert",
+  "login_rate_limit": "unchanged 5 requests/minute; real immediate rerun recorded 429 then 200 after 12 seconds",
+  "business_migration_acceptance": "reserved for Ticket 15",
+  "public_dns_tls_external_idp": "out of local acceptance scope"
+}

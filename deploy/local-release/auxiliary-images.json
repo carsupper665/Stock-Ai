@@ -1,0 +1,20 @@
+{
+  "schema": "stock-ai.local-auxiliary-images.v1",
+  "nginx": {
+    "status": "tested",
+    "image": "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+    "evidence": "deploy/evidence/local-test/certification/20261014T103650Z/public_login_redirects.json"
+  },
+  "idp": {
+    "status": "tested",
+    "image": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:73058bc3eb41ca6a0a2b38f38df2ab54ffe459dd04868d39599ea479d0c91469",
+    "evidence": "scripts/local-test/fixture_test.go",
+    "scope": "Auxiliary fixture only: Test defaults and isolated Release code/PKCE/token/redirect/logout identity tests. Product promotion is unchanged.",
+    "test_command": "go test ./... (scripts/local-test); 4 tests passed",
+    "source_sha256": {
+      "scripts/local-test/fixture.go": "ae767e52c87cd091006789fea23f13437778f40b07918629ab450886d85d5b5d",
+      "scripts/local-test/Dockerfile": "87e0120fd5e7e5cdb4e69f269f24fb2f27ac3bab038e6b29c3d258c2904bccc4",
+      "scripts/local-test/go.mod": "ba833aa1caf580bfedab508fbdd52d274d3ebd3238c75bad91ec244b11663499"
+    }
+  }
+}
