@@ -66,9 +66,9 @@ def _replace_validated(staged: Path, destination: Path, validator, gid: int) -> 
         raise PrepareError(f"cannot install local key material: {destination.name}") from error
 
 
-def _openssl_cert(path: Path) -> None:
-    _run("openssl", "x509", "-in", str(path), "-noout", "-checkhost", "app.localtest")
-    _run("openssl", "x509", "-in", str(path), "-noout", "-checkhost", "idp.localtest")
+def _openssl_cert(path: Path, hosts=("app.localtest", "idp.localtest")) -> None:
+    for host in hosts:
+        _run("openssl", "x509", "-in", str(path), "-noout", "-checkhost", host)
     _run("openssl", "x509", "-in", str(path), "-noout", "-checkend", "0")
 
 
@@ -79,8 +79,8 @@ def _openssl_private_key(path: Path) -> None:
         raise PrepareError(f"private key has an unexpected algorithm or size: {path.name}")
 
 
-def _validate_tls_pair(cert: Path, key: Path) -> None:
-    _openssl_cert(cert)
+def _validate_tls_pair(cert: Path, key: Path, hosts=("app.localtest", "idp.localtest")) -> None:
+    _openssl_cert(cert, hosts)
     _openssl_private_key(key)
     cert_public = _run("openssl", "x509", "-in", str(cert), "-pubkey", "-noout")
     key_public = _run("openssl", "pkey", "-in", str(key), "-pubout")
@@ -88,29 +88,29 @@ def _validate_tls_pair(cert: Path, key: Path) -> None:
         raise PrepareError("local TLS certificate and private key do not match")
 
 
-def _ensure_tls_pair(cert: Path, key: Path, gid: int) -> None:
+def _ensure_tls_pair(cert: Path, key: Path, gid: int, hosts=("app.localtest", "idp.localtest")) -> None:
     cert_exists, key_exists = cert.exists() or cert.is_symlink(), key.exists() or key.is_symlink()
     if cert_exists != key_exists:
         raise PrepareError("partial TLS certificate/key state; refusing to rotate existing material")
     if cert_exists:
-        _validate_tls_pair(cert, key)
+        _validate_tls_pair(cert, key, hosts)
         _secure_file(cert, gid)
         _secure_file(key, gid)
         return
 
-    with tempfile.TemporaryDirectory(prefix="tls-stage-", dir=CERTS) as temporary:
+    with tempfile.TemporaryDirectory(prefix="tls-stage-", dir=cert.parent) as temporary:
         stage = Path(temporary)
         staged_cert, staged_key = stage / "fullchain.pem", stage / "privkey.pem"
         _run(
             "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
             "-keyout", str(staged_key), "-out", str(staged_cert), "-days", "2",
-            "-subj", "/CN=local-test-fixture",
-            "-addext", "subjectAltName=DNS:app.localtest,DNS:idp.localtest",
+            "-subj", f"/CN={hosts[0]}",
+            "-addext", "subjectAltName=" + ",".join(f"DNS:{host}" for host in hosts),
             "-addext", "basicConstraints=critical,CA:TRUE",
             "-addext", "keyUsage=critical,digitalSignature,keyCertSign,cRLSign",
             "-addext", "extendedKeyUsage=serverAuth",
         )
-        _validate_tls_pair(staged_cert, staged_key)
+        _validate_tls_pair(staged_cert, staged_key, hosts)
         os.replace(staged_cert, cert)
         os.replace(staged_key, key)
     _secure_file(cert, gid)
@@ -122,7 +122,7 @@ def _ensure_jwks_key(path: Path, gid: int) -> None:
         _openssl_private_key(path)
         _secure_file(path, gid)
         return
-    with tempfile.TemporaryDirectory(prefix="jwks-stage-", dir=CERTS) as temporary:
+    with tempfile.TemporaryDirectory(prefix="jwks-stage-", dir=path.parent) as temporary:
         staged = Path(temporary) / path.name
         _run("openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", str(staged), stdout=subprocess.DEVNULL)
         _openssl_private_key(staged)
@@ -143,13 +143,14 @@ def _valid_base64_key(contents: bytes) -> bool:
 def _secret_value(name: str) -> tuple[bytes, object]:
     if name == "stock-ai-test_oidc_client_secret":
         return b"local-test-oidc-client-secret-only\n", lambda data: data == b"local-test-oidc-client-secret-only"
-    if name in {"stock-ai-test_backend_account_token_key", "stock-ai-test_llm_master_key", "stock-ai-test_oidc_cookie_key"}:
+    if name.endswith(("_backend_account_token_key", "_llm_master_key", "_oidc_cookie_key")):
         return (base64.b64encode(secrets.token_bytes(32)) + b"\n", _valid_base64_key)
     return (secrets.token_urlsafe(48).encode("ascii") + b"\n", _valid_token)
 
 
-def _write_secret(name: str, gid: int) -> None:
-    path = SECRETS / name
+def _write_secret(name: str, gid: int, directory: Path | None = None) -> None:
+    directory = directory if directory is not None else SECRETS
+    path = directory / name
     generated, validator = _secret_value(name)
     if path.exists() or path.is_symlink():
         if path.is_symlink() or not path.is_file():
@@ -163,7 +164,7 @@ def _write_secret(name: str, gid: int) -> None:
     value = generated[:-1]
     if not validator(value):
         raise PrepareError(f"generated secret format is invalid: {name}")
-    fd, temporary = tempfile.mkstemp(prefix=f".{name}.", dir=SECRETS)
+    fd, temporary = tempfile.mkstemp(prefix=f".{name}.", dir=directory)
     staged = Path(temporary)
     try:
         with os.fdopen(fd, "wb") as stream:

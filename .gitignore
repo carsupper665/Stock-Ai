@@ -41,5 +41,6 @@ __pycache__/
 .opencode/*
 .scratch/*
 /.local-test/
+/.local-release/
 /.ticket 12 validation/
 /frontend/design_handoff_agent_console/*

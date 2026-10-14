@@ -1,0 +1,147 @@
+services:
+  backend:
+    user: "65532:${LOCAL_RELEASE_GID:?set private Release container group}"
+    environment:
+      SSL_CERT_FILE: /run/release-tls/fullchain.pem
+      ALLOW_STATIC_USER_TOKEN: "false"
+    volumes:
+      - "${RELEASE_TLS_DIR}/fullchain.pem:/run/release-tls/fullchain.pem:ro"
+    depends_on:
+      idp:
+        condition: service_healthy
+  agent-server:
+    user: "65532:${LOCAL_RELEASE_GID:?set private Release container group}"
+    environment:
+      SSL_CERT_FILE: /run/release-tls/fullchain.pem
+    volumes:
+      - "${RELEASE_TLS_DIR}/fullchain.pem:/run/release-tls/fullchain.pem:ro"
+  llm-provider-server:
+    user: "65532:${LOCAL_RELEASE_GID:?set private Release container group}"
+    environment:
+      SSL_CERT_FILE: /run/release-tls/fullchain.pem
+    volumes:
+      - "${RELEASE_TLS_DIR}/fullchain.pem:/run/release-tls/fullchain.pem:ro"
+    depends_on:
+      idp:
+        condition: service_healthy
+  console:
+    user: "65532:${LOCAL_RELEASE_GID:?set private Release container group}"
+    environment:
+      SSL_CERT_FILE: /run/release-tls/fullchain.pem
+    volumes:
+      - "${RELEASE_TLS_DIR}/fullchain.pem:/run/release-tls/fullchain.pem:ro"
+  oidc-gateway:
+    user: "65532:${LOCAL_RELEASE_GID:?set private Release container group}"
+    image: "${OIDC_GATEWAY_IMAGE:?set OIDC_GATEWAY_IMAGE to the approved OIDC Gateway image reference}"
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    pids_limit: 128
+    environment:
+      SSL_CERT_FILE: /run/release-tls/fullchain.pem
+      STOCK_AI_ENVIRONMENT: Release
+      OIDC_GATEWAY_ADDR: ":4180"
+      OIDC_ISSUER: "${OIDC_ISSUER:?set the stable Release HTTPS issuer}"
+      OIDC_AUTHORIZATION_URL: "${OIDC_AUTHORIZATION_URL:?set the Release authorization endpoint}"
+      OIDC_TOKEN_URL: "${OIDC_TOKEN_URL:?set the Release token endpoint}"
+      OIDC_JWKS_URL: "${OIDC_JWKS_URL:?set the stable Release HTTPS JWKS endpoint}"
+      OIDC_END_SESSION_URL: "${OIDC_END_SESSION_URL:?set the Release logout endpoint}"
+      OIDC_CLIENT_ID: stock-ai-release
+      OIDC_CLIENT_SECRET_FILE: /run/secrets/stock-ai-release_oidc_client_secret
+      OIDC_COOKIE_KEY_FILE: /run/secrets/stock-ai-release_oidc_cookie_key
+      OIDC_REDIRECT_URI: "https://${RELEASE_APP_HOST:?set the Release app DNS hostname}/oauth2/callback"
+      OIDC_POST_LOGOUT_URI: "https://${RELEASE_APP_HOST}/"
+      OIDC_COOKIE_NAME: __Host-stock-ai-release-session
+      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the approved stable Release subject}"
+    secrets:
+      - source: release_oidc_client_secret
+        target: stock-ai-release_oidc_client_secret
+      - source: release_oidc_cookie_key
+        target: stock-ai-release_oidc_cookie_key
+    volumes:
+      - "${RELEASE_TLS_DIR}/fullchain.pem:/run/release-tls/fullchain.pem:ro"
+    depends_on:
+      idp:
+        condition: service_healthy
+    networks: [edge]
+    expose: ["4180"]
+    healthcheck:
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:4180/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  nginx:
+    image: "${NGINX_IMAGE:?set NGINX_IMAGE to an approved pinned Nginx image reference}"
+    restart: unless-stopped
+    init: true
+    user: "101:${LOCAL_RELEASE_GID:?set the host-private Release container group}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    pids_limit: 128
+    environment:
+      RELEASE_APP_HOST: "${RELEASE_APP_HOST:?set the Release app DNS hostname}"
+    command:
+      - /bin/sh
+      - -ec
+      - envsubst '$$RELEASE_APP_HOST' < /etc/nginx/templates/release-edge.conf.template > /tmp/release-edge.conf; exec nginx -c /etc/nginx/release-nginx.conf -g 'daemon off;'
+    ports:
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - ../nginx/release-nginx.conf:/etc/nginx/release-nginx.conf:ro
+      - ../nginx/release-edge.conf.template:/etc/nginx/templates/release-edge.conf.template:ro
+      - "${RELEASE_TLS_DIR:?set the Release TLS directory}:/run/release-tls:ro"
+    networks: [edge]
+    depends_on:
+      idp:
+        condition: service_healthy
+      console:
+        condition: service_healthy
+      oidc-gateway:
+        condition: service_healthy
+
+  idp:
+    image: "${LOCAL_RELEASE_FIXTURE_IMAGE:?set approved immutable fixture digest}"
+    user: "65532:${LOCAL_RELEASE_GID}"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    pids_limit: 64
+    environment:
+      FIXTURE_CONFIG: /fixture/config.json
+    volumes:
+      - "${RELEASE_TLS_DIR}:/fixture:ro"
+    secrets:
+      - source: release_oidc_client_secret
+        target: stock-ai-release_oidc_client_secret
+      - source: release_fixture_provider_secret
+        target: stock-ai-release_fixture_provider_secret
+    expose: ["8443", "18080"]
+    healthcheck:
+      test: ["CMD", "/local-fixture", "--healthcheck"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+    networks:
+      edge:
+        aliases: [app.localrelease]
+      application:
+        aliases: [fake-provider.localrelease, app.localrelease]
+
+secrets:
+  release_fixture_provider_secret:
+    file: "${STOCK_AI_SECRETS_DIR}/stock-ai-release_fixture_provider_secret"
+  release_oidc_client_secret:
+    file: "${STOCK_AI_SECRETS_DIR:?set Release secrets directory}/stock-ai-release_oidc_client_secret"
+  release_oidc_cookie_key:
+    file: "${STOCK_AI_SECRETS_DIR}/stock-ai-release_oidc_cookie_key"

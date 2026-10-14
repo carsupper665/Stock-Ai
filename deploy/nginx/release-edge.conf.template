@@ -1,0 +1,338 @@
+upstream stock_ai_console { server console:8088; keepalive 16; }
+upstream stock_ai_gateway { server oidc-gateway:4180; keepalive 8; }
+
+server {
+    listen 8443 ssl default_server;
+    server_name app.localrelease;
+    set $release_host app.localrelease;
+    absolute_redirect off;
+    if ($host != $release_host) { return 421; }
+
+    ssl_certificate /run/release-tls/fullchain.pem;
+    ssl_certificate_key /run/release-tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    ssl_session_cache shared:TLS:10m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header X-Frame-Options "DENY" always;
+
+    limit_conn connections_per_ip 30;
+
+    location = /oauth2/start {
+        limit_req zone=login_per_ip burst=5 nodelay;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Accept $http_accept;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Original-URL "";
+        proxy_set_header X-Original-URI "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header X-Auth-Request-Access-Token "";
+    }
+
+    location = /oauth2/callback {
+        limit_req zone=login_per_ip burst=10 nodelay;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Accept $http_accept;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Original-URL "";
+        proxy_set_header X-Original-URI "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header X-Auth-Request-Access-Token "";
+    }
+
+    location ^~ /oauth2/ {
+        limit_req zone=per_ip burst=30 nodelay;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Accept $http_accept;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Original-URL "";
+        proxy_set_header X-Original-URI "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header X-Auth-Request-Access-Token "";
+    }
+
+    location = /_oauth2_auth {
+        internal;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_gateway/oauth2/auth;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Accept $http_accept;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Original-URL "";
+        proxy_set_header X-Original-URI "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header X-Auth-Request-Access-Token "";
+    }
+
+    location @login {
+        return 302 /oauth2/start;
+    }
+
+    location = /oauth2/auth {
+        return 404;
+    }
+
+    # Only public protocol routes; fixture control routes remain private.
+    location ~ ^/realms/stock-ai-release/(?:authorize|token|jwks|logout|\.well-known/openid-configuration)$ {
+        proxy_pass https://idp:8443;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /run/release-tls/fullchain.pem;
+        proxy_ssl_server_name on;
+        proxy_ssl_name app.localrelease;
+        proxy_set_header Host app.localrelease:8443;
+    }
+
+    location = /healthz {
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location ^~ /assets/ {
+        limit_req zone=per_ip burst=40 nodelay;
+        limit_except GET HEAD { deny all; }
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_console;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+    }
+
+    location ~ ^/v1(?:/|$) {
+        limit_req zone=per_ip burst=40 nodelay;
+        auth_request /_v1_auth;
+        auth_request_set $oidc_subject $upstream_http_x_auth_request_subject;
+        auth_request_set $oidc_user $upstream_http_x_auth_request_user;
+        auth_request_set $oidc_email $upstream_http_x_auth_request_email;
+        auth_request_set $oidc_access_token $upstream_http_x_auth_request_access_token;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_console;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header Content-Type $content_type;
+        proxy_set_header Content-Length $content_length;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header Authorization $console_authorization;
+        proxy_set_header X-Auth-Request-Subject $oidc_subject;
+        proxy_set_header X-Auth-Request-User $oidc_user;
+        proxy_set_header X-Auth-Request-Email $oidc_email;
+        proxy_set_header X-Auth-Request-Access-Token $oidc_access_token;
+    }
+
+    location = /_v1_auth {
+        internal;
+        if ($http_authorization != "") { return 204; }
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_gateway/oauth2/auth;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Accept $http_accept;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Original-URL "";
+        proxy_set_header X-Original-URI "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header X-Auth-Request-Access-Token "";
+    }
+
+    location ^~ /agent/ {
+        if ($http_authorization != "") { return 403; }
+        limit_req zone=per_ip burst=40 nodelay;
+        auth_request /_oauth2_auth;
+        auth_request_set $oidc_subject $upstream_http_x_auth_request_subject;
+        auth_request_set $oidc_user $upstream_http_x_auth_request_user;
+        auth_request_set $oidc_email $upstream_http_x_auth_request_email;
+        auth_request_set $oidc_access_token $upstream_http_x_auth_request_access_token;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_console;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header Content-Type $content_type;
+        proxy_set_header Content-Length $content_length;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject $oidc_subject;
+        proxy_set_header X-Auth-Request-User $oidc_user;
+        proxy_set_header X-Auth-Request-Email $oidc_email;
+        proxy_set_header X-Auth-Request-Access-Token $oidc_access_token;
+    }
+
+    # The Gateway redirects failed logins to this public frontend route. Keep
+    # /login and /login/ outside auth_request so an IdP error cannot loop back
+    # into /oauth2/start; API locations remain authenticated above.
+    location ~ ^/login/?$ {
+        limit_req zone=per_ip burst=20 nodelay;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_console;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header Forwarded "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject "";
+        proxy_set_header X-Auth-Request-User "";
+        proxy_set_header X-Auth-Request-Email "";
+        proxy_set_header X-Auth-Request-Access-Token "";
+    }
+
+    location ^~ /llm/ {
+        if ($http_authorization != "") { return 403; }
+        limit_req zone=per_ip burst=40 nodelay;
+        auth_request /_oauth2_auth;
+        auth_request_set $oidc_subject $upstream_http_x_auth_request_subject;
+        auth_request_set $oidc_user $upstream_http_x_auth_request_user;
+        auth_request_set $oidc_email $upstream_http_x_auth_request_email;
+        auth_request_set $oidc_access_token $upstream_http_x_auth_request_access_token;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_console;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header Content-Type $content_type;
+        proxy_set_header Content-Length $content_length;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header Authorization "";
+        proxy_set_header X-Auth-Request-Subject $oidc_subject;
+        proxy_set_header X-Auth-Request-User $oidc_user;
+        proxy_set_header X-Auth-Request-Email $oidc_email;
+        proxy_set_header X-Auth-Request-Access-Token $oidc_access_token;
+    }
+
+    location / {
+        limit_req zone=per_ip burst=40 nodelay;
+        auth_request /_oauth2_auth;
+        error_page 401 = @login;
+        auth_request_set $oidc_subject $upstream_http_x_auth_request_subject;
+        auth_request_set $oidc_user $upstream_http_x_auth_request_user;
+        auth_request_set $oidc_email $upstream_http_x_auth_request_email;
+        auth_request_set $oidc_access_token $upstream_http_x_auth_request_access_token;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_console;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header Content-Type $content_type;
+        proxy_set_header Content-Length $content_length;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Server "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Original-URL "";
+        proxy_set_header X-Original-URI "";
+        proxy_set_header Authorization $console_authorization;
+        proxy_set_header X-Auth-Request-Subject $oidc_subject;
+        proxy_set_header X-Auth-Request-User $oidc_user;
+        proxy_set_header X-Auth-Request-Email $oidc_email;
+        proxy_set_header X-Auth-Request-Preferred-Username "";
+        proxy_set_header X-Auth-Request-Access-Token $oidc_access_token;
+    }
+}

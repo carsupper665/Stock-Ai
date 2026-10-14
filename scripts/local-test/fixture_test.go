@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,83 @@ func testFixture(t *testing.T) (*fixture, *httptest.Server) {
 	}
 	f := &fixture{key: key, codes: make(map[string]authorization)}
 	return f, httptest.NewServer(f.issuerHandler())
+}
+
+func TestReleaseIdentityIsolation(t *testing.T) {
+	f, oldServer := testFixture(t)
+	oldServer.Close()
+	f.config = fixtureConfig{Issuer: "https://app.localrelease:8443/realms/stock-ai-release",
+		ClientID: "stock-ai-release", ClientSecret: strings.Repeat("release-secret", 4),
+		Audience: "stock-ai-api-release", Subject: "local-release-user", KeyID: "local-release-signing-key",
+		RedirectURI: "https://app.localrelease:8443/oauth2/callback", LogoutURI: "https://app.localrelease:8443/"}
+	server := httptest.NewServer(f.issuerHandler())
+	defer server.Close()
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, redirect := range []string{f.config.RedirectURI, "https://app.localtest/oauth2/callback"} {
+		query := url.Values{"client_id": {f.config.ClientID}, "response_type": {"code"}, "code_challenge_method": {"S256"},
+			"redirect_uri": {redirect}, "state": {"release-state"}, "nonce": {"release-nonce"}, "code_challenge": {pkce("release-verifier")}}
+		response, err := client.Get(server.URL + "/realms/stock-ai-release/authorize?" + query.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if redirect != f.config.RedirectURI {
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatal("accepted Test redirect")
+			}
+			continue
+		}
+		if response.StatusCode != http.StatusFound {
+			t.Fatal("Release authorization failed")
+		}
+		location, _ := url.Parse(response.Header.Get("Location"))
+		code := location.Query().Get("code")
+		form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "code_verifier": {"release-verifier"}}
+		for _, secret := range []string{clientKey, f.config.ClientSecret} {
+			request, _ := http.NewRequest(http.MethodPost, server.URL+"/realms/stock-ai-release/token", strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.SetBasicAuth(f.config.ClientID, secret)
+			tokenResponse, err := client.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if secret == clientKey {
+				tokenResponse.Body.Close()
+				if tokenResponse.StatusCode != http.StatusUnauthorized {
+					t.Fatal("accepted Test secret")
+				}
+				continue
+			}
+			if tokenResponse.StatusCode != http.StatusOK {
+				t.Fatal("Release token exchange failed")
+			}
+			var raw map[string]json.RawMessage
+			if err := json.NewDecoder(tokenResponse.Body).Decode(&raw); err != nil {
+				t.Fatal(err)
+			}
+			tokenResponse.Body.Close()
+			var accessToken string
+			_ = json.Unmarshal(raw["access_token"], &accessToken)
+			parts := strings.Split(accessToken, ".")
+			if len(parts) != 3 {
+				t.Fatal("missing signed token")
+			}
+			body, _ := base64.RawURLEncoding.DecodeString(parts[1])
+			var claims map[string]any
+			_ = json.Unmarshal(body, &claims)
+			if claims["iss"] != f.config.Issuer || claims["aud"] != f.config.Audience || claims["sub"] != f.config.Subject {
+				t.Fatal("Release token reused Test claims")
+			}
+		}
+	}
+	response, err := client.Get(server.URL + "/realms/stock-ai-release/logout?post_logout_redirect_uri=" + url.QueryEscape("https://app.localtest/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatal("accepted Test logout redirect")
+	}
 }
 
 func TestDiscoveryRoute(t *testing.T) {

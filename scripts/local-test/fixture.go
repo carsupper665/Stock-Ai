@@ -9,12 +9,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,6 +37,7 @@ type authorization struct {
 }
 
 type fixture struct {
+	config        fixtureConfig
 	mu            sync.Mutex
 	key           *rsa.PrivateKey
 	codes         map[string]authorization
@@ -43,9 +46,80 @@ type fixture struct {
 	providerCalls int
 }
 
+// The auxiliary fixture is configured at runtime; product images are never rebuilt.
+type fixtureConfig struct {
+	Issuer             string `json:"issuer"`
+	ClientID           string `json:"client_id"`
+	ClientSecret       string `json:"-"`
+	ClientSecretFile   string `json:"client_secret_file"`
+	ProviderSecret     string `json:"-"`
+	ProviderSecretFile string `json:"provider_secret_file"`
+	Audience           string `json:"audience"`
+	Subject            string `json:"subject"`
+	RedirectURI        string `json:"redirect_uri"`
+	LogoutURI          string `json:"logout_uri"`
+	KeyID              string `json:"key_id"`
+}
+
+func (f *fixture) identity() fixtureConfig {
+	if f.config.Issuer != "" {
+		return f.config
+	}
+	return fixtureConfig{Issuer: issuer, ClientID: clientID, ClientSecret: clientKey,
+		ProviderSecret: providerKey, Audience: "stock-ai-api-test", Subject: "local-test-user",
+		RedirectURI: "https://app.localtest/oauth2/callback", LogoutURI: "https://app.localtest/", KeyID: keyID}
+}
+
+func readFixtureConfig(path string) (fixtureConfig, error) {
+	var c fixtureConfig
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return c, err
+	}
+	if err = json.Unmarshal(raw, &c); err != nil {
+		return c, err
+	}
+	for _, value := range []string{c.Issuer, c.ClientID, c.Audience, c.Subject, c.RedirectURI, c.LogoutURI, c.KeyID} {
+		if value == "" || strings.Contains(strings.ToLower(value), "test") {
+			return c, fmt.Errorf("invalid isolated fixture identity")
+		}
+	}
+	for _, value := range []string{c.Issuer, c.RedirectURI, c.LogoutURI} {
+		u, err := url.Parse(value)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+			return c, fmt.Errorf("invalid fixture URL")
+		}
+	}
+	for path, target := range map[string]*string{c.ClientSecretFile: &c.ClientSecret, c.ProviderSecretFile: &c.ProviderSecret} {
+		secret, err := os.ReadFile(path)
+		if err != nil {
+			return c, fmt.Errorf("fixture secret unavailable")
+		}
+		*target = strings.TrimSpace(string(secret))
+		if len(*target) < 32 || strings.Contains(strings.ToLower(*target), "test") {
+			return c, fmt.Errorf("invalid fixture secret")
+		}
+	}
+	return c, nil
+}
+
 func main() {
+	var configured fixtureConfig
+	listen := ":9443"
+	if path := os.Getenv("FIXTURE_CONFIG"); path != "" {
+		var err error
+		configured, err = readFixtureConfig(path)
+		if err != nil {
+			log.Fatal("isolated fixture configuration invalid")
+		}
+		u, _ := url.Parse(configured.Issuer)
+		if u.Port() == "" {
+			log.Fatal("fixture issuer requires explicit port")
+		}
+		listen = ":" + u.Port()
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--healthcheck" {
-		for _, address := range []string{"127.0.0.1:9443", "127.0.0.1:18080"} {
+		for _, address := range []string{"127.0.0.1" + listen, "127.0.0.1:18080"} {
 			conn, err := net.DialTimeout("tcp", address, time.Second)
 			if err != nil {
 				os.Exit(1)
@@ -70,7 +144,7 @@ func main() {
 	if !ok {
 		log.Fatal("fixture signing key has invalid type")
 	}
-	f := &fixture{key: key, codes: make(map[string]authorization)}
+	f := &fixture{key: key, codes: make(map[string]authorization), config: configured}
 	issuerMux := f.issuerHandler()
 	providerMux := f.providerHandler()
 
@@ -81,19 +155,21 @@ func main() {
 		}
 	}()
 	log.Print("local deterministic OIDC/JWKS fixture listening on :9443")
-	if err := http.ListenAndServeTLS(":9443", "/fixture/fullchain.pem", "/fixture/privkey.pem", issuerMux); err != nil {
+	if err := http.ListenAndServeTLS(listen, "/fixture/fullchain.pem", "/fixture/privkey.pem", issuerMux); err != nil {
 		log.Fatalf("OIDC fixture stopped: %v", err)
 	}
 }
 
 func (f *fixture) issuerHandler() http.Handler {
+	u, _ := url.Parse(f.identity().Issuer)
+	realm := u.Path
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	mux.HandleFunc("/realms/stock-ai-test/.well-known/openid-configuration", f.discovery)
-	mux.HandleFunc("/realms/stock-ai-test/authorize", f.authorize)
-	mux.HandleFunc("/realms/stock-ai-test/token", f.token)
-	mux.HandleFunc("/realms/stock-ai-test/jwks", f.jwks)
-	mux.HandleFunc("/realms/stock-ai-test/logout", f.logout)
+	mux.HandleFunc(realm+"/.well-known/openid-configuration", f.discovery)
+	mux.HandleFunc(realm+"/authorize", f.authorize)
+	mux.HandleFunc(realm+"/token", f.token)
+	mux.HandleFunc(realm+"/jwks", f.jwks)
+	mux.HandleFunc(realm+"/logout", f.logout)
 	mux.HandleFunc("/__fixture/next", f.nextCase)
 	mux.HandleFunc("/__fixture/outage", f.setOutage)
 	return mux
@@ -117,6 +193,7 @@ func (f *fixture) down(w http.ResponseWriter) bool {
 }
 
 func (f *fixture) discovery(w http.ResponseWriter, _ *http.Request) {
+	issuer := f.identity().Issuer
 	if f.down(w) {
 		return
 	}
@@ -133,6 +210,7 @@ func (f *fixture) discovery(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (f *fixture) authorize(w http.ResponseWriter, r *http.Request) {
+	clientID := f.identity().ClientID
 	if f.down(w) {
 		return
 	}
@@ -147,7 +225,7 @@ func (f *fixture) authorize(w http.ResponseWriter, r *http.Request) {
 	f.scenarioNext = ""
 	f.mu.Unlock()
 	redirect, err := url.Parse(q.Get("redirect_uri"))
-	if err != nil || redirect.Scheme != "https" || redirect.Host != "app.localtest" || redirect.Path != "/oauth2/callback" {
+	if err != nil || q.Get("redirect_uri") != f.identity().RedirectURI {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_redirect_uri"})
 		return
 	}
@@ -179,7 +257,7 @@ func (f *fixture) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client, secret, ok := r.BasicAuth()
-	if !ok || client != clientID || secret != clientKey {
+	if !ok || client != f.identity().ClientID || secret != f.identity().ClientSecret {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_client"})
 		return
 	}
@@ -196,9 +274,9 @@ func (f *fixture) token(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
 		return
 	}
-	subject := "local-test-user"
-	tokenIssuer, audience := issuer, clientID
-	apiAudience := "stock-ai-api-test"
+	subject := f.identity().Subject
+	tokenIssuer, audience := f.identity().Issuer, f.identity().ClientID
+	apiAudience := f.identity().Audience
 	expiresIn := int64(3600)
 	exp := time.Now().Add(time.Hour).Unix()
 	accessExp := exp
@@ -219,7 +297,7 @@ func (f *fixture) token(w http.ResponseWriter, r *http.Request) {
 	}
 	idClaims := map[string]any{
 		"iss": tokenIssuer, "aud": audience, "sub": subject, "nonce": a.nonce,
-		"preferred_username": "local-test-user", "email": "local-test@example.invalid", "exp": exp,
+		"preferred_username": f.identity().Subject, "email": f.identity().Subject + "@example.invalid", "exp": exp,
 	}
 	accessClaims := map[string]any{"iss": tokenIssuer, "aud": apiAudience, "sub": subject, "exp": accessExp, "nbf": time.Now().Add(-time.Minute).Unix()}
 	idToken, err := f.signToken("JWT", idClaims)
@@ -241,7 +319,7 @@ func (f *fixture) jwks(w http.ResponseWriter, _ *http.Request) {
 	}
 	n := base64.RawURLEncoding.EncodeToString(f.key.PublicKey.N.Bytes())
 	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(f.key.PublicKey.E)).Bytes())
-	writeJSON(w, http.StatusOK, map[string]any{"keys": []any{map[string]string{"kty": "RSA", "use": "sig", "alg": "RS256", "kid": keyID, "n": n, "e": e}}})
+	writeJSON(w, http.StatusOK, map[string]any{"keys": []any{map[string]string{"kty": "RSA", "use": "sig", "alg": "RS256", "kid": f.identity().KeyID, "n": n, "e": e}}})
 }
 
 func (f *fixture) logout(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +327,7 @@ func (f *fixture) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	postLogout := r.URL.Query().Get("post_logout_redirect_uri")
-	if postLogout != "https://app.localtest/" {
+	if postLogout != f.identity().LogoutURI {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_logout_uri"})
 		return
 	}
@@ -290,7 +368,7 @@ func (f *fixture) setOutage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fixture) complete(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer "+providerKey {
+	if r.Header.Get("Authorization") != "Bearer "+f.identity().ProviderSecret {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_api_key"})
 		return
 	}
@@ -321,7 +399,7 @@ func (f *fixture) complete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fixture) signToken(typ string, claims map[string]any) (string, error) {
-	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": keyID, "typ": typ})
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": f.identity().KeyID, "typ": typ})
 	if err != nil {
 		return "", err
 	}
