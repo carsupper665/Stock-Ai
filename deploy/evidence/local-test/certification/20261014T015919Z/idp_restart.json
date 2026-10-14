@@ -1,0 +1,13 @@
+{
+  "details": {
+    "duration_seconds": 30.243,
+    "fixture_restarted": true,
+    "health": "healthy",
+    "login_after_restart": true
+  },
+  "finished_at_utc": "2026-10-14T02:00:59.125958+00:00",
+  "name": "idp_restart",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T02:00:31.914838+00:00",
+  "status": "passed"
+}

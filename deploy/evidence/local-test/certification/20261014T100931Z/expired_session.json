@@ -1,0 +1,12 @@
+{
+  "details": {
+    "duration_seconds": 6.49,
+    "session_status": 401,
+    "short_lived_session_expired": true
+  },
+  "finished_at_utc": "2026-10-14T10:09:45.118994+00:00",
+  "name": "expired_session",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:09:38.628535+00:00",
+  "status": "passed"
+}

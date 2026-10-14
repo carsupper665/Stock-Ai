@@ -1,0 +1,18 @@
+{
+  "details": {
+    "account_created": true,
+    "duration_seconds": 5.896,
+    "logout_cleared_session": true,
+    "model_created": true,
+    "provider_created": true,
+    "relogin_succeeded": true,
+    "run_status": "completed",
+    "session_created": true,
+    "session_stopped": true
+  },
+  "finished_at_utc": "2026-10-14T10:09:37.458986+00:00",
+  "name": "secured_product_flow",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:09:31.563278+00:00",
+  "status": "passed"
+}

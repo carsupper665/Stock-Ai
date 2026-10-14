@@ -1,0 +1,28 @@
+{
+  "checks": {
+    "flattened_filesystem_inventory": "passed",
+    "sbom": "passed",
+    "vulnerability_scan": "passed"
+  },
+  "critical_high_findings": 0,
+  "images": {
+    "agent-server": {
+      "build_result_digest": "sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42"
+    },
+    "backend": {
+      "build_result_digest": "sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9"
+    },
+    "console": {
+      "build_result_digest": "sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9"
+    },
+    "llm-provider-server": {
+      "build_result_digest": "sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e"
+    },
+    "oidc-gateway": {
+      "build_result_digest": "sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+    }
+  },
+  "revision": "906326524f70acf77dcffeff86e9433896830509",
+  "source_tree": "6395651d7d61485dfd0d8f9fc763c00ad9eb2e17",
+  "status": "pass"
+}

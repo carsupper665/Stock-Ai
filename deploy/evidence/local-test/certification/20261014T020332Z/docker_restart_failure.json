@@ -1,0 +1,14 @@
+{
+  "details": {
+    "backend_health_after": "healthy",
+    "backend_health_before": "healthy",
+    "duration_seconds": 2.235,
+    "invalid_restart_rejected": true,
+    "stderr_recorded": false
+  },
+  "finished_at_utc": "2026-10-14T02:04:49.937505+00:00",
+  "name": "docker_restart_failure",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T02:04:47.702345+00:00",
+  "status": "passed"
+}

@@ -1,0 +1,18 @@
+{
+  "details": {
+    "duration_seconds": 2.196,
+    "exact_test_digests": true,
+    "mutable_tags_accepted": false,
+    "services_checked": [
+      "backend",
+      "agent-server",
+      "llm-provider-server",
+      "console"
+    ]
+  },
+  "finished_at_utc": "2026-10-14T10:10:01.165646+00:00",
+  "name": "release_exact_digest",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:09:58.969774+00:00",
+  "status": "passed"
+}

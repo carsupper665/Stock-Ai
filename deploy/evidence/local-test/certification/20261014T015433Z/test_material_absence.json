@@ -1,0 +1,19 @@
+{
+  "details": {
+    "duration_seconds": 0.081,
+    "images_checked": [
+      "backend",
+      "agent-server",
+      "llm-provider-server",
+      "console",
+      "oidc-gateway"
+    ],
+    "inventory_and_config_clear": true,
+    "test_fixture_image_promoted": false
+  },
+  "finished_at_utc": "2026-10-14T01:55:36.207225+00:00",
+  "name": "test_material_absence",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:55:36.125872+00:00",
+  "status": "passed"
+}

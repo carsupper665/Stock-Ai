@@ -1,0 +1,12 @@
+{
+  "details": {
+    "build_directive_rejected": true,
+    "duration_seconds": 2.191,
+    "service": "backend"
+  },
+  "finished_at_utc": "2026-10-14T10:18:02.902275+00:00",
+  "name": "release_build_directive",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:18:00.711355+00:00",
+  "status": "passed"
+}

@@ -1,0 +1,11 @@
+{
+  "details": {
+    "duration_seconds": 24.104
+  },
+  "error": "RuntimeError: HTTPS request failed for app path /oauth2/start: ConnectionRefusedError",
+  "finished_at_utc": "2026-10-14T02:00:05.418880+00:00",
+  "name": "wrong_user",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:59:43.180134+00:00",
+  "status": "failed"
+}
