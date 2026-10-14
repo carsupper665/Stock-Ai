@@ -33,6 +33,16 @@ def main():
     revision = run("git", "rev-parse", "HEAD").stdout.strip()
     tree = run("git", "rev-parse", "HEAD^{tree}").stdout.strip()
     source_date_epoch = int(run("git", "show", "-s", "--format=%ct", "HEAD").stdout.strip())
+    existing_provenance = OUTPUT / "provenance.json"
+    if existing_provenance.is_file():
+        try:
+            prior_revision = json.loads(existing_provenance.read_text(encoding="utf-8")).get("revision")
+        except (OSError, json.JSONDecodeError):
+            prior_revision = None
+        if prior_revision != revision:
+            for path in OUTPUT.iterdir():
+                if path.is_file():
+                    path.unlink()
     metadata = {}
     image_records = {}
     run("docker", "pull", TRIVY)

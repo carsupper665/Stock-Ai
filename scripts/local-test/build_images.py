@@ -40,7 +40,17 @@ def main():
     for service, dockerfile in SERVICES.items():
         tag = f"{REGISTRY}/stock-ai/{service}:{version}"
         metadata_path = Path("/tmp") / f"stock-ai-t10-{service}-build.json"
-        metadata_path.unlink(missing_ok=True)
+        if metadata_path.is_file():
+            try:
+                existing = json.loads(metadata_path.read_text(encoding="utf-8"))
+                args = existing["buildx.build.provenance"]["invocation"]["parameters"]["args"]
+                digest = existing["containerimage.digest"]
+                if args.get("build-arg:REVISION") == revision and digest.startswith("sha256:") and len(digest) == 71:
+                    print(f"{service}: reusing completed build {REGISTRY}/stock-ai/{service}@{digest}")
+                    continue
+            except (KeyError, OSError, json.JSONDecodeError, TypeError):
+                pass
+            metadata_path.unlink(missing_ok=True)
         run(
             "docker", "buildx", "build", "--builder", BUILDER, "--platform", "linux/amd64",
             "--file", dockerfile, "--tag", tag,

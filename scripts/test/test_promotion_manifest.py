@@ -11,6 +11,7 @@ from scripts.create_promotion_manifest import (
     create_manifest,
     main,
 )
+from scripts import local_operations
 
 
 class PromotionManifestTest(unittest.TestCase):
@@ -159,6 +160,34 @@ class PromotionManifestTest(unittest.TestCase):
         for name, digest in entries.items():
             self.assertEqual(hashlib.sha256((output.parent / name).read_bytes()).hexdigest(), digest)
         self.assertIn("oidc-gateway-sbom.spdx.json", entries)
+
+    def test_generated_manifest_is_consumed_by_release_operator(self):
+        output = self.root / "release-package" / "promotion.json"
+        self.assertEqual(main([
+            "--build-evidence", str(self.build),
+            "--test-certification", str(self.certification_path),
+            "--registry-references", str(self.references_path),
+            "--output", str(output),
+        ]), 0)
+        env_file = self.root / "release.env"
+        env_file.write_text("STOCK_AI_ENVIRONMENT=Release\n", encoding="utf-8")
+        compose = self.root / "compose.yaml"
+        compose.write_text("services: {}\n", encoding="utf-8")
+        operator = local_operations.Operator(env_file, [compose], self.root / "operator-evidence", 5)
+        config = {"services": {
+            service: {"image": f"release.local/stock-ai/{service}:current"}
+            for service in local_operations.PROMOTION_IMAGE_SERVICES
+        }}
+        promoted, _ = operator.promotion(output, config)
+        self.assertEqual(set(promoted), local_operations.PROMOTION_IMAGE_SERVICES)
+        for service, reference in promoted.items():
+            self.assertEqual(reference, json.loads(self.references_path.read_text())[service])
+
+        manifest = json.loads(output.read_text(encoding="utf-8"))
+        manifest["artifacts"]["backend"]["build_digest"] = "registry.local/stock-ai/backend@" + self.digests["backend"]
+        output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(local_operations.WorkflowError, "build digest mismatch"):
+            operator.promotion(output, config)
 
 
 if __name__ == "__main__":

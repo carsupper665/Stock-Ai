@@ -105,7 +105,7 @@ WSL/Linux scope.
 
 Update accepts only `stock-ai.promotion-manifest.v1` with `status: "promoted"`,
 `environment: "Test"`, a full Git revision, a configuration schema version,
-the declared SHA-256 sidecar trust, and eight passed acceptance results. Its
+the declared SHA-256 sidecar trust, and every required passed acceptance result. Its
 `images` map contains exactly Backend, Agent Server, LLM Provider Server, and
 Console. `test_stack_images` and `artifacts` cover those services plus the OIDC
 Gateway, and every `build_digest` must match the corresponding immutable

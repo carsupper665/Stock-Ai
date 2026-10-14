@@ -209,6 +209,11 @@ def run_flow(browser, prefix):
     require_ok(status, 200, "list orders created by Agent run")
     rows = orders.get("orders", []) if isinstance(orders, dict) else []
     assert rows, "secured Agent run completed without placing an order"
+    order = rows[0]
+    assert order.get("symbol") == "BTCUSDT" and order.get("product") == "spot", "Backend order market/product gate mismatch"
+    assert order.get("side") == "buy" and order.get("type") == "limit", "Backend order side/type gate mismatch"
+    assert order.get("quantity") == 0.001 and order.get("price") == 100, "Backend order quantity/price gate mismatch"
+    assert order.get("status") in ("open", "filled"), "Backend order did not pass trade lifecycle gate"
     del account_token
     status, _, _ = browser.request("POST", f"/agent/api/v1/sessions/{session_id}/stop")
     assert status in (200, 202, 204), f"stop Agent session returned HTTP {status}"
