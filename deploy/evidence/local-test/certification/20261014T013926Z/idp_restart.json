@@ -1,0 +1,11 @@
+{
+  "details": {
+    "duration_seconds": 4.702
+  },
+  "error": "URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1000)>",
+  "finished_at_utc": "2026-10-14T01:39:30.908514+00:00",
+  "name": "idp_restart",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:39:26.206673+00:00",
+  "status": "failed"
+}

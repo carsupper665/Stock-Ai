@@ -1,0 +1,356 @@
+{
+  "builder": "Docker Buildx / BuildKit stock-ai-t10",
+  "images": {
+    "agent-server": {
+      "digest": "sha256:86b621ebbd6c962f39f7a5d314b5c5eed49dc4e5beb25e78c24bb5caf0510d47",
+      "provenance": {
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "builder": {
+          "id": ""
+        },
+        "invocation": {
+          "configSource": {
+            "entryPoint": "agent-server.Dockerfile"
+          },
+          "environment": {
+            "dockerfileVersion": "1.27.0",
+            "platform": "linux/amd64"
+          },
+          "parameters": {
+            "args": {
+              "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+              "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+              "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+              "build-arg:VERSION": "local-da6fc3e60dd1"
+            },
+            "compatibilityVersion": 30,
+            "frontend": "dockerfile.v0",
+            "locals": [
+              {
+                "name": "context"
+              },
+              {
+                "name": "dockerfile"
+              }
+            ],
+            "root": {
+              "configSource": {
+                "path": "agent-server.Dockerfile"
+              },
+              "request": {
+                "args": {
+                  "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+                  "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+                  "build-arg:VERSION": "local-da6fc3e60dd1",
+                  "vcs:localdir:context": ".",
+                  "vcs:localdir:dockerfile": "docker",
+                  "vcs:revision": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "vcs:source": "https://github.com/carsupper665/Stock-Ai.git"
+                }
+              }
+            }
+          }
+        },
+        "materials": [
+          {
+            "digest": {
+              "sha256": "ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+            },
+            "uri": "pkg:docker/docker/buildkit-syft-scanner@stable-1?platform=linux%2Famd64"
+          },
+          {
+            "digest": {
+              "sha256": "9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079"
+            },
+            "uri": "pkg:docker/golang@1.27.2-alpine3.23?digest=sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079&platform=linux%2Famd64"
+          }
+        ]
+      },
+      "registry_reference": "127.0.0.1:5000/stock-ai/agent-server@sha256:86b621ebbd6c962f39f7a5d314b5c5eed49dc4e5beb25e78c24bb5caf0510d47"
+    },
+    "backend": {
+      "digest": "sha256:168935cba82fda2b58a755473317f9c215b2cf7cbdcb1fd2bf2cd3f97f1b3c58",
+      "provenance": {
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "builder": {
+          "id": ""
+        },
+        "invocation": {
+          "configSource": {
+            "entryPoint": "backend.Dockerfile"
+          },
+          "environment": {
+            "dockerfileVersion": "1.27.0",
+            "platform": "linux/amd64"
+          },
+          "parameters": {
+            "args": {
+              "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+              "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+              "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+              "build-arg:VERSION": "local-da6fc3e60dd1"
+            },
+            "compatibilityVersion": 30,
+            "frontend": "dockerfile.v0",
+            "locals": [
+              {
+                "name": "context"
+              },
+              {
+                "name": "dockerfile"
+              }
+            ],
+            "root": {
+              "configSource": {
+                "path": "backend.Dockerfile"
+              },
+              "request": {
+                "args": {
+                  "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+                  "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+                  "build-arg:VERSION": "local-da6fc3e60dd1",
+                  "vcs:localdir:context": ".",
+                  "vcs:localdir:dockerfile": "docker",
+                  "vcs:revision": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "vcs:source": "https://github.com/carsupper665/Stock-Ai.git"
+                }
+              }
+            }
+          }
+        },
+        "materials": [
+          {
+            "digest": {
+              "sha256": "ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+            },
+            "uri": "pkg:docker/docker/buildkit-syft-scanner@stable-1?platform=linux%2Famd64"
+          },
+          {
+            "digest": {
+              "sha256": "9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079"
+            },
+            "uri": "pkg:docker/golang@1.27.2-alpine3.23?digest=sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079&platform=linux%2Famd64"
+          }
+        ]
+      },
+      "registry_reference": "127.0.0.1:5000/stock-ai/backend@sha256:168935cba82fda2b58a755473317f9c215b2cf7cbdcb1fd2bf2cd3f97f1b3c58"
+    },
+    "console": {
+      "digest": "sha256:2b853d4b528e14432c402b7d1296aca1bfd475b23cf3acf2c84c770edcad0b07",
+      "provenance": {
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "builder": {
+          "id": ""
+        },
+        "invocation": {
+          "configSource": {
+            "entryPoint": "console.Dockerfile"
+          },
+          "environment": {
+            "dockerfileVersion": "1.27.0",
+            "platform": "linux/amd64"
+          },
+          "parameters": {
+            "args": {
+              "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+              "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+              "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+              "build-arg:VERSION": "local-da6fc3e60dd1"
+            },
+            "compatibilityVersion": 30,
+            "frontend": "dockerfile.v0",
+            "locals": [
+              {
+                "name": "context"
+              },
+              {
+                "name": "dockerfile"
+              }
+            ],
+            "root": {
+              "configSource": {
+                "path": "console.Dockerfile"
+              },
+              "request": {
+                "args": {
+                  "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+                  "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+                  "build-arg:VERSION": "local-da6fc3e60dd1",
+                  "vcs:localdir:context": ".",
+                  "vcs:localdir:dockerfile": "docker",
+                  "vcs:revision": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "vcs:source": "https://github.com/carsupper665/Stock-Ai.git"
+                }
+              }
+            }
+          }
+        },
+        "materials": [
+          {
+            "digest": {
+              "sha256": "ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+            },
+            "uri": "pkg:docker/docker/buildkit-syft-scanner@stable-1?platform=linux%2Famd64"
+          },
+          {
+            "digest": {
+              "sha256": "9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079"
+            },
+            "uri": "pkg:docker/golang@1.27.2-alpine3.23?digest=sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079&platform=linux%2Famd64"
+          },
+          {
+            "digest": {
+              "sha256": "9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2"
+            },
+            "uri": "pkg:docker/node@24.21.0-alpine3.23?digest=sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2&platform=linux%2Famd64"
+          }
+        ]
+      },
+      "registry_reference": "127.0.0.1:5000/stock-ai/console@sha256:2b853d4b528e14432c402b7d1296aca1bfd475b23cf3acf2c84c770edcad0b07"
+    },
+    "llm-provider-server": {
+      "digest": "sha256:7cb815dd33f8d24ab7b378aa51d6cec2e53db72cabf993236e147f0e33c40377",
+      "provenance": {
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "builder": {
+          "id": ""
+        },
+        "invocation": {
+          "configSource": {
+            "entryPoint": "llm-provider-server.Dockerfile"
+          },
+          "environment": {
+            "dockerfileVersion": "1.27.0",
+            "platform": "linux/amd64"
+          },
+          "parameters": {
+            "args": {
+              "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+              "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+              "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+              "build-arg:VERSION": "local-da6fc3e60dd1"
+            },
+            "compatibilityVersion": 30,
+            "frontend": "dockerfile.v0",
+            "locals": [
+              {
+                "name": "context"
+              },
+              {
+                "name": "dockerfile"
+              }
+            ],
+            "root": {
+              "configSource": {
+                "path": "llm-provider-server.Dockerfile"
+              },
+              "request": {
+                "args": {
+                  "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+                  "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+                  "build-arg:VERSION": "local-da6fc3e60dd1",
+                  "vcs:localdir:context": ".",
+                  "vcs:localdir:dockerfile": "docker",
+                  "vcs:revision": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "vcs:source": "https://github.com/carsupper665/Stock-Ai.git"
+                }
+              }
+            }
+          }
+        },
+        "materials": [
+          {
+            "digest": {
+              "sha256": "ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+            },
+            "uri": "pkg:docker/docker/buildkit-syft-scanner@stable-1?platform=linux%2Famd64"
+          },
+          {
+            "digest": {
+              "sha256": "9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079"
+            },
+            "uri": "pkg:docker/golang@1.27.2-alpine3.23?digest=sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079&platform=linux%2Famd64"
+          }
+        ]
+      },
+      "registry_reference": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7cb815dd33f8d24ab7b378aa51d6cec2e53db72cabf993236e147f0e33c40377"
+    },
+    "oidc-gateway": {
+      "digest": "sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29",
+      "provenance": {
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "builder": {
+          "id": ""
+        },
+        "invocation": {
+          "configSource": {
+            "entryPoint": "oidc-gateway.Dockerfile"
+          },
+          "environment": {
+            "dockerfileVersion": "1.27.0",
+            "platform": "linux/amd64"
+          },
+          "parameters": {
+            "args": {
+              "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+              "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+              "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+              "build-arg:VERSION": "local-da6fc3e60dd1"
+            },
+            "compatibilityVersion": 30,
+            "frontend": "dockerfile.v0",
+            "locals": [
+              {
+                "name": "context"
+              },
+              {
+                "name": "dockerfile"
+              }
+            ],
+            "root": {
+              "configSource": {
+                "path": "oidc-gateway.Dockerfile"
+              },
+              "request": {
+                "args": {
+                  "build-arg:BUILD_DATE": "2026-10-14T09:57:55Z",
+                  "build-arg:REVISION": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "build-arg:SOURCE_DATE_EPOCH": "1791971875",
+                  "build-arg:VERSION": "local-da6fc3e60dd1",
+                  "vcs:localdir:context": ".",
+                  "vcs:localdir:dockerfile": "docker",
+                  "vcs:revision": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+                  "vcs:source": "https://github.com/carsupper665/Stock-Ai.git"
+                }
+              }
+            }
+          }
+        },
+        "materials": [
+          {
+            "digest": {
+              "sha256": "ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+            },
+            "uri": "pkg:docker/docker/buildkit-syft-scanner@stable-1?platform=linux%2Famd64"
+          },
+          {
+            "digest": {
+              "sha256": "9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079"
+            },
+            "uri": "pkg:docker/golang@1.27.2-alpine3.23?digest=sha256:9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079&platform=linux%2Famd64"
+          }
+        ]
+      },
+      "registry_reference": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29"
+    }
+  },
+  "platform": "linux/amd64",
+  "revision": "da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70",
+  "schema": "stock-ai.local-build-provenance.v1",
+  "source_date_epoch": 1791971875,
+  "source_tree": "429c4d14f9be1a1b0ff6b1c5689c4071313d3065"
+}

@@ -1,0 +1,98 @@
+{
+  "accepted_image_digests": {
+    "agent-server": "sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+    "backend": "sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+    "console": "sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+    "llm-provider-server": "sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+    "oidc-gateway": "sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0"
+  },
+  "completed_at_utc": "2026-10-14T10:19:07.487206+00:00",
+  "configuration_schema_version": "stock-ai-compose-local.v1",
+  "evidence": {
+    "audience_mismatch": {
+      "file": "audience_mismatch.json",
+      "sha256": "27eae55196d9719dec6a778da25d95b53b48a04e9983ae6b41f44e4376ec3da6"
+    },
+    "docker_restart_failure": {
+      "file": "docker_restart_failure.json",
+      "sha256": "a2fb152bc1d22378a5af8fa3c3f4b85905a020e49720c779ad3ba0557a7b9f57"
+    },
+    "expired_session": {
+      "file": "expired_session.json",
+      "sha256": "c2b2f54680dfac28c7bcff26283dd31dcc66cf9b809e0a7c015b7d604f59575f"
+    },
+    "fixture_outage": {
+      "file": "fixture_outage.json",
+      "sha256": "c5b305065d74fb5ef8ee17b54b1d35c992dc513b9486a0a91eabf129ca8949c1"
+    },
+    "idp_denial": {
+      "file": "idp_denial.json",
+      "sha256": "b6a1d732ba6a14caf9053fcd2e70be22ef54486baa6bb93e44adc342d2ebbde5"
+    },
+    "idp_restart": {
+      "file": "idp_restart.json",
+      "sha256": "21fd28be8faee186c0836b47e2ca78ad90756e6a0079bfee2ef35f1bdd8ea010"
+    },
+    "internal_service_restart": {
+      "file": "internal_service_restart.json",
+      "sha256": "506b8e96d5f9545806b32ef1b92093bacc8a95616bfb31eb9100d36b46146419"
+    },
+    "issuer_mismatch": {
+      "file": "issuer_mismatch.json",
+      "sha256": "a367e1a605fc88fd98aa5f550d4bc9d6eed1da9d4e64161ccf1257fc1c8559da"
+    },
+    "public_login_redirects": {
+      "file": "public_login_redirects.json",
+      "sha256": "331ae36f577e7341fec79fd961a700c849d13798a4023c31260d330175356a2c"
+    },
+    "release_build_directive": {
+      "file": "release_build_directive.json",
+      "sha256": "86066ec49d766d3cbdf4ef436ce027784d5908cad3b6f57b7ceab78c8b4d7b34"
+    },
+    "release_exact_digest": {
+      "file": "release_exact_digest.json",
+      "sha256": "27c9c86180b9d4103952d715546ef7c18066b64b414052c9425f8bbb2fc21aa9"
+    },
+    "release_manifest_substitution": {
+      "file": "release_manifest_substitution.json",
+      "sha256": "dd3bd688138d6f4f753ca955813041247688068dfab17aed3f433f4e3301193f"
+    },
+    "release_manifest_tamper": {
+      "file": "release_manifest_tamper.json",
+      "sha256": "0fdb0f00e7483e4f6112ecb7ed14acc4bde08bf9c8d2733fd1c9bfe3b6bd70f1"
+    },
+    "secured_product_flow": {
+      "file": "secured_product_flow.json",
+      "sha256": "454197eef2bca92c694fc463e52fcc56a62bb025684a72706edc64432ab278bd"
+    },
+    "test_material_absence": {
+      "file": "test_material_absence.json",
+      "sha256": "b26cccee133d4b28f838c79987d402de6b54fc93ccd34d17b6ff599227dd67be"
+    },
+    "wrong_user": {
+      "file": "wrong_user.json",
+      "sha256": "31ad08af8346c10b25d5c9968fc837cfd3502bdfed345b553dc02515596b7482"
+    }
+  },
+  "results": {
+    "audience_mismatch": "passed",
+    "docker_restart_failure": "passed",
+    "expired_session": "passed",
+    "fixture_outage": "passed",
+    "idp_denial": "passed",
+    "idp_restart": "passed",
+    "internal_service_restart": "passed",
+    "issuer_mismatch": "passed",
+    "public_login_redirects": "passed",
+    "release_build_directive": "passed",
+    "release_exact_digest": "passed",
+    "release_manifest_substitution": "passed",
+    "release_manifest_tamper": "passed",
+    "secured_product_flow": "passed",
+    "test_material_absence": "passed",
+    "wrong_user": "passed"
+  },
+  "revision": "906326524f70acf77dcffeff86e9433896830509",
+  "schema": "stock-ai.test-certification.v1",
+  "status": "passed"
+}

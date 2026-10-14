@@ -1,0 +1,12 @@
+{
+  "accepted_source_revision": "906326524f70acf77dcffeff86e9433896830509",
+  "details": {
+    "preflight_rejected_manifest_tamper": true,
+    "sha256_sidecar_required": true
+  },
+  "name": "release_operator_tamper_rejected",
+  "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+  "schema": "stock-ai.local-release-operator-result.v1",
+  "status": "passed",
+  "tested_at_utc": "2026-10-14T10:41:48.273038+00:00"
+}

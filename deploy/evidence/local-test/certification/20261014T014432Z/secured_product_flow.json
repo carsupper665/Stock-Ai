@@ -1,0 +1,11 @@
+{
+  "details": {
+    "duration_seconds": 0.055
+  },
+  "error": "JSONDecodeError: Extra data: line 1 column 5 (char 4)",
+  "finished_at_utc": "2026-10-14T01:44:32.424867+00:00",
+  "name": "secured_product_flow",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:44:32.369482+00:00",
+  "status": "failed"
+}

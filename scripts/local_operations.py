@@ -22,6 +22,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts.promotion_contract import REQUIRED_RESULTS
+except ModuleNotFoundError:  # Direct ``python scripts/local_operations.py`` execution.
+    from promotion_contract import REQUIRED_RESULTS
+
 
 CORE_SERVICES = ("backend", "llm-provider-server", "agent-server", "console")
 OPTIONAL_SERVICES = ("oidc-gateway", "nginx", "idp")
@@ -37,16 +42,7 @@ IMAGE_VARIABLES = {
 PROMOTABLE_SERVICES = tuple(IMAGE_VARIABLES)
 PROMOTION_IMAGE_SERVICES = set(CORE_SERVICES)
 TEST_STACK_IMAGE_SERVICES = set(CORE_SERVICES) | {"oidc-gateway"}
-REQUIRED_ACCEPTANCE_RESULTS = {
-    "secured_product_flow",
-    "wrong_user",
-    "expired_session",
-    "idp_denial",
-    "idp_restart",
-    "internal_service_restart",
-    "docker_restart_failure",
-    "test_material_absence",
-}
+REQUIRED_ACCEPTANCE_RESULTS = set(REQUIRED_RESULTS)
 PROMOTION_SCHEMA = "stock-ai.promotion-manifest.v1"
 DIGEST_RE = re.compile(r"^[^\s@]+@(?P<digest>sha256:[0-9a-f]{64})$")
 SCHEMA_VERSION = 2
@@ -574,7 +570,8 @@ class Operator:
         for service in TEST_STACK_IMAGE_SERVICES:
             artifact = artifacts[service]
             expected_digest = images.get(service, test_images[service])
-            if not isinstance(artifact, dict) or artifact.get("build_digest") != expected_digest:
+            expected_build_digest = expected_digest.rsplit("@", 1)[1]
+            if not isinstance(artifact, dict) or artifact.get("build_digest") != expected_build_digest:
                 raise WorkflowError(f"Promotion artifact build digest mismatch for {service}.")
             for artifact_name in ("sbom", "scan", "filesystem_inventory"):
                 if not self._artifact_ref(artifact.get(artifact_name)):
@@ -594,12 +591,12 @@ class Operator:
         if set(results) != set(acceptance_records):
             raise WorkflowError("Certification result names do not match acceptance result names.")
         if set(acceptance_records) != REQUIRED_ACCEPTANCE_RESULTS or set(results) != REQUIRED_ACCEPTANCE_RESULTS:
-            raise WorkflowError("Certification evidence must cover the exact eight required acceptance checks.")
+            raise WorkflowError("Certification evidence must cover the exact required acceptance checks.")
         if any(
             (entry.get("status") if isinstance(entry, dict) else entry) != "passed"
             for entry in acceptance_records.values()
         ):
-            raise WorkflowError("Promotion manifest must contain eight passed acceptance results.")
+            raise WorkflowError("Promotion manifest must contain all required passed acceptance results.")
         result_refs = [self._artifact_ref(record) for record in results.values()]
         if (
             any(ref is None for ref in result_refs)

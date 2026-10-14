@@ -1,0 +1,14 @@
+{
+  "details": {
+    "duration_seconds": 3.51,
+    "internal_port_exposed": false,
+    "public_error_page": true,
+    "rejected": true,
+    "session_status": 401
+  },
+  "finished_at_utc": "2026-10-14T10:17:51.830338+00:00",
+  "name": "audience_mismatch",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:17:48.320521+00:00",
+  "status": "passed"
+}

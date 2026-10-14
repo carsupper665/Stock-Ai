@@ -89,7 +89,7 @@ class LocalOperationsTests(unittest.TestCase):
 
         for service in test_images:
             artifacts[service] = {
-                "build_digest": test_images[service],
+                "build_digest": test_images[service].rsplit("@", 1)[1] if "@" in test_images[service] else "",
                 "registry_reference": test_images[service].split("@", 1)[0],
                 "sbom": artifact_ref(f"artifacts/{service}.sbom.json", "{}\n"),
                 "scan": artifact_ref(f"artifacts/{service}.scan.json", "{}\n"),
@@ -336,7 +336,7 @@ class LocalOperationsTests(unittest.TestCase):
         document["certification_evidence"]["results"]["unrelated_check"] = document["certification_evidence"]["results"].pop("secured_product_flow")
         document["acceptance_results"]["unrelated_check"] = document["acceptance_results"].pop("secured_product_flow")
         manifest.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
-        with self.assertRaisesRegex(local_operations.WorkflowError, "exact eight required acceptance"):
+        with self.assertRaisesRegex(local_operations.WorkflowError, "exact required acceptance"):
             operator.promotion(manifest, self.config_from_env())
 
         manifest = self.make_manifest()
@@ -365,7 +365,7 @@ class LocalOperationsTests(unittest.TestCase):
         document = json.loads(manifest.read_text(encoding="utf-8"))
         document["acceptance_results"]["test_material_absence"]["status"] = "not_run"
         manifest.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
-        with self.assertRaisesRegex(local_operations.WorkflowError, "eight passed acceptance"):
+        with self.assertRaisesRegex(local_operations.WorkflowError, "required passed acceptance"):
             operator.promotion(manifest, config)
 
     def test_release_preflight_requires_manifest_and_exact_certified_app_digests(self):

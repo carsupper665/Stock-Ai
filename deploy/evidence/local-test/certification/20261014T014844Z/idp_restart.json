@@ -1,0 +1,11 @@
+{
+  "details": {
+    "duration_seconds": 6.717
+  },
+  "error": "AssertionError: OIDC callback did not return to app",
+  "finished_at_utc": "2026-10-14T01:48:53.217411+00:00",
+  "name": "idp_restart",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:48:48.371318+00:00",
+  "status": "failed"
+}

@@ -1,0 +1,58 @@
+{
+  "accepted_image_digests": {
+    "agent-server": "sha256:e63f3cae4df4c9122b2954b15fee77ff15e9ca7a15affa1b015e046ab05be4d3",
+    "backend": "sha256:1e5ab2e8f4800a8bc221a1b4154d79ee1f8c944ff7464d771b988997491c7dac",
+    "console": "sha256:1c5fe6ec71f7390369bce6683c0726e265f989f8124451e44eb9425a8e32527b",
+    "llm-provider-server": "sha256:c8a85a34998502ce8ebc595ba380d4f20fd927cdfa1d688c66f27edb3870965f",
+    "oidc-gateway": "sha256:22c1adadb470483812a53050c171eb7b456d692cae9ff007613741cb325ff6a9"
+  },
+  "completed_at_utc": "2026-10-14T01:40:18.823796+00:00",
+  "configuration_schema_version": "stock-ai-compose-local.v1",
+  "evidence": {
+    "docker_restart_failure": {
+      "file": "docker_restart_failure.json",
+      "sha256": "d50cb57bb1f7ecd6f204b46697c5202564b877c39aabc3cc7cea32de5f76a066"
+    },
+    "expired_session": {
+      "file": "expired_session.json",
+      "sha256": "65a7aabc6f136deb5cff0c03d1a7cc2bbd54db5430a56d45c17530e4fc60b053"
+    },
+    "idp_denial": {
+      "file": "idp_denial.json",
+      "sha256": "c26850f831a42eec48310c51733bb22b0cce98d839a1645275e6c3bf87b8f2be"
+    },
+    "idp_restart": {
+      "file": "idp_restart.json",
+      "sha256": "3a772bb004775b87cfddfdc99ab01b0b7219abdb66eb5d1c293039ef7f6bf933"
+    },
+    "internal_service_restart": {
+      "file": "internal_service_restart.json",
+      "sha256": "f8c7f2b363f063882be7afb4c24481fb065e34158cf39262928a7f37b613a532"
+    },
+    "secured_product_flow": {
+      "file": "secured_product_flow.json",
+      "sha256": "e9108b8892067749bbc2b7c34d045c7f87a5a3ab347dbfe5cce07c36f4b34b5d"
+    },
+    "test_material_absence": {
+      "file": "test_material_absence.json",
+      "sha256": "07cb9cef8be20364965c1d95a1878219986ab65c9440816f15987f63d8c95894"
+    },
+    "wrong_user": {
+      "file": "wrong_user.json",
+      "sha256": "4f6c3c8b918944d064a92b4d2ae5b455a6488bdedf9158d22c95399230f618ce"
+    }
+  },
+  "results": {
+    "docker_restart_failure": "passed",
+    "expired_session": "failed",
+    "idp_denial": "failed",
+    "idp_restart": "failed",
+    "internal_service_restart": "failed",
+    "secured_product_flow": "failed",
+    "test_material_absence": "passed",
+    "wrong_user": "failed"
+  },
+  "revision": "ec30fa0a2b885a93ce49652902741ac5a1e167c2",
+  "schema": "stock-ai.test-certification.v1",
+  "status": "failed"
+}

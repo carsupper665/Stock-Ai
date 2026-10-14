@@ -1,0 +1,14 @@
+{
+  "details": {
+    "access_denied_rejected": true,
+    "duration_seconds": 2.336,
+    "internal_port_exposed": false,
+    "public_error_page": true,
+    "session_status": 401
+  },
+  "finished_at_utc": "2026-10-14T10:17:44.832156+00:00",
+  "name": "idp_denial",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:17:42.495987+00:00",
+  "status": "passed"
+}

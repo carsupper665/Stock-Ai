@@ -1,0 +1,11 @@
+{
+  "details": {
+    "duration_seconds": 0.16
+  },
+  "error": "AssertionError: create Agent session: expected HTTP 201, received 502, code=BACKEND_AUTH_FAILED",
+  "finished_at_utc": "2026-10-14T01:52:45.208963+00:00",
+  "name": "secured_product_flow",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:52:45.048508+00:00",
+  "status": "failed"
+}

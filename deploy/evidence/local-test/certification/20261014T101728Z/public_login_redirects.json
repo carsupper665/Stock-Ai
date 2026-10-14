@@ -1,0 +1,35 @@
+{
+  "details": {
+    "anonymous_login_paths": true,
+    "auth_error_path_does_not_loop": true,
+    "duration_seconds": 2.211,
+    "navigations": [
+      {
+        "browser_status": 200,
+        "curl_status": 200,
+        "internal_port_exposed": false,
+        "login_page_reached": true,
+        "path": "/login"
+      },
+      {
+        "browser_status": 200,
+        "curl_status": 200,
+        "internal_port_exposed": false,
+        "login_page_reached": true,
+        "path": "/login/"
+      },
+      {
+        "browser_status": 200,
+        "curl_status": 200,
+        "internal_port_exposed": false,
+        "login_page_reached": true,
+        "path": "/login?auth_error=login_denied"
+      }
+    ]
+  },
+  "finished_at_utc": "2026-10-14T10:17:56.421361+00:00",
+  "name": "public_login_redirects",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:17:54.210372+00:00",
+  "status": "passed"
+}

@@ -1,0 +1,390 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29",
+  "documentNamespace": "http://trivy.dev/container_image/127.0.0.1:5000/stock-ai/oidc-gateway@sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29-8bfac9ca-b135-4be8-b4ab-a139ca859cbc",
+  "creationInfo": {
+    "creators": [
+      "Organization: aquasecurity",
+      "Tool: trivy-0.75.0"
+    ],
+    "created": "2026-10-14T10:09:27Z"
+  },
+  "packages": [
+    {
+      "name": "healthcheck",
+      "SPDXID": "SPDXRef-Application-1ca469d65da227ad",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Class: lang-pkgs"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Type: gobinary"
+        }
+      ]
+    },
+    {
+      "name": "issuer-check",
+      "SPDXID": "SPDXRef-Application-bcd48a70f95bf884",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Class: lang-pkgs"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Type: gobinary"
+        }
+      ]
+    },
+    {
+      "name": "oidc-gateway",
+      "SPDXID": "SPDXRef-Application-b9853a12eb2036d9",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Class: lang-pkgs"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Type: gobinary"
+        }
+      ]
+    },
+    {
+      "name": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29",
+      "SPDXID": "SPDXRef-ContainerImage-6222f6154e54ea61",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:oci/oidc-gateway@sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29?arch=amd64\u0026repository_url=127.0.0.1:5000%2Fstock-ai%2Foidc-gateway"
+        }
+      ],
+      "primaryPackagePurpose": "CONTAINER",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "DiffID: sha256:0ba4c8f498a9209bb31a34ff849cb4a0586851e514c8d5f4ec3333e9a2d5ec4a"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "DiffID: sha256:497d666158ac938d17920b1fe81d7630229daea7e0880964746055ffd4277fd0"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "DiffID: sha256:50ee6dbf6d921608b132f94dc53d919fe0e8d39456dc624715d331a4b3075d06"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "DiffID: sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "DiffID: sha256:bb8fc7acb9231f207667a5a0dc1192f3e54ef59ec8eab1eb52826587a45050fc"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "ImageID: sha256:6c14d3c9a5aed7e34ba61db0cda698ce35ce81698f2745cb1b2b43ef2d43ad07"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Labels:org.opencontainers.image.created: 2026-10-14T09:57:55Z"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Labels:org.opencontainers.image.revision: da6fc3e60dd1804e05fb6f63dabe0e00d8d62f70"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Labels:org.opencontainers.image.source: https://github.com/carsupper665/Stock-Ai"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Labels:org.opencontainers.image.title: Stock AI OIDC Gateway"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Labels:org.opencontainers.image.version: local-da6fc3e60dd1"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Reference: 127.0.0.1:5000/stock-ai/oidc-gateway@sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "RepoDigest: 127.0.0.1:5000/stock-ai/oidc-gateway@sha256:464d7bfba083f968791cd88506e62f48d06a9c36280dea84319e283f4e2e9a29"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "SchemaVersion: 2"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "Size: 20754944"
+        }
+      ]
+    },
+    {
+      "name": "oidc_gateway",
+      "SPDXID": "SPDXRef-Package-8e0cc3c32893d865",
+      "supplier": "NOASSERTION",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "sourceInfo": "package found in: oidc-gateway",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/oidc_gateway"
+        }
+      ],
+      "primaryPackagePurpose": "LIBRARY",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "LayerDiffID: sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgID: oidc_gateway"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgType: gobinary"
+        }
+      ]
+    },
+    {
+      "name": "stdlib",
+      "SPDXID": "SPDXRef-Package-1e351be0161e5b3d",
+      "versionInfo": "v1.27.2",
+      "supplier": "NOASSERTION",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "sourceInfo": "package found in: issuer-check",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/stdlib@v1.27.2"
+        }
+      ],
+      "primaryPackagePurpose": "LIBRARY",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "LayerDiffID: sha256:50ee6dbf6d921608b132f94dc53d919fe0e8d39456dc624715d331a4b3075d06"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgID: stdlib@v1.27.2"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgType: gobinary"
+        }
+      ]
+    },
+    {
+      "name": "stdlib",
+      "SPDXID": "SPDXRef-Package-bc0e905da9f3c284",
+      "versionInfo": "v1.27.2",
+      "supplier": "NOASSERTION",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "sourceInfo": "package found in: healthcheck",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/stdlib@v1.27.2"
+        }
+      ],
+      "primaryPackagePurpose": "LIBRARY",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "LayerDiffID: sha256:0ba4c8f498a9209bb31a34ff849cb4a0586851e514c8d5f4ec3333e9a2d5ec4a"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgID: stdlib@v1.27.2"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgType: gobinary"
+        }
+      ]
+    },
+    {
+      "name": "stdlib",
+      "SPDXID": "SPDXRef-Package-f9c6d95ec8488e86",
+      "versionInfo": "v1.27.2",
+      "supplier": "NOASSERTION",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "sourceInfo": "package found in: oidc-gateway",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/stdlib@v1.27.2"
+        }
+      ],
+      "primaryPackagePurpose": "LIBRARY",
+      "annotations": [
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "LayerDiffID: sha256:a251319e50e75defc8efd8d5faf98e4b41fd5e57a93a1c0f7b7a741d5af6c9b7"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgID: stdlib@v1.27.2"
+        },
+        {
+          "annotator": "Tool: trivy-0.75.0",
+          "annotationDate": "2026-10-14T10:09:27Z",
+          "annotationType": "OTHER",
+          "comment": "PkgType: gobinary"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-Application-1ca469d65da227ad",
+      "relatedSpdxElement": "SPDXRef-Package-bc0e905da9f3c284",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Application-b9853a12eb2036d9",
+      "relatedSpdxElement": "SPDXRef-Package-8e0cc3c32893d865",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Application-bcd48a70f95bf884",
+      "relatedSpdxElement": "SPDXRef-Package-1e351be0161e5b3d",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-ContainerImage-6222f6154e54ea61",
+      "relatedSpdxElement": "SPDXRef-Application-1ca469d65da227ad",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-ContainerImage-6222f6154e54ea61",
+      "relatedSpdxElement": "SPDXRef-Application-b9853a12eb2036d9",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-ContainerImage-6222f6154e54ea61",
+      "relatedSpdxElement": "SPDXRef-Application-bcd48a70f95bf884",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-ContainerImage-6222f6154e54ea61",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-8e0cc3c32893d865",
+      "relatedSpdxElement": "SPDXRef-Package-f9c6d95ec8488e86",
+      "relationshipType": "DEPENDS_ON"
+    }
+  ]
+}

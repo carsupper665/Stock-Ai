@@ -1,0 +1,11 @@
+{
+  "details": {
+    "duration_seconds": 4.776
+  },
+  "error": "JSONDecodeError: Extra data: line 1 column 5 (char 4)",
+  "finished_at_utc": "2026-10-14T01:44:35.530675+00:00",
+  "name": "idp_restart",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:44:32.568968+00:00",
+  "status": "failed"
+}

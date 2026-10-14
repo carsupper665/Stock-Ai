@@ -1,0 +1,13 @@
+{
+  "details": {
+    "duration_seconds": 2.371,
+    "fixture_http_status": 503,
+    "login_failed_closed": true,
+    "session_status": 401
+  },
+  "finished_at_utc": "2026-10-14T10:32:19.966490+00:00",
+  "name": "fixture_outage",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T10:32:17.595612+00:00",
+  "status": "passed"
+}

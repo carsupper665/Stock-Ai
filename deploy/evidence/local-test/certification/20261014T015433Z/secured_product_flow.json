@@ -1,0 +1,11 @@
+{
+  "details": {
+    "duration_seconds": 2.372
+  },
+  "error": "AssertionError: Agent run did not complete (status=failed)",
+  "finished_at_utc": "2026-10-14T01:54:35.861386+00:00",
+  "name": "secured_product_flow",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-14T01:54:33.489619+00:00",
+  "status": "failed"
+}

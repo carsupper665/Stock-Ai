@@ -1,0 +1,10 @@
+{
+  "details": {
+    "build_directive_rejected": true,
+    "service": "backend"
+  },
+  "name": "release_build_directive",
+  "schema": "stock-ai.local-release-gate-result.v1",
+  "status": "passed",
+  "tested_at_utc": "2026-10-14T10:38:54.322194+00:00"
+}

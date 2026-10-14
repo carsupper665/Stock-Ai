@@ -6,7 +6,8 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=16m]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     pids_limit: 128
     environment:
       STOCK_AI_ENVIRONMENT: Test
@@ -40,11 +41,12 @@ services:
     image: "${NGINX_IMAGE:?set NGINX_IMAGE to an approved pinned Nginx image reference}"
     restart: unless-stopped
     init: true
-    user: "101:101"
+    user: "101:${LOCAL_TEST_GID:?set the host-private Test container group}"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
     pids_limit: 128
     environment:
       TEST_APP_HOST: "${TEST_APP_HOST:?set the Test app DNS hostname}"
