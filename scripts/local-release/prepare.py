@@ -28,6 +28,13 @@ DEFAULT_MANIFEST = ROOT / "deploy/evidence/local-test/promotion/promotion.json"
 AUXILIARY = ROOT / "deploy/local-release/auxiliary-images.json"
 
 
+def persistent_runtime(path):
+    path = path.resolve()
+    if "worktrees" in path.parts or path == ROOT or ROOT in path.parents:
+        raise WorkflowError("Release runtime must be outside disposable worktrees")
+    return path
+
+
 def approved_images(manifest):
     # Reuse the full operator contract, including all package artifact hashes.
     promoted, checksum = Operator.__new__(Operator).promotion(
@@ -82,7 +89,9 @@ def install_private(path, content, gid, preserve=False):
 
 def prepare(manifest=DEFAULT_MANIFEST, runtime=None):
     images, checksum = approved_images(manifest)
-    runtime = runtime or ROOT / ".local-release"
+    if runtime is None:
+        raise WorkflowError("An explicit persistent Release runtime is required")
+    runtime = persistent_runtime(runtime)
     certs, secrets = runtime / "certs", runtime / "secrets"
     gid = os.getgid()
     for path, mode in ((runtime, 0o700), (certs, 0o750), (secrets, 0o700)):
@@ -117,8 +126,10 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument("--runtime", type=Path, required=True,
+                        help="Persistent private directory outside disposable worktrees")
     args = parser.parse_args()
-    print(f"Prepared private local-release environment: {prepare(args.manifest)}")
+    print(f"Prepared private local-release environment: {prepare(args.manifest, args.runtime.resolve())}")
 
 
 if __name__ == "__main__":

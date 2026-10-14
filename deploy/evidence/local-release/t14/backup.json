@@ -1,0 +1,47 @@
+{
+  "all_nine_secrets_and_tls_jwks": true,
+  "authenticated_and_inventory_verified": true,
+  "backup_file": "/home/car/.agentcraft/runtime/proj/local-release/backups/stock-ai-local-release-20261014T143753Z.sai-backup",
+  "consistency": "all-running-project-containers-paused",
+  "created_at_utc": "2026-10-14T14:37:54.116532+00:00",
+  "databases": {
+    "agent-server": {
+      "integrity_check": "ok",
+      "schema_sha256": "508a7a8e8ff76e2e6382855687cd028ddac609e19209913f933587429c9e947a",
+      "table_counts": {
+        "event_log": 0,
+        "events": 0,
+        "memories": 0,
+        "pending_triggers": 0,
+        "run_history_files": 0,
+        "runs": 0,
+        "sessions": 0
+      }
+    },
+    "backend": {
+      "integrity_check": "ok",
+      "schema_sha256": "0f54389f2c631fe276bed956e259208417d04d40ac5ab01afcbf617649fcc796",
+      "table_counts": {
+        "accounts": 0,
+        "ledger_entries": 0,
+        "message_tags": 0,
+        "messages": 0,
+        "orders": 0,
+        "positions": 0,
+        "trades": 0
+      }
+    },
+    "llm-provider-server": {
+      "integrity_check": "ok",
+      "schema_sha256": "4e76abec38309d889eb8889ff0cb8bd5fde46a7498a85ce017b7e3d69f557c61",
+      "table_counts": {
+        "model_catalog": 0,
+        "provider_tokens": 0,
+        "providers": 0
+      }
+    }
+  },
+  "encrypted": "AES-256-GCM",
+  "schema": "stock-ai.complete-release-backup.v1",
+  "sha256": "af15c96f132952df68af87bfd1c1cf9de8d80fb0c5d2dca477682a4d2906a000"
+}

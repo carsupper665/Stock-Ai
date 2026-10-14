@@ -8,7 +8,7 @@ private env file. Release startup never builds images.
 | Boundary | local-release value |
 | --- | --- |
 | Compose project | `stock-ai-local-release` |
-| Environment and secrets | `Release`, `stock-ai-release`, ignored `.local-release/` |
+| Environment and secrets | `Release`, `stock-ai-release`, persistent private runtime outside worktrees |
 | Public origin | `https://app.localrelease:8443` |
 | Published ingress | Nginx only, `127.0.0.1:8443/tcp` |
 | Issuer | `https://app.localrelease:8443/realms/stock-ai-release` |
@@ -26,10 +26,15 @@ the T10 product package; missing images must be imported/pulled, never rebuilt
 by the Release workflow.
 
 ```sh
-python3 scripts/local-release/prepare.py
-python3 scripts/local-release/lint.py --evidence deploy/evidence/local-release/t11/configuration-lint.json
-python3 scripts/local-release/start.py
-python3 scripts/local-release/verify_ingress.py --evidence deploy/evidence/local-release/t11/curl-ingress.json
+RUNTIME=/home/car/.agentcraft/runtime/proj/local-release
+python3 scripts/local-release/prepare.py --runtime "$RUNTIME"
+python3 scripts/local-release/lint.py --env-file "$RUNTIME/compose.env" \
+  --compose-file "$RUNTIME/deployment/deploy/compose/compose.yaml" \
+  --compose-file "$RUNTIME/deployment/deploy/compose/compose.local-release.yaml"
+python3 scripts/local-release/start.py --env-file "$RUNTIME/compose.env" \
+  --deployment-root "$RUNTIME/deployment"
+python3 scripts/local-release/verify_ingress.py --runtime "$RUNTIME" \
+  --evidence "$RUNTIME/evidence/curl-ingress.json"
 python3 scripts/local-release/verify_runtime.py --test-project stock-ai-t10-cert --evidence deploy/evidence/local-release/t11/runtime-isolation.json
 ```
 
@@ -44,7 +49,9 @@ The runtime isolation verifier requires the actual Test project name; the
 accepted T10 run uses `stock-ai-t10-cert`. It refuses to claim isolation if
 the supplied Test project is absent.
 
-Preparation creates secrets directly in `.local-release/secrets` with mode
+Preparation requires an explicit persistent `--runtime`, rejects the current
+checkout and resolved paths under a `worktrees` directory, and creates secrets
+directly in that runtime's `secrets` directory with mode
 0440, a mode-0600 env file, and separate self-signed TLS/JWKS private keys.
 The runtime/secrets directories are mode 0700 and the certificate directory
 is mode 0750. Services retain their unprivileged user IDs with the current
@@ -117,3 +124,10 @@ Sanitized evidence is under `deploy/evidence/local-release/t11/`; it contains
 no cookies, tokens, authorization-code queries, secrets, certificate/private
 key contents or user data. This completes the configuration/ingress scope;
 T14 preflight/deployment and T15 business migration/acceptance remain separate.
+
+T11's historical deployment used private material and Nginx configuration
+inside its disposable worktree. Merging removed that worktree and invalidated
+the Docker bind sources. T14 replaces that layout with a persistent deployment
+bundle, preserves all nine rescued secrets, and regenerates only the lost TLS
+and fixture JWKS keys. Follow [the T14 deployment workflow](local-release-deployment.md)
+before starting or recreating the full profile.

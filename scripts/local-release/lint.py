@@ -96,7 +96,7 @@ def validate(config, values, images):
         raise WorkflowError("Required logs/history persistence is missing.")
 
 
-def validate_material(config, values, runtime):
+def validate_material(config, values, runtime, deployment_root=ROOT):
     certs, secrets = runtime / "certs", runtime / "secrets"
     if values.get("STOCK_AI_SECRETS_DIR") != str(secrets) or values.get("RELEASE_TLS_DIR") != str(certs):
         raise WorkflowError("Release material must use its own private runtime directory.")
@@ -150,7 +150,7 @@ def validate_material(config, values, runtime):
                 if not source.exists() or source.is_symlink() or not mount.get("read_only"):
                     raise WorkflowError("Release bind mount must exist and be read-only.")
                 if source != certs and source.parent != certs and source not in (
-                    ROOT / "deploy/nginx/release-nginx.conf", ROOT / "deploy/nginx/release-edge.conf.template"):
+                    deployment_root / "deploy/nginx/release-nginx.conf", deployment_root / "deploy/nginx/release-edge.conf.template"):
                     raise WorkflowError("Unexpected Release bind mount detected.")
 
 
@@ -169,7 +169,7 @@ def lint(env_file, manifest, files=FILES):
         raise WorkflowError("Auxiliary approval differs from prepared Release approval.")
     config = operator.compose_config()
     validate(config, operator.values, images)
-    validate_material(config, operator.values, runtime)
+    validate_material(config, operator.values, runtime, operator.compose_files[0].parents[2])
     return {"schema": "stock-ai.local-release-lint.v1", "status": "passed", "project": INSTANCE,
             "promotion_manifest_sha256": checksum, "services": sorted(SERVICES),
             "published_ingress": "127.0.0.1:8443/tcp", "image_policy": "exact-approved-digests-no-build"}

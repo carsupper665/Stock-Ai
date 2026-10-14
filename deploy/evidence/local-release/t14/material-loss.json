@@ -1,0 +1,30 @@
+{
+  "schema": "stock-ai.release-material-loss.v1",
+  "tested_at_utc": "2026-10-14T14:28:19.848349+00:00",
+  "read_only_live_volume_inspection": true,
+  "databases": {
+    "backend": {
+      "integrity_check": "ok",
+      "schema_sha256": "0f54389f2c631fe276bed956e259208417d04d40ac5ab01afcbf617649fcc796",
+      "table_counts": {
+        "accounts": 0,
+        "ledger_entries": 0,
+        "message_tags": 0,
+        "messages": 0,
+        "orders": 0,
+        "positions": 0,
+        "trades": 0
+      }
+    },
+    "llm-provider-server": {
+      "integrity_check": "ok",
+      "schema_sha256": "4e76abec38309d889eb8889ff0cb8bd5fde46a7498a85ce017b7e3d69f557c61",
+      "table_counts": {
+        "model_catalog": 0,
+        "provider_tokens": 0,
+        "providers": 0
+      }
+    }
+  },
+  "replacement_keys_safe": true
+}
