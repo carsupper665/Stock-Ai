@@ -33,12 +33,13 @@ def curl_with_retry(command, stage, observations, *, json_output=False):
         time.sleep(12)
 
 
-def verify():
+def verify(runtime=None):
+    runtime = runtime or ROOT / ".local-release"
     origin = f"https://{HOST}"
-    cert = ROOT / ".local-release/certs/fullchain.pem"
+    cert = runtime / "certs/fullchain.pem"
     chain = []
     observations = []
-    with tempfile.TemporaryDirectory(prefix="curl-release-", dir=ROOT / ".local-release") as temporary:
+    with tempfile.TemporaryDirectory(prefix="curl-release-", dir=runtime) as temporary:
         directory = Path(temporary)
         jar = directory / "cookies.txt"
         headers = directory / "headers.txt"
@@ -95,9 +96,10 @@ def verify():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--runtime", type=Path, required=True)
     args = parser.parse_args()
     try:
-        evidence = verify()
+        evidence = verify(args.runtime)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         evidence = {"schema": "stock-ai.local-release-ingress.v1", "status": "failed",
                     "tested_at_utc": datetime.now(timezone.utc).isoformat(),

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lint import SERVICES
-from prepare import DEFAULT_MANIFEST, INSTANCE, ROOT, approved_images
+from prepare import DEFAULT_MANIFEST, INSTANCE, ROOT, approved_images, persistent_runtime
 
 
 def docker(*args):
@@ -32,12 +32,15 @@ def verify(test_project):
     for entry in release:
         service = entry["Config"]["Labels"]["com.docker.compose.service"]
         health = entry["State"].get("Health", {}).get("Status")
-        if not entry["State"]["Running"] or (service != "nginx" and health != "healthy"):
+        if not entry["State"]["Running"] or health != "healthy":
             raise RuntimeError("Release service is not healthy")
         if entry["Config"]["Image"] != images[service]:
             raise RuntimeError("Running image differs from approval")
         if service == "backend" and "ALLOW_STATIC_USER_TOKEN=false" not in entry["Config"]["Env"]:
             raise RuntimeError("Running Backend static authentication is not disabled")
+        for mount in entry["Mounts"]:
+            if mount["Type"] == "bind":
+                persistent_runtime(Path(mount["Source"]))
         for target, bindings in entry["NetworkSettings"]["Ports"].items():
             for binding in bindings or []:
                 published.append({"service": service, "host_ip": binding["HostIp"],
@@ -62,6 +65,7 @@ def verify(test_project):
             "tested_at_utc": datetime.now(timezone.utc).isoformat(), "project": INSTANCE,
             "test_project": test_project, "promotion_manifest_sha256": checksum,
             "services": records, "published_ingress": published, "isolation": isolation,
+            "all_release_bind_sources_persistent": True,
             "backend_static_user_token": "disabled"}
 
 

@@ -1,0 +1,75 @@
+{
+  "all_release_bind_sources_persistent": true,
+  "backend_static_user_token": "disabled",
+  "isolation": {
+    "binds": {
+      "disjoint_from_test": true
+    },
+    "networks": {
+      "disjoint_from_test": true,
+      "release_names": [
+        "stock-ai-local-release_application",
+        "stock-ai-local-release_edge"
+      ]
+    },
+    "volumes": {
+      "disjoint_from_test": true,
+      "release_names": [
+        "stock-ai-local-release_agent_state",
+        "stock-ai-local-release_backend_state",
+        "stock-ai-local-release_llm_state"
+      ]
+    }
+  },
+  "project": "stock-ai-local-release",
+  "promotion_manifest_sha256": "3d0a4ca85d7cd9699a349cea7f9f5f5ab21731f36f1ea8fa011c5c33a6512861",
+  "published_ingress": [
+    {
+      "host_ip": "127.0.0.1",
+      "host_port": "8443",
+      "service": "nginx",
+      "target": "8443/tcp"
+    }
+  ],
+  "schema": "stock-ai.local-release-runtime.v1",
+  "services": {
+    "agent-server": {
+      "health": "healthy",
+      "image": "127.0.0.1:5000/stock-ai/agent-server@sha256:e2325af063f00c897f217f67666178e927c3bfa521a6b8add4f4bc67449cdd42",
+      "running": true
+    },
+    "backend": {
+      "health": "healthy",
+      "image": "127.0.0.1:5000/stock-ai/backend@sha256:fd2271997df80d52d76ea39a10f0fcddfd522c9ad74b4fda355b1c34283493d9",
+      "running": true
+    },
+    "console": {
+      "health": "healthy",
+      "image": "127.0.0.1:5000/stock-ai/console@sha256:a3795b9d05c11b3edbc684b92d1d5085a53bb2043ea0dbd6ab454b4c59c975e9",
+      "running": true
+    },
+    "idp": {
+      "health": "healthy",
+      "image": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:73058bc3eb41ca6a0a2b38f38df2ab54ffe459dd04868d39599ea479d0c91469",
+      "running": true
+    },
+    "llm-provider-server": {
+      "health": "healthy",
+      "image": "127.0.0.1:5000/stock-ai/llm-provider-server@sha256:7271d96039a218f7f13b67470370d351150e39d40cbdf2c37b99d57fbf97f78e",
+      "running": true
+    },
+    "nginx": {
+      "health": "healthy",
+      "image": "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+      "running": true
+    },
+    "oidc-gateway": {
+      "health": "healthy",
+      "image": "127.0.0.1:5000/stock-ai/oidc-gateway@sha256:d15b7e11619a71b394bdd21f97ad2624aa7ac7e3b648008fcee5e338b73c30e0",
+      "running": true
+    }
+  },
+  "status": "passed",
+  "test_project": "stock-ai-t10-cert",
+  "tested_at_utc": "2026-10-14T14:38:28.148254+00:00"
+}

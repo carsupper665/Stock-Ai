@@ -1,0 +1,16 @@
+{
+  "schema": "stock-ai.t14-validation.v1",
+  "status": "passed",
+  "automated_tests": {
+    "repository_python": 110,
+    "release_configuration_ingress_deployment": 14,
+    "private_material": 4
+  },
+  "real_deployment": "Car executed persistent-runtime runner successfully, exit 0",
+  "secrets": "All nine rescued secrets preserved byte for byte by Car; lost TLS/JWKS keys replaced with authorization",
+  "rollback": "Exact persistent-bundle command recorded in deployment.json; image map unchanged, data rollback not performed",
+  "non_gating": [
+    "public DNS/TLS",
+    "host reboot"
+  ]
+}
