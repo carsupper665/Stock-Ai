@@ -1,0 +1,177 @@
+{
+  "backup": {
+    "agent_history": true,
+    "compose_and_env": true,
+    "consistency": "compose_stopped",
+    "created_at_utc": "2026-10-14T01:42:01.503923+00:00",
+    "duration_seconds": 24.243,
+    "encrypted_plaintext_scan_passed": true,
+    "encryption": "AES-256-GCM",
+    "secret_file_count": 6,
+    "sha256": "d1feb02f509922a669653c34f9240aa70f53aa2902bb89673b58a0a470f13def",
+    "three_sqlite_databases": true
+  },
+  "cleanup": {
+    "disposable_containers_removed": true,
+    "disposable_volumes_removed": true,
+    "restore_compose_containers_absent": true,
+    "restore_provider_container_absent": true,
+    "source_compose_containers_absent": true,
+    "source_provider_container_absent": true,
+    "verified_absent": true
+  },
+  "completed_at_utc": "2026-10-14T01:42:56.653179+00:00",
+  "docker_server": "linux 29.5.2",
+  "exercise_duration_seconds": 85.777,
+  "fixture": {
+    "accounts": true,
+    "messages": true,
+    "models": true,
+    "provider_encrypted_credential": true,
+    "runs": true,
+    "sessions": true,
+    "version": "deterministic-local-v1"
+  },
+  "image_reference_policy": "full local image IDs or repository digests",
+  "objectives": {
+    "fixture_committed_at_utc": "2026-10-14T01:42:01.503906+00:00",
+    "incident_declared_at_utc": "2026-10-14T01:42:24.857972+00:00",
+    "recovery_point_utc": "2026-10-14T01:42:01.503923+00:00",
+    "rpo_achieved_seconds": 23.354,
+    "rpo_passed": true,
+    "rpo_target_seconds": 86400,
+    "rto_achieved_seconds": 31.322,
+    "rto_passed": true,
+    "rto_target_seconds": 14400
+  },
+  "platform": "WSL/Linux + Docker Desktop",
+  "restore": {
+    "brand_new_disposable_volumes": true,
+    "business_checks": {
+      "account": true,
+      "history_file": true,
+      "message": true,
+      "model": true,
+      "provider_credential_decrypted": true,
+      "run_history": true,
+      "session": true
+    },
+    "duration_seconds": 2.173,
+    "health": {
+      "agent-server": "running/healthy",
+      "backend": "running/healthy",
+      "console": "running/healthy",
+      "llm-provider-server": "running/healthy"
+    },
+    "health_seconds": 22.871,
+    "helper_image": "sha256:6769dc3a703c719c1d2756bda113659be28ae16cf0da58dd5fd823d6b9a050ea",
+    "initial_directory_mode": "0700",
+    "initial_file_mode": "0600",
+    "post_start_baseline_rows_preserved": true,
+    "post_start_history_changed_by_recovery_run": true,
+    "post_start_history_file_count": 1,
+    "post_start_schema_equal": true,
+    "post_start_sqlite_integrity": {
+      "agent-server": "ok",
+      "backend": "ok",
+      "llm-provider-server": "ok"
+    },
+    "post_start_table_counts": {
+      "agent-server": {
+        "event_log": 0,
+        "events": 0,
+        "memories": 0,
+        "pending_triggers": 0,
+        "run_history_files": 1,
+        "runs": 2,
+        "sessions": 1
+      },
+      "backend": {
+        "accounts": 1,
+        "ledger_entries": 0,
+        "message_tags": 0,
+        "messages": 1,
+        "orders": 0,
+        "positions": 0,
+        "trades": 0
+      },
+      "llm-provider-server": {
+        "model_catalog": 0,
+        "provider_tokens": 1,
+        "providers": 1
+      }
+    },
+    "post_start_volume_ownership_valid": true,
+    "pre_start_history_equal": true,
+    "pre_start_sqlite_logical_state_equal": true,
+    "secret_file_mode": "0440",
+    "secret_uid_gid": "65532:1000",
+    "source_stack_distinct": true,
+    "uid_gid": "65532:65532",
+    "volume_count": 3
+  },
+  "retention": {
+    "checksum_validated_before_delete": true,
+    "dry_run_removed": 2,
+    "offhost_attestation_required": true,
+    "passed": true,
+    "removed": 2,
+    "retained": 1
+  },
+  "rollback": {
+    "full_data_restore": "verified encrypted set into new empty volumes",
+    "image_config_rollback": "metadata-driven; never changes named volumes",
+    "schema_downgrade": "not automated; restore decision required"
+  },
+  "schema": "stock-ai.local-recovery-exercise.v1",
+  "scope": {
+    "external_host_idp_dns_tls": "not_run_non_gate",
+    "ntfs_acl": "legacy_not_run_non_gate",
+    "windows_pester": "legacy_not_run_non_gate"
+  },
+  "status": "passed",
+  "verify": {
+    "checksum_valid": true,
+    "databases": {
+      "agent-server": {
+        "integrity_check": "ok",
+        "schema_sha256": "508a7a8e8ff76e2e6382855687cd028ddac609e19209913f933587429c9e947a",
+        "table_counts": {
+          "event_log": 0,
+          "events": 0,
+          "memories": 0,
+          "pending_triggers": 0,
+          "run_history_files": 1,
+          "runs": 1,
+          "sessions": 1
+        }
+      },
+      "backend": {
+        "integrity_check": "ok",
+        "schema_sha256": "0f54389f2c631fe276bed956e259208417d04d40ac5ab01afcbf617649fcc796",
+        "table_counts": {
+          "accounts": 1,
+          "ledger_entries": 0,
+          "message_tags": 0,
+          "messages": 1,
+          "orders": 0,
+          "positions": 0,
+          "trades": 0
+        }
+      },
+      "llm-provider-server": {
+        "integrity_check": "ok",
+        "schema_sha256": "4e76abec38309d889eb8889ff0cb8bd5fde46a7498a85ce017b7e3d69f557c61",
+        "table_counts": {
+          "model_catalog": 0,
+          "provider_tokens": 1,
+          "providers": 1
+        }
+      }
+    },
+    "duration_seconds": 0.01,
+    "encryption_authenticated": true,
+    "history_file_count": 1,
+    "history_sha256": "60bcc74094a5f90ee3b9e3c95afb6d6f733e0cd6e7a3eaf5b26a2f856fb87264"
+  }
+}

@@ -60,7 +60,7 @@ class SecurityContractTest(unittest.TestCase):
 
     def test_incomplete_risk_row_is_rejected(self):
         broken = self.text.replace(
-            "| R-001 | Critical | Open |", "| R-001 | Critical | Open | |", 1
+            "| R-001 | Critical | Closed |", "| R-001 | Critical | Closed | |", 1
         )
         errors = MODULE.validate_contract(broken)
         self.assertTrue(any("malformed/incomplete risk row" in error for error in errors), errors)
