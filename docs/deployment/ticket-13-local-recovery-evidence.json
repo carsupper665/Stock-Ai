@@ -3,22 +3,26 @@
     "agent_history": true,
     "compose_and_env": true,
     "consistency": "compose_stopped",
-    "created_at_utc": "2026-10-13T20:56:42.832912+00:00",
-    "duration_seconds": 24.209,
+    "created_at_utc": "2026-10-14T01:42:01.503923+00:00",
+    "duration_seconds": 24.243,
     "encrypted_plaintext_scan_passed": true,
     "encryption": "AES-256-GCM",
     "secret_file_count": 6,
-    "sha256": "248fe61ce8900d938c132bee374ee4841f8ec343d84a2c98ed8a13cc8534900b",
+    "sha256": "d1feb02f509922a669653c34f9240aa70f53aa2902bb89673b58a0a470f13def",
     "three_sqlite_databases": true
   },
   "cleanup": {
     "disposable_containers_removed": true,
     "disposable_volumes_removed": true,
+    "restore_compose_containers_absent": true,
+    "restore_provider_container_absent": true,
+    "source_compose_containers_absent": true,
+    "source_provider_container_absent": true,
     "verified_absent": true
   },
-  "completed_at_utc": "2026-10-13T20:57:37.911667+00:00",
+  "completed_at_utc": "2026-10-14T01:42:56.653179+00:00",
   "docker_server": "linux 29.5.2",
-  "exercise_duration_seconds": 82.718,
+  "exercise_duration_seconds": 85.777,
   "fixture": {
     "accounts": true,
     "messages": true,
@@ -28,15 +32,15 @@
     "sessions": true,
     "version": "deterministic-local-v1"
   },
-  "image_reference_policy": "full local image IDs",
+  "image_reference_policy": "full local image IDs or repository digests",
   "objectives": {
-    "fixture_committed_at_utc": "2026-10-13T20:56:42.832868+00:00",
-    "incident_declared_at_utc": "2026-10-13T20:57:07.152652+00:00",
-    "recovery_point_utc": "2026-10-13T20:56:42.832912+00:00",
-    "rpo_achieved_seconds": 24.32,
+    "fixture_committed_at_utc": "2026-10-14T01:42:01.503906+00:00",
+    "incident_declared_at_utc": "2026-10-14T01:42:24.857972+00:00",
+    "recovery_point_utc": "2026-10-14T01:42:01.503923+00:00",
+    "rpo_achieved_seconds": 23.354,
     "rpo_passed": true,
     "rpo_target_seconds": 86400,
-    "rto_achieved_seconds": 30.646,
+    "rto_achieved_seconds": 31.322,
     "rto_passed": true,
     "rto_target_seconds": 14400
   },
@@ -52,14 +56,14 @@
       "run_history": true,
       "session": true
     },
-    "duration_seconds": 1.967,
+    "duration_seconds": 2.173,
     "health": {
       "agent-server": "running/healthy",
       "backend": "running/healthy",
       "console": "running/healthy",
       "llm-provider-server": "running/healthy"
     },
-    "health_seconds": 22.748,
+    "health_seconds": 22.871,
     "helper_image": "sha256:6769dc3a703c719c1d2756bda113659be28ae16cf0da58dd5fd823d6b9a050ea",
     "initial_directory_mode": "0700",
     "initial_file_mode": "0600",
@@ -165,9 +169,9 @@
         }
       }
     },
-    "duration_seconds": 0.012,
+    "duration_seconds": 0.01,
     "encryption_authenticated": true,
     "history_file_count": 1,
-    "history_sha256": "97c4339ffe6106a97867a4da0d64b23e72f6b5a7403081761a2dd30e9816ca95"
+    "history_sha256": "60bcc74094a5f90ee3b9e3c95afb6d6f733e0cd6e7a3eaf5b26a2f856fb87264"
   }
 }

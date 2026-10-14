@@ -1,8 +1,12 @@
+import copy
 import hashlib
+import importlib.util
 import json
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -12,6 +16,12 @@ DOC = ROOT / "docs" / "deployment" / "backup-restore.md"
 EVIDENCE = ROOT / "docs" / "deployment" / "ticket-13-local-recovery-evidence.json"
 SIDECAR = Path(f"{EVIDENCE}.sha256")
 WINDOWS = ROOT / "scripts" / "recovery.ps1"
+EXERCISE_SPEC = importlib.util.spec_from_file_location(
+    "exercise_linux_recovery", EXERCISE
+)
+assert EXERCISE_SPEC and EXERCISE_SPEC.loader
+exercise_module = importlib.util.module_from_spec(EXERCISE_SPEC)
+EXERCISE_SPEC.loader.exec_module(exercise_module)
 
 
 class RecoveryPolicyTest(unittest.TestCase):
@@ -37,6 +47,15 @@ class RecoveryPolicyTest(unittest.TestCase):
         ):
             self.assertIn(marker, self.linux)
         self.assertEqual(len(re.findall(r'^    "[a-z_]+",$', self.linux, re.MULTILINE)), 6)
+
+    def test_application_images_are_immutable_at_backup_verify_and_restore(self):
+        for marker in (
+            "validate_application_images(manifest.get(\"images\"))",
+            "images = validate_application_images(",
+            "restored_images = validate_application_images(",
+            "full local SHA-256 ID or repository digest",
+        ):
+            self.assertIn(marker, self.linux)
 
     def test_encryption_checksums_and_safe_extraction_are_authenticated(self):
         for marker in (
@@ -117,8 +136,68 @@ class RecoveryPolicyTest(unittest.TestCase):
         self.assertTrue(all(self.evidence["restore"]["business_checks"].values()))
         self.assertTrue(all(value == "running/healthy" for value in self.evidence["restore"]["health"].values()))
         self.assertTrue(self.evidence["cleanup"]["verified_absent"])
+        for name in (
+            "source_compose_containers_absent",
+            "restore_compose_containers_absent",
+            "source_provider_container_absent",
+            "restore_provider_container_absent",
+            "disposable_containers_removed",
+            "disposable_volumes_removed",
+        ):
+            self.assertTrue(self.evidence["cleanup"][name])
         self.assertEqual(self.evidence["backup"]["secret_file_count"], 6)
         self.assertTrue(self.evidence["backup"]["encrypted_plaintext_scan_passed"])
+
+    def test_executable_evidence_gate_rejects_false_pass_claims(self):
+        exercise_module.assert_evidence_acceptance(self.evidence)
+        mutations = (
+            (("backup", "encrypted_plaintext_scan_passed"), "backup.encrypted_plaintext"),
+            (("retention", "passed"), "retention.passed"),
+            (("objectives", "rpo_passed"), "objectives.rpo_passed"),
+            (("objectives", "rto_passed"), "objectives.rto_passed"),
+            (("cleanup", "source_compose_containers_absent"), "cleanup.source_compose"),
+            (("cleanup", "restore_provider_container_absent"), "cleanup.restore_provider"),
+        )
+        for path, expected in mutations:
+            with self.subTest(path=path):
+                candidate = copy.deepcopy(self.evidence)
+                candidate[path[0]][path[1]] = False
+                candidate["status"] = "pending"
+                with self.assertRaisesRegex(exercise_module.ExerciseError, expected):
+                    exercise_module.assert_evidence_acceptance(candidate)
+        self.assertLess(
+            self.exercise.index("assert_evidence_acceptance(evidence)"),
+            self.exercise.index('evidence["status"] = "passed"'),
+        )
+
+    def test_cleanup_verifier_detects_each_resource_class(self):
+        source = "stock-ai-recovery-source-deadbeef"
+        restore = "stock-ai-recovery-restore-deadbeef"
+        source_fixture = f"{source}-provider"
+        restore_fixture = f"{restore}-provider"
+
+        def fake_run(args, *, allow_failure=False):
+            del allow_failure
+            output = ""
+            if args[:3] == ["docker", "ps", "--all"] and "--quiet" in args:
+                if args[-1] == f"label=com.docker.compose.project={source}":
+                    output = "source-container-id\n"
+            elif args[:3] == ["docker", "ps", "--all"]:
+                output = f"{restore_fixture}\n"
+            elif args[:3] == ["docker", "volume", "ls"]:
+                output = f"{restore}_backend_state\n"
+            return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+        with mock.patch.object(exercise_module, "run", side_effect=fake_run):
+            result = exercise_module.verify_cleanup_absence(
+                source, restore, source_fixture, restore_fixture
+            )
+        self.assertFalse(result["source_compose_containers_absent"])
+        self.assertTrue(result["restore_compose_containers_absent"])
+        self.assertTrue(result["source_provider_container_absent"])
+        self.assertFalse(result["restore_provider_container_absent"])
+        self.assertFalse(result["disposable_volumes_removed"])
+        self.assertFalse(result["verified_absent"])
 
     def test_evidence_sidecar_matches_and_contains_no_secret_payload_fields(self):
         match = re.fullmatch(

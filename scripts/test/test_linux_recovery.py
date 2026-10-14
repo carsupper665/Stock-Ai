@@ -127,6 +127,32 @@ class LinuxRecoveryTests(unittest.TestCase):
         self.assertNotIn("private-", encoded)
         self.assertNotIn("source-secrets", encoded)
 
+    def test_application_images_reject_mutable_tags(self) -> None:
+        immutable = {
+            service: f"example/{service}@sha256:{index:064x}"
+            for index, service in enumerate(recovery.SERVICES, start=1)
+        }
+        self.assertEqual(recovery.validate_application_images(immutable), immutable)
+        local_ids = {
+            service: f"sha256:{index:064x}"
+            for index, service in enumerate(recovery.SERVICES, start=1)
+        }
+        self.assertEqual(recovery.validate_application_images(local_ids), local_ids)
+
+        mutable = dict(immutable)
+        mutable["backend"] = "example/backend:0.7.0"
+        with self.assertRaisesRegex(recovery.RecoveryError, "full local SHA-256"):
+            recovery.validate_application_images(mutable)
+
+        contents = self.make_contents()
+        manifest_path = contents / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["images"]["console"] = "example/console:latest"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        os.chmod(manifest_path, 0o600)
+        with self.assertRaisesRegex(recovery.RecoveryError, "full local SHA-256"):
+            recovery.validate_contents(contents)
+
     def test_checksum_and_gcm_each_reject_tampering(self) -> None:
         backup = self.make_encrypted_backup()
         data = bytearray(backup.read_bytes())

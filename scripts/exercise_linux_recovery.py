@@ -714,6 +714,173 @@ def write_sanitized_evidence(path: Path, evidence: dict[str, Any], secrets_to_sc
         os.close(descriptor)
 
 
+def _evidence_value(evidence: dict[str, Any], *path: str) -> Any:
+    value: Any = evidence
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return None
+        value = value[key]
+    return value
+
+
+def assert_evidence_acceptance(evidence: dict[str, Any]) -> None:
+    failures: list[str] = []
+
+    def require(name: str, condition: bool) -> None:
+        if not condition:
+            failures.append(name)
+
+    require(
+        "backup.encrypted_plaintext_scan_passed",
+        _evidence_value(evidence, "backup", "encrypted_plaintext_scan_passed") is True,
+    )
+    require(
+        "backup.encryption",
+        _evidence_value(evidence, "backup", "encryption") == "AES-256-GCM",
+    )
+    require(
+        "backup.secret_file_count",
+        _evidence_value(evidence, "backup", "secret_file_count") == len(recovery.SECRETS),
+    )
+    require(
+        "verify.checksum_valid",
+        _evidence_value(evidence, "verify", "checksum_valid") is True,
+    )
+    require(
+        "verify.encryption_authenticated",
+        _evidence_value(evidence, "verify", "encryption_authenticated") is True,
+    )
+    require(
+        "retention.passed",
+        _evidence_value(evidence, "retention", "passed") is True,
+    )
+    require(
+        "retention.removed",
+        _evidence_value(evidence, "retention", "removed") == 2
+        and _evidence_value(evidence, "retention", "dry_run_removed") == 2,
+    )
+    require(
+        "restore.volume_count",
+        _evidence_value(evidence, "restore", "volume_count") == len(recovery.VOLUMES),
+    )
+    for name in (
+        "source_stack_distinct",
+        "brand_new_disposable_volumes",
+        "post_start_volume_ownership_valid",
+        "pre_start_sqlite_logical_state_equal",
+        "pre_start_history_equal",
+        "post_start_schema_equal",
+        "post_start_baseline_rows_preserved",
+    ):
+        require(
+            f"restore.{name}",
+            _evidence_value(evidence, "restore", name) is True,
+        )
+    health = _evidence_value(evidence, "restore", "health")
+    require(
+        "restore.health",
+        isinstance(health, dict)
+        and set(health) == set(recovery.SERVICES)
+        and all(value == "running/healthy" for value in health.values()),
+    )
+    integrity = _evidence_value(evidence, "restore", "post_start_sqlite_integrity")
+    require(
+        "restore.post_start_sqlite_integrity",
+        isinstance(integrity, dict)
+        and set(integrity) == set(recovery.DATABASES)
+        and all(value == "ok" for value in integrity.values()),
+    )
+    business_checks = _evidence_value(evidence, "restore", "business_checks")
+    require(
+        "restore.business_checks",
+        isinstance(business_checks, dict)
+        and bool(business_checks)
+        and all(value is True for value in business_checks.values()),
+    )
+    objectives = _evidence_value(evidence, "objectives")
+    for name in ("rpo", "rto"):
+        achieved = objectives.get(f"{name}_achieved_seconds") if isinstance(objectives, dict) else None
+        target = objectives.get(f"{name}_target_seconds") if isinstance(objectives, dict) else None
+        require(
+            f"objectives.{name}_passed",
+            isinstance(objectives, dict)
+            and objectives.get(f"{name}_passed") is True
+            and type(achieved) in (int, float)
+            and type(target) in (int, float)
+            and (0 <= achieved <= target if name == "rpo" else 0 < achieved <= target),
+        )
+    for name in (
+        "source_compose_containers_absent",
+        "restore_compose_containers_absent",
+        "source_provider_container_absent",
+        "restore_provider_container_absent",
+        "disposable_containers_removed",
+        "disposable_volumes_removed",
+        "verified_absent",
+    ):
+        require(
+            f"cleanup.{name}",
+            _evidence_value(evidence, "cleanup", name) is True,
+        )
+    require(
+        "image_reference_policy",
+        _evidence_value(evidence, "image_reference_policy")
+        == "full local image IDs or repository digests",
+    )
+    if failures:
+        raise ExerciseError(
+            "Recovery evidence acceptance checks failed: " + ", ".join(failures)
+        )
+
+
+def verify_cleanup_absence(
+    source_stack: str,
+    restore_stack: str,
+    source_fixture_name: str,
+    restore_fixture_name: str,
+) -> dict[str, bool]:
+    compose_absent: dict[str, bool] = {}
+    for label, stack in (("source", source_stack), ("restore", restore_stack)):
+        identifiers = run(
+            [
+                "docker",
+                "ps",
+                "--all",
+                "--quiet",
+                "--filter",
+                f"label=com.docker.compose.project={stack}",
+            ]
+        ).stdout.split()
+        compose_absent[f"{label}_compose_containers_absent"] = not identifiers
+    container_names = set(
+        run(["docker", "ps", "--all", "--format", "{{.Names}}"]).stdout.splitlines()
+    )
+    provider_absent = {
+        "source_provider_container_absent": source_fixture_name not in container_names,
+        "restore_provider_container_absent": restore_fixture_name not in container_names,
+    }
+    volume_names = set(
+        run(["docker", "volume", "ls", "--format", "{{.Name}}"]).stdout.splitlines()
+    )
+    expected_volumes = {
+        f"{stack}_{suffix}"
+        for stack in (source_stack, restore_stack)
+        for suffix in recovery.VOLUMES.values()
+    }
+    result = {
+        **compose_absent,
+        **provider_absent,
+        "disposable_containers_removed": all(compose_absent.values())
+        and all(provider_absent.values()),
+        "disposable_volumes_removed": not bool(expected_volumes & volume_names),
+    }
+    result["verified_absent"] = (
+        result["disposable_containers_removed"]
+        and result["disposable_volumes_removed"]
+    )
+    return result
+
+
 def exercise(compose_source: Path, evidence_file: Path, nginx_reference: str) -> dict[str, Any]:
     exercise_started = time.monotonic()
     suffix = secrets.token_hex(4)
@@ -886,10 +1053,9 @@ def exercise(compose_source: Path, evidence_file: Path, nginx_reference: str) ->
             )
             evidence = {
                 "schema": "stock-ai.local-recovery-exercise.v1",
-                "completed_at_utc": now().isoformat(),
                 "platform": "WSL/Linux + Docker Desktop",
                 "docker_server": docker_server,
-                "status": "passed",
+                "status": "pending",
                 "scope": {
                     "windows_pester": "legacy_not_run_non_gate",
                     "ntfs_acl": "legacy_not_run_non_gate",
@@ -980,12 +1146,8 @@ def exercise(compose_source: Path, evidence_file: Path, nginx_reference: str) ->
                     "full_data_restore": "verified encrypted set into new empty volumes",
                     "schema_downgrade": "not automated; restore decision required",
                 },
-                "cleanup": {
-                    "disposable_containers_removed": True,
-                    "disposable_volumes_removed": True,
-                },
-                "image_reference_policy": "full local image IDs",
-                "exercise_duration_seconds": round(time.monotonic() - exercise_started, 3),
+                "cleanup": {},
+                "image_reference_policy": "full local image IDs or repository digests",
             }
         finally:
             run(["docker", "rm", "-f", restore_fixture_name], allow_failure=True)
@@ -1026,14 +1188,21 @@ def exercise(compose_source: Path, evidence_file: Path, nginx_reference: str) ->
                         ["docker", "volume", "rm", f"{stack}_{suffix_name}"],
                         allow_failure=True,
                     )
-        evidence["cleanup"]["verified_absent"] = all(
-            run(["docker", "volume", "inspect", f"{stack}_{suffix_name}"], allow_failure=True).returncode
-            != 0
-            for stack in (source_stack, restore_stack)
-            for suffix_name in recovery.VOLUMES.values()
+            cleanup = verify_cleanup_absence(
+                source_stack,
+                restore_stack,
+                source_fixture_name,
+                restore_fixture_name,
+            )
+            if not cleanup["verified_absent"]:
+                raise ExerciseError("Disposable container or volume cleanup verification failed.")
+        evidence["cleanup"].update(cleanup)
+        evidence["completed_at_utc"] = now().isoformat()
+        evidence["exercise_duration_seconds"] = round(
+            time.monotonic() - exercise_started, 3
         )
-        if not evidence["cleanup"]["verified_absent"]:
-            raise ExerciseError("Disposable volume cleanup verification failed.")
+        assert_evidence_acceptance(evidence)
+        evidence["status"] = "passed"
         write_sanitized_evidence(
             evidence_file,
             evidence,

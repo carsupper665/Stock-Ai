@@ -69,6 +69,9 @@ BACKUP_NAME = re.compile(
 RESTORE_STACK = re.compile(
     r"^[a-z0-9][a-z0-9-]{1,47}-restore-[a-z0-9]{4,16}$"
 )
+IMMUTABLE_IMAGE = re.compile(
+    r"(?:sha256:[0-9a-f]{64}|[^\s@]+@sha256:[0-9a-f]{64})"
+)
 
 
 class RecoveryError(RuntimeError):
@@ -355,6 +358,20 @@ def required_backup_paths(root: Path) -> list[Path]:
     return paths
 
 
+def validate_application_images(value: object) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != set(SERVICES):
+        raise RecoveryError("Backup image metadata is incomplete.")
+    images: dict[str, str] = {}
+    for service in SERVICES:
+        reference = value.get(service)
+        if not isinstance(reference, str) or not IMMUTABLE_IMAGE.fullmatch(reference):
+            raise RecoveryError(
+                "Application images must use a full local SHA-256 ID or repository digest."
+            )
+        images[service] = reference
+    return images
+
+
 def validate_contents(root: Path) -> dict[str, Any]:
     manifest_path = root / "manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
@@ -373,8 +390,7 @@ def validate_contents(root: Path) -> dict[str, Any]:
                 raise RecoveryError("Backup is missing Agent History.")
         elif path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
             raise RecoveryError("Backup is missing required recovery content.")
-    if set(manifest.get("images", {})) != set(SERVICES):
-        raise RecoveryError("Backup image metadata is incomplete.")
+    manifest["images"] = validate_application_images(manifest.get("images"))
     return manifest
 
 
@@ -484,6 +500,9 @@ def backup(
     recovery_key(key_file)
     validate_docker()
     config = validate_compose(env_file, compose_file)
+    images = validate_application_images(
+        {service: config["services"][service].get("image") for service in SERVICES}
+    )
     running = bool(
         run(compose_args(env_file, compose_file, "ps", "--status", "running", "-q"))
         .stdout.strip()
@@ -511,7 +530,6 @@ def backup(
             _copy_private(env_file, config_directory / "compose.env")
             for name, source in secret_paths.items():
                 _copy_private(source, secrets_directory / name)
-            images = {service: str(config["services"][service]["image"]) for service in SERVICES}
             manifest = {
                 "schema": SCHEMA,
                 "created_at_utc": started.isoformat(),
@@ -596,10 +614,7 @@ def _remove_volumes(names: Iterable[str]) -> None:
 
 
 def _immutable_helper(reference: str) -> str:
-    if not (
-        re.fullmatch(r"sha256:[0-9a-f]{64}", reference)
-        or re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", reference)
-    ):
+    if not IMMUTABLE_IMAGE.fullmatch(reference):
         raise RecoveryError("Recovery helper image must be pinned by a full SHA-256 digest.")
     return reference
 
@@ -826,9 +841,14 @@ def restore(
             restored_config = validate_compose(
                 restore_directory / "compose.env", restore_directory / "compose.yaml"
             )
-            for service in SERVICES:
-                if restored_config["services"][service]["image"] != manifest["images"][service]:
-                    raise RecoveryError("Restored image reference does not match backup metadata.")
+            restored_images = validate_application_images(
+                {
+                    service: restored_config["services"][service].get("image")
+                    for service in SERVICES
+                }
+            )
+            if restored_images != manifest["images"]:
+                raise RecoveryError("Restored image reference does not match backup metadata.")
             result = {
                 "action": "restore",
                 "backup_file": backup_file.name,

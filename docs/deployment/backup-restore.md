@@ -53,8 +53,12 @@ Keep the recovery key as canonical base64 for exactly 32 random bytes and mode
 
 ## Consistent encrypted backup and verification
 
-Backup validates all six secrets and Compose metadata, records exact image
-references, stops the stack, and copies `/data` from the stopped containers.
+Backup validates all six secrets and Compose metadata, requires every
+application image reference to be either a full local `sha256:<64 hex>` ID or
+`repository@sha256:<64 hex>` digest, records those exact references, stops the
+stack, and copies `/data` from the stopped containers. Mutable tags are rejected
+before the stack is stopped. Restore revalidates the archived references and
+requires the rendered restored Compose configuration to match them exactly.
 It restarts the stack only when it was running before the operation. Stopping
 all services means each SQLite main file and any WAL/journal state are copied
 at one consistent recovery point rather than from an actively mutating file.
@@ -173,9 +177,12 @@ verify the baseline Run History through its API and record the additional
 recovery state rather than incorrectly requiring a live database to remain
 byte-for-byte unchanged.
 
-Destroy the disposable recovery containers and volumes after acceptance. Do
-not delete or repurpose the failed/production source volumes as part of this
-workflow.
+Destroy the disposable recovery containers and volumes after acceptance. The
+exercise fails unless label-based queries prove that both source and restore
+Compose projects have no containers, exact-name queries prove that both local
+Provider fixture containers are absent, and all six source/restore named
+volumes are absent. Do not delete or repurpose the failed/production source
+volumes as part of this workflow.
 
 ## Image/config rollback versus full data restore
 
