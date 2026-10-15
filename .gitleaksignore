@@ -3,3 +3,6 @@ backend/internal/config/config_test.go:generic-api-key:123
 llm_provider_server/test/diagnostic_security_http_test.go:generic-api-key:86
 llm_provider_server/test/token_http_test.go:generic-api-key:99
 llm_provider_server/test/provider_http_test.go:generic-api-key:22
+
+# Historical deterministic alphabet fixture in TestProductionLoadsNamespaceScopedSecretFiles.
+35ff20a020e1665ea3ff6c9d3f652dc627625f0a:backend/internal/config/config_test.go:generic-api-key:122
