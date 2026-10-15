@@ -9,6 +9,7 @@
 - 包含五個產品映像、兩個 auxiliary 映像、原始碼、完整 image digest 清單與 SHA-256 校驗碼。
 - 保留已驗收的 manifest digest，不經重新建置或重新推送產品映像。
 - 映像包會在目標機建立只監聽 `127.0.0.1:5000` 的 registry，解決原設定指向來源機本地 registry 的問題。
+- registry 只供安裝時載入映像，七個映像驗證完成後便停止；應用啟動使用 `--pull never`。
 - 目標機自行產生九個 secrets、TLS/JWKS 和空白資料庫；**不包含來源機的帳戶、交易資料、私鑰、環境檔或備份**。
 - 登入、Provider、行情與服務憑證 adapter 仍是本地 fixture。這不是外部 IdP／真實行情／真實交易的正式上線驗證。
 - 本機既有 144 個 Python 測試及 T16 安全／還原驗收記錄保留於原始碼中；遠端 Windows 仍需現場驗收。

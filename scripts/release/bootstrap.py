@@ -95,6 +95,7 @@ def main(args):
         print("Loading verified image: " + service, flush=True)
         run("docker", "pull", reference)
         run("docker", "image", "inspect", reference)
+    run("docker", "stop", registry_name)
     env_file = prepare(runtime=runtime)
     from accept import sync_bundle
     deployment = runtime / "deployment"
