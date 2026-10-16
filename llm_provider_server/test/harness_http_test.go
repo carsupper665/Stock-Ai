@@ -71,7 +71,7 @@ func TestHarnessPromptPlacesToolsBeforeMessagesForCachePrefix(t *testing.T) {
 	}
 }
 
-func TestHarnessGatewayDisclosesToolsInCLIPrompt(t *testing.T) {
+func TestHarnessGatewayDisclosesToolsToTheCLI(t *testing.T) {
 	for _, kind := range []string{"codex", "claude_code"} {
 		t.Run(kind, func(t *testing.T) {
 			fixture, key, variable := "codex-fixture.exe", "fixture-codex-key", "LLM_SERVER_CODEX_EXECUTABLE"
@@ -91,7 +91,12 @@ func TestHarnessGatewayDisclosesToolsInCLIPrompt(t *testing.T) {
 			}
 			response := request(t, server.Handler(), http.MethodPost, "/v1/generate", runtimeToken,
 				[]byte(`{"provider":"tool-disclosure","messages":[{"role":"user","content":"first"}],"tools":[{"name":"market.price","description":"price","input_schema":{"type":"object"}},{"name":"get_ohlcv","description":"candles","input_schema":{"type":"object"}}]}`))
-			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content":"tools=market.price,get_ohlcv"`) {
+			// Claude reads the tools from its prompt; Codex receives them as native dynamic tools under wire-safe names.
+			want := `"content":"tools=market.price,get_ohlcv"`
+			if kind == "codex" {
+				want = `"content":"tools=price,candles"`
+			}
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) {
 				t.Fatalf("generate=%d %s", response.Code, response.Body)
 			}
 		})

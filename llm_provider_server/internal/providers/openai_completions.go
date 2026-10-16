@@ -2,28 +2,46 @@ package providers
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
-const maxResponseBody = 1 << 20
+// OpenAICompletions is pi-ai's openai-completions Api: one non-streaming /chat/completions call.
+// OpenAI selects the native OpenAI rules (option allowlist, required credential, model-not-found);
+// otherwise any OpenAI-compatible Provider, which may run without a credential.
+type OpenAICompletions struct{ OpenAI bool }
 
-func CompatibleCall(providerType, baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (ProviderCall, error) {
-	openAI := providerType == "openai"
+func (api OpenAICompletions) Complete(ctx context.Context, model Model, request GenerateRequest, options Options) (GenerateResponse, error) {
+	aliases := NewToolAliases(request)
+	call, err := api.buildParams(model.BaseURL, model.ID, request, options.Options, aliases.WireByRuntime)
+	if err != nil {
+		return GenerateResponse{}, invalidRequest(err)
+	}
+	if options.APIKey != "" {
+		call.headers["Authorization"] = "Bearer " + options.APIKey
+	} else if api.OpenAI {
+		return GenerateResponse{}, errCredentialRequired
+	}
+	response, err := postJSON(ctx, options.Client, call)
+	if err != nil {
+		return GenerateResponse{}, err
+	}
+	defer response.Body.Close()
+	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages))
+}
+
+func (api OpenAICompletions) buildParams(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (providerCall, error) {
+	openAI := api.OpenAI
 	if openAI {
 		var err error
 		options, err = normalizeOpenAIOptions(options, request.Tools, WireByRuntime)
 		if err != nil {
-			return ProviderCall{}, err
+			return providerCall{}, err
 		}
 	}
 	upstreamRequest := map[string]any{"model": model, "messages": compatibleMessages(request.Messages, WireByRuntime, openAI)}
@@ -32,205 +50,15 @@ func CompatibleCall(providerType, baseURL, model string, request GenerateRequest
 	}
 	for key, value := range options {
 		if key == "model" || key == "messages" || key == "tools" {
-			return ProviderCall{}, errors.New("options cannot replace model, messages, or tools.")
+			return providerCall{}, errors.New("options cannot replace model, messages, or tools.")
 		}
 		upstreamRequest[key] = value
 	}
 	body, err := json.Marshal(upstreamRequest)
 	if err != nil {
-		return ProviderCall{}, errors.New("Options contain an invalid value.")
+		return providerCall{}, errors.New("Options contain an invalid value.")
 	}
-	return ProviderCall{URL: strings.TrimRight(baseURL, "/") + "/chat/completions", Headers: map[string]string{}, Body: body}, nil
-}
-
-// callProvider performs the single upstream request. It writes the transport, credential, and
-// rate-limit errors shared by every Provider type and returns nil when it did.
-func UpstreamStatusFailure(upstream *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(upstream.Body, maxUpstreamFailureBody))
-	message := fmt.Sprintf("Provider returned HTTP %d.", upstream.StatusCode)
-	if category := UpstreamFailureCategory(body); category != "" {
-		message += " " + category
-	}
-	return ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", message}
-}
-
-func UpstreamFailureCategory(body []byte) string {
-	var failure struct {
-		Error struct {
-			Code   string `json:"code"`
-			Type   string `json:"type"`
-			Status string `json:"status"`
-		} `json:"error"`
-		Code   string `json:"code"`
-		Type   string `json:"type"`
-		Status string `json:"status"`
-	}
-	if json.Unmarshal(body, &failure) != nil {
-		return ""
-	}
-	for _, value := range []string{failure.Error.Code, failure.Error.Type, failure.Error.Status, failure.Code, failure.Type, failure.Status} {
-		switch strings.ToLower(value) {
-		case "model_not_found", "model_not_found_error", "unknown_model":
-			return "Provider does not provide the requested model."
-		case "insufficient_quota", "quota_exceeded", "resource_exhausted", "billing_hard_limit_reached", "usage_limit_reached":
-			return "Provider quota is exhausted."
-		case "authentication_expired", "login_expired", "oauth_token_expired", "token_expired":
-			return "Provider login or credential has expired."
-		}
-	}
-	return ""
-}
-
-func ValidateGenerateRequest(request *GenerateRequest) error {
-	request.Provider = strings.TrimSpace(request.Provider)
-	if !ProviderIDPattern.MatchString(request.Provider) {
-		return errors.New("provider must be a valid provider ID")
-	}
-	if len(request.Messages) == 0 {
-		return errors.New("messages must contain at least one message")
-	}
-	if request.ConversationID != nil {
-		if *request.ConversationID == "" || utf8.RuneCountInString(*request.ConversationID) > 128 || strings.IndexFunc(*request.ConversationID, unicode.IsControl) >= 0 {
-			return errors.New("conversation_id must be 1-128 characters with no control characters")
-		}
-	}
-	if request.Continuation != nil && request.Continuation.AfterMessages <= 0 {
-		return errors.New("continuation.after_messages must be positive")
-	}
-	pendingCalls := map[string]bool{}
-	seenCalls := map[string]bool{}
-	for _, message := range request.Messages {
-		switch message.Role {
-		case "system", "user":
-			if message.Content == nil || len(message.ToolCalls) != 0 || message.ToolCallID != nil {
-				return errors.New("system and user messages require string content and no tool fields")
-			}
-		case "assistant":
-			if message.ToolCallID != nil || (message.Content == nil && len(message.ToolCalls) == 0) {
-				return errors.New("assistant messages require content or tool_calls and no tool_call_id")
-			}
-			for _, call := range message.ToolCalls {
-				if err := ValidateToolCall(call); err != nil {
-					return err
-				}
-				if seenCalls[call.ID] {
-					return errors.New("tool call IDs must be unique")
-				}
-				seenCalls[call.ID] = true
-				pendingCalls[call.ID] = true
-			}
-		case "tool":
-			if len(message.ToolCalls) != 0 || message.ToolCallID == nil || strings.TrimSpace(*message.ToolCallID) == "" || !pendingCalls[*message.ToolCallID] {
-				return errors.New("tool messages must reference an unresolved assistant tool call")
-			}
-			delete(pendingCalls, *message.ToolCallID)
-		default:
-			return errors.New("message role must be system, user, assistant, or tool")
-		}
-	}
-	toolNames := map[string]bool{}
-	for _, tool := range request.Tools {
-		if !ModelNamePattern.MatchString(tool.Name) || !ValidJSONObject(tool.InputSchema) || toolNames[tool.Name] {
-			return errors.New("tools require unique valid names and object input_schema values")
-		}
-		toolNames[tool.Name] = true
-	}
-	return nil
-}
-
-func ValidateToolCall(call ToolCall) error {
-	if strings.TrimSpace(call.ID) == "" || !ModelNamePattern.MatchString(call.Name) || !ValidJSONObject(call.Arguments) {
-		return errors.New("tool calls require an ID, valid name, and object arguments")
-	}
-	return nil
-}
-
-func ValidJSONObject(value json.RawMessage) bool {
-	if len(value) == 0 || IsJSONNull(value) {
-		return false
-	}
-	var object map[string]json.RawMessage
-	decoder := json.NewDecoder(bytes.NewReader(value))
-	if decoder.Decode(&object) != nil || object == nil {
-		return false
-	}
-	return errors.Is(decoder.Decode(&struct{}{}), io.EOF)
-}
-
-func NewToolAliases(request GenerateRequest) ToolAliases {
-	names := map[string]bool{}
-	for _, tool := range request.Tools {
-		names[tool.Name] = true
-	}
-	for _, message := range request.Messages {
-		for _, call := range message.ToolCalls {
-			names[call.Name] = true
-		}
-	}
-	sortedNames := make([]string, 0, len(names))
-	for name := range names {
-		sortedNames = append(sortedNames, name)
-	}
-	sort.Strings(sortedNames)
-	aliases := ToolAliases{WireByRuntime: map[string]string{}, RuntimeByWire: map[string]string{}}
-	for _, name := range sortedNames {
-		if compatibleToolNamePattern.MatchString(name) {
-			aliases.WireByRuntime[name] = name
-			aliases.RuntimeByWire[name] = name
-		}
-	}
-	for _, name := range sortedNames {
-		if _, exists := aliases.WireByRuntime[name]; exists {
-			continue
-		}
-		for attempt := 0; ; attempt++ {
-			wireName := compatibleToolAlias(name, attempt)
-			if _, collision := aliases.RuntimeByWire[wireName]; collision {
-				continue
-			}
-			aliases.WireByRuntime[name] = wireName
-			aliases.RuntimeByWire[wireName] = name
-			break
-		}
-	}
-	return aliases
-}
-
-func compatibleToolAlias(name string, attempt int) string {
-	var prefix strings.Builder
-	for _, character := range name {
-		if (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
-			(character >= '0' && character <= '9') || character == '_' || character == '-' {
-			prefix.WriteRune(character)
-		} else {
-			prefix.WriteByte('_')
-		}
-	}
-	seed := name
-	if attempt != 0 {
-		seed = fmt.Sprintf("%s\x00%d", name, attempt)
-	}
-	digest := sha256.Sum256([]byte(seed))
-	suffix := hex.EncodeToString(digest[:8])
-	base := prefix.String()
-	maxBaseLength := 64 - len(suffix) - 1
-	if len(base) > maxBaseLength {
-		base = base[:maxBaseLength]
-	}
-	if base == "" {
-		base = "tool"
-	}
-	return base + "_" + suffix
-}
-
-func HistoricalToolCallIDs(messages []Message) map[string]bool {
-	ids := map[string]bool{}
-	for _, message := range messages {
-		for _, call := range message.ToolCalls {
-			ids[call.ID] = true
-		}
-	}
-	return ids
+	return providerCall{url: strings.TrimRight(baseURL, "/") + "/chat/completions", headers: map[string]string{}, body: body}, nil
 }
 
 func compatibleMessages(messages []Message, WireByRuntime map[string]string, openAI bool) []map[string]any {
@@ -317,7 +145,7 @@ func normalizeOpenAIOptions(options map[string]json.RawMessage, tools []ToolSche
 }
 
 func isOpenAIModelNotFound(reader io.Reader) (bool, error) {
-	body, err := ReadProviderBody(reader)
+	body, err := readProviderBody(reader)
 	if err != nil {
 		return false, err
 	}
@@ -334,9 +162,8 @@ func isOpenAIModelNotFound(reader io.Reader) (bool, error) {
 	return response.Error.Code == "model_not_found" || response.Error.Param == "model", nil
 }
 
-const maxUpstreamFailureBody = 8 << 10
-
-func NormalizeCompatibleResponse(upstream *http.Response, openAI bool, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
+func (api OpenAICompletions) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
+	openAI := api.OpenAI
 	if openAI && (upstream.StatusCode == http.StatusBadRequest || upstream.StatusCode == http.StatusNotFound) {
 		modelNotFound, err := isOpenAIModelNotFound(upstream.Body)
 		if err != nil {
@@ -353,9 +180,9 @@ func NormalizeCompatibleResponse(upstream *http.Response, openAI bool, RuntimeBy
 		}
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return GenerateResponse{}, UpstreamStatusFailure(upstream)
+		return GenerateResponse{}, upstreamStatusFailure(upstream)
 	}
-	body, err := ReadProviderBody(upstream.Body)
+	body, err := readProviderBody(upstream.Body)
 	if err != nil {
 		return GenerateResponse{}, err
 	}
@@ -462,25 +289,4 @@ func NormalizeCompatibleResponse(upstream *http.Response, openAI bool, RuntimeBy
 		}
 	}
 	return normalized, nil
-}
-
-func IsJSONNull(value json.RawMessage) bool {
-	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
-}
-
-func ReadProviderBody(reader io.Reader) ([]byte, error) {
-	body, err := io.ReadAll(io.LimitReader(reader, maxResponseBody+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > maxResponseBody {
-		return nil, errors.New("provider response exceeds 1 MiB")
-	}
-	return body, nil
-}
-
-// sumTokens adds the Usage components a Provider actually reported; it is null only when it reported none.
-func IsTimeout(err error) bool {
-	var timeoutError interface{ Timeout() bool }
-	return errors.As(err, &timeoutError) && timeoutError.Timeout()
 }

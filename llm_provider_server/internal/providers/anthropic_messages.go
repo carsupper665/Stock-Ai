@@ -2,6 +2,7 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,10 +24,31 @@ var AnthropicOptionNames = map[string]bool{
 	"top_k": true, "top_p": true,
 }
 
-func AnthropicCall(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (ProviderCall, error) {
+// AnthropicMessages is pi-ai's anthropic-messages Api: one non-streaming Messages API call with an x-api-key credential.
+type AnthropicMessages struct{}
+
+func (api AnthropicMessages) Complete(ctx context.Context, model Model, request GenerateRequest, options Options) (GenerateResponse, error) {
+	aliases := NewToolAliases(request)
+	call, err := api.buildParams(model.BaseURL, model.ID, request, options.Options, aliases.WireByRuntime)
+	if err != nil {
+		return GenerateResponse{}, invalidRequest(err)
+	}
+	if options.APIKey == "" {
+		return GenerateResponse{}, errCredentialRequired
+	}
+	call.headers["x-api-key"] = options.APIKey
+	response, err := postJSON(ctx, options.Client, call)
+	if err != nil {
+		return GenerateResponse{}, err
+	}
+	defer response.Body.Close()
+	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages))
+}
+
+func (api AnthropicMessages) buildParams(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (providerCall, error) {
 	for name := range options {
 		if !AnthropicOptionNames[name] {
-			return ProviderCall{}, fmt.Errorf("Anthropic option %s is not supported by the normalized Generate contract", name)
+			return providerCall{}, fmt.Errorf("Anthropic option %s is not supported by the normalized Generate contract", name)
 		}
 	}
 	body := map[string]any{"model": model, "max_tokens": anthropicDefaultMaxTokens,
@@ -48,16 +70,16 @@ func AnthropicCall(baseURL, model string, request GenerateRequest, options map[s
 	if choice, exists := options["tool_choice"]; exists {
 		normalizedChoice, err := anthropicToolChoice(choice, request.Tools, WireByRuntime)
 		if err != nil {
-			return ProviderCall{}, err
+			return providerCall{}, err
 		}
 		body["tool_choice"] = normalizedChoice
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return ProviderCall{}, errors.New("Options contain an invalid value.")
+		return providerCall{}, errors.New("Options contain an invalid value.")
 	}
-	return ProviderCall{URL: strings.TrimRight(baseURL, "/") + "/messages",
-		Headers: map[string]string{"anthropic-version": anthropicVersion}, Body: encoded}, nil
+	return providerCall{url: strings.TrimRight(baseURL, "/") + "/messages",
+		headers: map[string]string{"anthropic-version": anthropicVersion}, body: encoded}, nil
 }
 
 func anthropicSystem(messages []Message) []map[string]any {
@@ -145,12 +167,12 @@ func anthropicToolChoice(choice json.RawMessage, tools []ToolSchema, WireByRunti
 	return normalized, nil
 }
 
-func NormalizeAnthropicResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
+func (api AnthropicMessages) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
 	switch upstream.StatusCode {
 	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
 		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "Anthropic rejected the generated request."}
 	case http.StatusNotFound:
-		body, err := ReadProviderBody(upstream.Body)
+		body, err := readProviderBody(upstream.Body)
 		if err != nil {
 			if IsTimeout(err) {
 				return GenerateResponse{}, err
@@ -162,9 +184,9 @@ func NormalizeAnthropicResponse(upstream *http.Response, RuntimeByWire map[strin
 		}
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return GenerateResponse{}, UpstreamStatusFailure(upstream)
+		return GenerateResponse{}, upstreamStatusFailure(upstream)
 	}
-	body, err := ReadProviderBody(upstream.Body)
+	body, err := readProviderBody(upstream.Body)
 	if err != nil {
 		return GenerateResponse{}, err
 	}

@@ -1,11 +1,12 @@
 package test
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	providers "stock-ai/llm-provider-server/internal/providers"
 	webharness "stock-ai/llm-provider-server/internal/webharness"
 )
 
@@ -30,24 +32,40 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestCodexHarnessPinsCapabilitiesAndNormalizesStructuredToolReturn(t *testing.T) {
+func codexComplete(t *testing.T, ctx context.Context, server *webharness.CodexAppServer, key, model string, timeout time.Duration, messages []providers.Message, tools []providers.ToolSchema) (providers.GenerateResponse, error) {
+	t.Helper()
+	return server.Complete(ctx, providers.Model{Provider: "codex", ID: model, Config: json.RawMessage(`{"auth_mode":"api_key"}`)},
+		providers.GenerateRequest{Provider: "codex", Messages: messages, Tools: tools},
+		providers.Options{APIKey: key, Client: &http.Client{Timeout: timeout}})
+}
+
+func userMessages(content string) []providers.Message {
+	return []providers.Message{{Role: "user", Content: &content}}
+}
+
+func providerErrorCode(err error) string {
+	failure, ok := err.(providers.ProviderError)
+	if !ok {
+		return fmt.Sprintf("not a ProviderError: %v", err)
+	}
+	return failure.Code
+}
+
+func TestCodexAppServerDeclaresToolsNativelyAndReturnsTheFirstCall(t *testing.T) {
 	attackerConfig := t.TempDir()
 	t.Setenv("HOME", attackerConfig)
 	t.Setenv("USERPROFILE", attackerConfig)
 	t.Setenv("CODEX_HOME", attackerConfig)
 	t.Setenv("CLAUDE_CONFIG_DIR", attackerConfig)
 	t.Setenv("OPENAI_API_KEY", "attacker-key")
-	executable := copyHarnessFixture(t, "codex-fixture.exe")
-	harness := webharness.CodexWebHarness{Executable: executable}
-	content := "Check BTC using current public information."
-	response, err := harness.Generate(context.Background(), "fixture-codex-key", webharness.WebHarnessRequest{
-		Model:    "gpt-5.4",
-		Messages: []webharness.WebHarnessMessage{{Role: "user", Content: &content}},
-		Tools: []webharness.WebHarnessTool{{
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
+	response, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "gpt-5.4", 5*time.Second,
+		userMessages("Check BTC using current public information."), []providers.ToolSchema{{
 			Name: "market.price", Description: "Return the current market price.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}`),
-		}},
-	})
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,77 +77,101 @@ func TestCodexHarnessPinsCapabilitiesAndNormalizesStructuredToolReturn(t *testin
 		t.Fatalf("tool call = %+v", call)
 	}
 	if response.Usage == nil || value(response.Usage.InputTokens) != 11 || value(response.Usage.OutputTokens) != 3 ||
-		value(response.Usage.CachedTokens) != 4 || response.Usage.TotalTokens != nil {
+		value(response.Usage.CachedTokens) != 4 || value(response.Usage.TotalTokens) != 14 {
 		t.Fatalf("usage = %+v", response.Usage)
 	}
 }
 
-func TestCodexHarnessRejectsWrongVersionAndInvalidOutput(t *testing.T) {
-	for _, test := range []struct {
-		model string
-		want  error
-	}{
-		{model: "wrong-version", want: webharness.ErrWebHarnessVersion},
-		{model: "invalid-output", want: webharness.ErrWebHarnessResponse},
+func TestCodexAppServerContinuesFromInjectedToolResult(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
+	question, result := "price?", `{"price":65000.5}`
+	callID := "call-price"
+	messages := []providers.Message{
+		{Role: "user", Content: &question},
+		{Role: "assistant", ToolCalls: []providers.ToolCall{{ID: callID, Name: "market.price", Arguments: json.RawMessage(`{"symbol":"BTCUSDT"}`)}}},
+		{Role: "tool", ToolCallID: &callID, Content: &result},
+	}
+	tools := []providers.ToolSchema{{Name: "market.price", Description: "price", InputSchema: json.RawMessage(`{"type":"object"}`)}}
+	response, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "tool-result-report", 5*time.Second, messages, tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.FinishReason != "stop" || response.Content == nil || *response.Content != "items=3 input=0 result="+result {
+		t.Fatalf("response = %+v content=%v", response, value2(response.Content))
+	}
+}
+
+func TestCodexAppServerRejectsWrongVersionAndInvalidOutput(t *testing.T) {
+	for _, test := range []struct{ fixture, model, code string }{
+		{fixture: "codex-fixture-wrong-version.exe", model: "gpt-5.4", code: "HARNESS_VERSION_MISMATCH"},
+		{fixture: "codex-fixture.exe", model: "invalid-output", code: "PROVIDER_RESPONSE_INVALID"},
 	} {
-		t.Run(test.model, func(t *testing.T) {
-			executable := copyHarnessFixture(t, "codex-fixture.exe")
-			if test.model == "wrong-version" {
-				executable = copyHarnessFixture(t, "codex-fixture-wrong-version.exe")
-			}
-			_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(context.Background(), "fixture-codex-key",
-				webharness.WebHarnessRequest{Model: test.model, Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
-			if !isError(err, test.want) {
-				t.Fatalf("error = %v, want %v", err, test.want)
+		t.Run(test.model+"/"+test.fixture, func(t *testing.T) {
+			t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, test.fixture))
+			server := webharness.NewCodexAppServer()
+			defer server.Close()
+			_, err := codexComplete(t, context.Background(), server, "fixture-codex-key", test.model, 5*time.Second, userMessages("hello"), nil)
+			if providerErrorCode(err) != test.code {
+				t.Fatalf("error = %v, want %s", err, test.code)
 			}
 		})
 	}
 }
 
-func TestCodexHarnessCancellationKillsTheInvocation(t *testing.T) {
-	executable := copyHarnessFixture(t, "codex-fixture.exe")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+func TestCodexAppServerTimeoutAndCancellationKeepTheServerUsable(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
 	started := time.Now()
-	_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
-		webharness.WebHarnessRequest{Model: "hang", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
-	if !isError(err, context.DeadlineExceeded) {
-		t.Fatalf("error = %v, want deadline exceeded", err)
+	_, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "hang", 200*time.Millisecond, userMessages("hello"), nil)
+	if providerErrorCode(err) != "PROVIDER_TIMEOUT" || time.Since(started) > 3*time.Second {
+		t.Fatalf("timeout error = %v after %s", err, time.Since(started))
 	}
-	if elapsed := time.Since(started); elapsed > 3*time.Second {
-		t.Fatalf("cancellation took %s", elapsed)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	_, err = codexComplete(t, ctx, server, "fixture-codex-key", "hang", 5*time.Second, userMessages("hello"), nil)
+	if providerErrorCode(err) != "REQUEST_CANCELED" {
+		t.Fatalf("cancel error = %v", err)
+	}
+	first, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "pid-report", 5*time.Second, userMessages("hello"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "pid-report", 5*time.Second, userMessages("hello"), nil)
+	if err != nil || *first.Content != *second.Content {
+		t.Fatalf("one credential must reuse one app-server: %v %v err=%v", value2(first.Content), value2(second.Content), err)
+	}
+	other, err := codexComplete(t, context.Background(), server, "fixture-codex-key-2", "pid-report", 5*time.Second, userMessages("hello"), nil)
+	if err != nil || *other.Content == *first.Content {
+		t.Fatalf("another credential must get its own app-server: %v err=%v", value2(other.Content), err)
 	}
 }
 
-func TestCodexHarnessRejectsOversizedOutputWithoutWaitingForTimeout(t *testing.T) {
-	executable := copyHarnessFixture(t, "codex-fixture.exe")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func TestCodexAppServerRejectsOversizedOutputWithoutWaitingForTimeout(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
 	started := time.Now()
-	_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
-		webharness.WebHarnessRequest{Model: "oversized-output", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: stringPointer("hello")}}})
-	if !isError(err, webharness.ErrWebHarnessResponse) {
-		t.Fatalf("error = %v, want invalid response", err)
-	}
-	if elapsed := time.Since(started); elapsed > 3*time.Second {
-		t.Fatalf("oversized output took %s", elapsed)
+	_, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "oversized-output", 5*time.Second, userMessages("hello"), nil)
+	if providerErrorCode(err) != "PROVIDER_RESPONSE_INVALID" || time.Since(started) > 3*time.Second {
+		t.Fatalf("oversized output error = %v after %s", err, time.Since(started))
 	}
 }
 
-func TestCodexHarnessCancellationKillsDescendants(t *testing.T) {
+func TestCodexAppServerCloseKillsDescendants(t *testing.T) {
 	if !processTreeTestSupported() {
 		t.Skip("process liveness probe is unavailable on this platform")
 	}
-	executable := copyHarnessFixture(t, "codex-fixture.exe")
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := webharness.NewCodexAppServer()
 	marker := filepath.Join(t.TempDir(), "descendant.pid")
-	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		_, err := (webharness.CodexWebHarness{Executable: executable}).Generate(ctx, "fixture-codex-key",
-			webharness.WebHarnessRequest{Model: "spawn-descendant", Messages: []webharness.WebHarnessMessage{{Role: "user", Content: &marker}}})
+		_, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "spawn-descendant", 30*time.Second, userMessages(marker), nil)
 		result <- err
 	}()
-
 	pid := waitForDescendantPID(t, marker)
 	defer func() {
 		if alive, _ := processIsAlive(pid); alive {
@@ -138,19 +180,32 @@ func TestCodexHarnessCancellationKillsDescendants(t *testing.T) {
 			}
 		}
 	}()
-	if alive, err := processIsAlive(pid); err != nil || !alive {
-		t.Fatalf("descendant was not alive before cancellation: alive=%t error=%v", alive, err)
-	}
-	cancel()
+	server.Close()
 	select {
 	case err := <-result:
-		if !isError(err, context.Canceled) {
-			t.Fatalf("error = %v, want context canceled", err)
+		if err == nil {
+			t.Fatal("Generate succeeded after Close")
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("Generate did not return after cancellation")
+		t.Fatal("Generate did not return after Close")
 	}
 	waitForProcessExit(t, pid)
+}
+
+func value2(text *string) string {
+	if text == nil {
+		return "<nil>"
+	}
+	return *text
+}
+
+// --- fake `codex app-server` ---
+
+type codexFixtureThread struct {
+	id, model, instructions string
+	tools                   []struct{ Name, Description string }
+	injected                []json.RawMessage
+	raw                     []byte
 }
 
 func runCodexFixture() int {
@@ -168,147 +223,231 @@ func runCodexFixture() int {
 			return 13
 		}
 		if strings.Contains(strings.ToLower(filepath.Base(os.Args[0])), "wrong-version") {
-			fmt.Println("codex-cli 0.144.0")
+			fmt.Println("codex-cli 0.161.0")
 		} else {
-			fmt.Println("codex-cli 0.145.0")
+			fmt.Println("codex-cli 0.162.1")
 		}
 		return 0
 	}
-	prompt, _ := io.ReadAll(os.Stdin)
-	request := fixtureHarnessRequest(prompt)
-	if strings.Contains(string(prompt), `"model":"hang"`) {
-		time.Sleep(30 * time.Second)
-		return 1
-	}
-	if !codexInvocationIsRestricted(request) {
+	if !codexAppServerIsRestricted() {
 		return 2
 	}
-	if strings.Contains(string(prompt), `"model":"invalid-output"`) {
-		fmt.Println(`{"type":"turn.completed","usage":{}}`)
-		return 0
+	return serveCodexFixture()
+}
+
+func serveCodexFixture() int {
+	local := strings.Contains(filepath.Base(os.Args[0]), "-local")
+	shutdown := strings.Contains(filepath.Base(os.Args[0]), "-shutdown")
+	output := json.NewEncoder(os.Stdout)
+	emit := func(method string, params any) { _ = output.Encode(map[string]any{"method": method, "params": params}) }
+	reply := func(id json.RawMessage, result any) { _ = output.Encode(map[string]any{"id": id, "result": result}) }
+	fail := func(id json.RawMessage, message string) {
+		_ = output.Encode(map[string]any{"id": id, "error": map[string]any{"code": -32600, "message": message}})
 	}
-	if request.Model == "oversized-output" {
-		chunk := strings.Repeat("x", 64<<10)
-		for index := 0; index < 32; index++ {
-			fmt.Print(chunk)
+	completeWith := func(thread *codexFixtureThread, text string) {
+		emit("item/completed", map[string]any{"threadId": thread.id, "item": map[string]any{"type": "agentMessage", "text": text}})
+		emit("turn/completed", map[string]any{"threadId": thread.id, "turn": map[string]any{"id": "turn-" + thread.id, "status": "completed"}})
+	}
+	failTurn := func(thread *codexFixtureThread, message string) {
+		emit("error", map[string]any{"threadId": thread.id, "willRetry": false, "error": map[string]any{"message": message}})
+		emit("turn/completed", map[string]any{"threadId": thread.id, "turn": map[string]any{"id": "turn-" + thread.id, "status": "failed", "error": map[string]any{"message": message}}})
+	}
+	threads := map[string]*codexFixtureThread{}
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1<<20), 16<<20)
+	for scanner.Scan() {
+		var message struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
-		return 0
-	}
-	if request.Model == "diagnostic-secret" {
-		fmt.Printf("{\"type\":\"turn.failed\",\"error\":{\"message\":%q}}\n",
-			"usage limit reached "+strings.Repeat("x", 295)+diagnosticSecret)
-		fmt.Fprintln(os.Stderr, "stderr "+diagnosticSecret)
-		return 0
-	}
-	if request.Model == "diagnostic-model-secret" {
-		fmt.Printf("{\"type\":\"turn.failed\",\"error\":{\"message\":%q}}\n", "unknown model "+diagnosticSecret)
-		return 0
-	}
-	if request.Model == "diagnostic-login-secret" {
-		fmt.Printf("{\"type\":\"turn.failed\",\"error\":{\"message\":%q}}\n", "login expired "+diagnosticSecret)
-		return 0
-	}
-	if request.Model == "diagnostic-stderr-secret" {
-		fmt.Fprintln(os.Stderr, strings.Repeat("x", 295)+diagnosticSecret)
-		return 1
-	}
-	if request.Model == "auth-failure" {
-		fmt.Println(`{"type":"turn.failed","error":{"message":"authentication failed: 401"}}`)
-		return 0
-	}
-	if strings.Contains(strings.ToLower(filepath.Base(os.Args[0])), "-shutdown") {
-		signal.Ignore(os.Interrupt)
-		marker := *request.Messages[0].Content
-		command := exec.Command(os.Args[0], "codex-descendant", marker+".descendant")
-		command.Stdout = io.Discard
-		command.Stderr = io.Discard
-		if err := command.Start(); err != nil {
+		if json.Unmarshal(scanner.Bytes(), &message) != nil {
 			return 4
 		}
-		deadline := time.Now().Add(2 * time.Second)
-		for {
-			if _, err := os.Stat(marker + ".descendant"); err == nil {
-				break
+		var scope struct {
+			ThreadID string `json:"threadId"`
+		}
+		_ = json.Unmarshal(message.Params, &scope)
+		thread := threads[scope.ThreadID]
+		switch message.Method {
+		case "initialize":
+			var params struct {
+				Capabilities struct {
+					ExperimentalAPI bool `json:"experimentalApi"`
+				} `json:"capabilities"`
 			}
-			if time.Now().After(deadline) {
-				_ = command.Process.Kill()
-				return 5
+			if json.Unmarshal(message.Params, &params) != nil || !params.Capabilities.ExperimentalAPI {
+				fail(message.ID, "dynamicTools require experimentalApi")
+				continue
 			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		state, _ := json.Marshal(shutdownHarnessState{
-			CLIPID: os.Getpid(), DescendantPID: command.Process.Pid, WorkingDirectory: mustWorkingDirectory(),
-		})
-		_ = command.Process.Release()
-		if err := os.WriteFile(marker, state, 0o600); err != nil {
-			return 6
-		}
-		time.Sleep(30 * time.Second)
-		return 1
-	}
-	if request.Model == "spawn-descendant" {
-		command := exec.Command(os.Args[0], "codex-descendant", *request.Messages[0].Content)
-		command.Stdout = io.Discard
-		command.Stderr = io.Discard
-		if err := command.Start(); err != nil {
-			return 4
-		}
-		_ = command.Process.Release()
-		time.Sleep(30 * time.Second)
-		return 1
-	}
-	if request.Model == "effort-report" {
-		reported := fmt.Sprintf(`{"content":%q,"tool_calls":[],"finish_reason":"stop"}`, fixtureCodexEffort())
-		fmt.Printf("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":%q}}\n", reported)
-		fmt.Println(`{"type":"turn.completed","usage":{}}`)
-		return 0
-	}
-	if request.Model == "prompt-order-report" {
-		tools := bytes.Index(prompt, []byte(`"tools":`))
-		messages := bytes.Index(prompt, []byte(`"messages":`))
-		content := "messages-before-tools"
-		if tools >= 0 && tools < messages {
-			content = "tools-before-messages"
-		}
-		reported := fmt.Sprintf(`{"content":%q,"tool_calls":[],"finish_reason":"stop"}`, content)
-		fmt.Printf("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":%q}}\n", reported)
-		fmt.Println(`{"type":"turn.completed","usage":{}}`)
-		return 0
-	}
-	if request.Model == "tool-disclosure-report" {
-		content := "tools=none"
-		if len(request.Tools) > 0 {
-			names := make([]string, 0, len(request.Tools))
-			for _, tool := range request.Tools {
-				names = append(names, tool.Name)
+			reply(message.ID, map[string]string{"userAgent": "codex-fixture"})
+		case "initialized":
+		case "account/login/start":
+			var params struct{ Type, APIKey string }
+			_ = json.Unmarshal(message.Params, &params)
+			if local || params.Type != "apiKey" || !strings.HasPrefix(params.APIKey, "fixture-codex-key") {
+				fail(message.ID, "invalid api key: 401")
+				continue
 			}
-			content = "tools=" + strings.Join(names, ",")
+			reply(message.ID, map[string]string{"type": "apiKey"})
+		case "account/read":
+			body, err := os.ReadFile(filepath.Join(mustWorkingDirectory(), "auth.json"))
+			if err != nil || string(body) != `{"fixture_login":true}` {
+				reply(message.ID, map[string]any{"account": nil})
+				continue
+			}
+			reply(message.ID, map[string]any{"account": map[string]string{"type": "chatgpt"}})
+		case "thread/start":
+			var params struct {
+				Model            string `json:"model"`
+				BaseInstructions string `json:"baseInstructions"`
+				Ephemeral        bool   `json:"ephemeral"`
+				Sandbox          string `json:"sandbox"`
+				ApprovalPolicy   string `json:"approvalPolicy"`
+				DynamicTools     []struct{ Name, Description string }
+			}
+			if json.Unmarshal(message.Params, &params) != nil || !params.Ephemeral || params.Sandbox != "read-only" || params.ApprovalPolicy != "never" {
+				fail(message.ID, "unrestricted thread")
+				continue
+			}
+			if params.Model == "" {
+				params.Model = "cli-default"
+			}
+			thread := &codexFixtureThread{id: fmt.Sprintf("thread-%d", len(threads)+1), model: params.Model, instructions: params.BaseInstructions,
+				tools: params.DynamicTools, raw: append([]byte(nil), message.Params...)}
+			threads[thread.id] = thread
+			reply(message.ID, map[string]any{"thread": map[string]string{"id": thread.id}})
+		case "thread/inject_items":
+			var params struct{ Items []json.RawMessage }
+			_ = json.Unmarshal(message.Params, &params)
+			thread.injected = append(thread.injected, params.Items...)
+			thread.raw = append(thread.raw, message.Params...)
+			reply(message.ID, map[string]any{})
+		case "turn/start":
+			var params struct {
+				Input  []struct{ Text string }
+				Effort string `json:"effort"`
+			}
+			_ = json.Unmarshal(message.Params, &params)
+			thread.raw = append(thread.raw, message.Params...)
+			reply(message.ID, map[string]any{"turn": map[string]string{"id": "turn-" + thread.id}})
+			if shutdown || thread.model == "spawn-descendant" {
+				marker := params.Input[0].Text
+				descendant := marker
+				if shutdown {
+					descendant = marker + ".descendant"
+				}
+				command := exec.Command(os.Args[0], "codex-descendant", descendant)
+				command.Stdout, command.Stderr = io.Discard, io.Discard
+				if command.Start() != nil {
+					return 5
+				}
+				if shutdown {
+					for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+						if _, err := os.Stat(descendant); err == nil {
+							break
+						}
+					}
+					state, _ := json.Marshal(shutdownHarnessState{CLIPID: os.Getpid(), DescendantPID: command.Process.Pid, WorkingDirectory: mustWorkingDirectory()})
+					_ = os.WriteFile(marker, state, 0o600)
+				}
+				_ = command.Process.Release()
+				continue
+			}
+			effort := params.Effort
+			if effort == "" {
+				effort = "none"
+			}
+			switch thread.model {
+			case "hang":
+			case "invalid-output":
+				emit("turn/completed", map[string]any{"threadId": thread.id, "turn": map[string]any{"id": "turn-" + thread.id, "status": "completed"}})
+			case "auth-failure":
+				failTurn(thread, "authentication failed: 401")
+			case "oversized-output":
+				fmt.Print(strings.Repeat("x", 2<<20))
+			case "diagnostic-secret":
+				failTurn(thread, "usage limit reached "+strings.Repeat("x", 295)+diagnosticSecret)
+			case "diagnostic-model-secret":
+				failTurn(thread, "unknown model "+diagnosticSecret)
+			case "diagnostic-login-secret":
+				failTurn(thread, "login expired "+diagnosticSecret)
+			case "diagnostic-stderr-secret":
+				fmt.Fprintln(os.Stderr, strings.Repeat("x", 295)+diagnosticSecret)
+				return 1
+			case "effort-report":
+				completeWith(thread, effort)
+			case "pid-report":
+				completeWith(thread, strconv.Itoa(os.Getpid()))
+			case "prompt-order-report":
+				order := "messages-before-tools"
+				if len(thread.tools) != 0 && len(thread.injected) != 0 {
+					order = "tools-before-messages"
+				}
+				completeWith(thread, order)
+			case "tool-disclosure-report":
+				descriptions := make([]string, 0, len(thread.tools))
+				for _, tool := range thread.tools {
+					descriptions = append(descriptions, tool.Description)
+				}
+				completeWith(thread, "tools="+strings.Join(descriptions, ","))
+			case "continuation-full-context":
+				completeWith(thread, fmt.Sprintf("messages=%d continuation_serialized=%t", len(thread.injected)+len(params.Input), strings.Contains(string(thread.raw), `"continuation"`)))
+			case "tool-result-report":
+				var last struct{ Type, Output string }
+				_ = json.Unmarshal(thread.injected[len(thread.injected)-1], &last)
+				completeWith(thread, fmt.Sprintf("items=%d input=%d result=%s", len(thread.injected), len(params.Input), last.Output))
+			default:
+				if len(thread.tools) == 0 {
+					completeWith(thread, "ok")
+					continue
+				}
+				_ = output.Encode(map[string]any{"id": 900, "method": "item/tool/call", "params": map[string]any{
+					"threadId": thread.id, "turnId": "turn-" + thread.id, "callId": "call-price", "tool": thread.tools[0].Name,
+					"arguments": map[string]string{"symbol": "BTCUSDT"}}})
+			}
+		case "turn/interrupt":
+			emit("thread/tokenUsage/updated", map[string]any{"threadId": thread.id, "tokenUsage": map[string]any{
+				"total": map[string]int{"inputTokens": 11, "cachedInputTokens": 4, "outputTokens": 3, "totalTokens": 14}}})
+			emit("turn/completed", map[string]any{"threadId": thread.id, "turn": map[string]any{"id": "turn-" + thread.id, "status": "interrupted"}})
+			reply(message.ID, map[string]any{})
+		case "thread/unsubscribe":
+			reply(message.ID, map[string]string{"status": "unsubscribed"})
 		}
-		reported := fmt.Sprintf(`{"content":%q,"tool_calls":[],"finish_reason":"stop"}`, content)
-		fmt.Printf("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":%q}}\n", reported)
-		fmt.Println(`{"type":"turn.completed","usage":{}}`)
-		return 0
 	}
-	if request.Model == "continuation-full-context" {
-		content := fmt.Sprintf("messages=%d continuation_serialized=%t", len(request.Messages), bytes.Contains(prompt, []byte(`"continuation"`)))
-		reported := fmt.Sprintf(`{"content":%q,"tool_calls":[],"finish_reason":"stop"}`, content)
-		fmt.Printf("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":%q}}\n", reported)
-		fmt.Println(`{"type":"turn.completed","usage":{}}`)
-		return 0
-	}
-	result := `{"content":null,"tool_calls":[{"id":"call-price","name":"market.price","arguments":"{\"symbol\":\"BTCUSDT\"}"}],"finish_reason":"tool_call"}`
-	fmt.Printf("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":%q}}\n", result)
-	fmt.Println(`{"type":"turn.completed","usage":{"input_tokens":11,"cached_input_tokens":4,"output_tokens":3}}`)
 	return 0
 }
 
-func fixtureHarnessRequest(prompt []byte) webharness.WebHarnessRequest {
-	var request webharness.WebHarnessRequest
-	start := bytes.Index(prompt, []byte(`{"model"`))
-	if start >= 0 {
-		_ = json.Unmarshal(prompt[start:], &request)
+// The Gateway launches app-server with the pinned capability flags and an isolated environment.
+func codexAppServerIsRestricted() bool {
+	expected := []string{"app-server", "-c", `web_search="live"`}
+	for _, feature := range []string{
+		"shell_tool", "apps", "multi_agent", "goals", "hooks", "memories", "remote_plugin", "plugins",
+		"browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "image_generation",
+		"skill_search", "tool_suggest", "workspace_dependencies",
+	} {
+		expected = append(expected, "--disable", feature)
 	}
-	return request
+	if !reflect.DeepEqual(os.Args[1:], expected) || os.Getenv("CODEX_API_KEY") != "" || os.Getenv("OPENAI_API_KEY") != "" {
+		return false
+	}
+	workingDirectory := mustWorkingDirectory()
+	for _, name := range []string{"HOME", "USERPROFILE", "CODEX_HOME", "CLAUDE_CONFIG_DIR"} {
+		if os.Getenv(name) != workingDirectory {
+			return false
+		}
+	}
+	allowedEnvironment := map[string]bool{
+		"HOME": true, "USERPROFILE": true, "CODEX_HOME": true, "CLAUDE_CONFIG_DIR": true, "SystemRoot": true, "WINDIR": true,
+		"TEMP": true, "TMP": true, "HTTPS_PROXY": true, "HTTP_PROXY": true, "NO_PROXY": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
+	}
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !allowedEnvironment[name] {
+			return false
+		}
+	}
+	return strings.HasPrefix(filepath.Base(workingDirectory), "stock-ai-codex-app-server-")
 }
 
 func waitForDescendantPID(t *testing.T, marker string) int {
@@ -343,78 +482,6 @@ func waitForProcessExit(t *testing.T, pid int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("descendant process %d survived cancellation", pid)
-}
-
-// Codex takes its effort as a TOML config override rather than a flag.
-func fixtureCodexEffort() string {
-	for _, argument := range os.Args {
-		if strings.HasPrefix(argument, `model_reasoning_effort="`) {
-			return strings.TrimSuffix(strings.TrimPrefix(argument, `model_reasoning_effort="`), `"`)
-		}
-	}
-	return "none"
-}
-
-func codexInvocationIsRestricted(request webharness.WebHarnessRequest) bool {
-	schemaPath := filepath.Join(mustWorkingDirectory(), "response-schema.json")
-	expected := []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
-		"--sandbox", "read-only", "-c", `web_search="live"`,
-	}
-	if effort := fixtureCodexEffort(); effort != "none" {
-		expected = append(expected, "-c", `model_reasoning_effort="`+effort+`"`)
-	}
-	if request.Model != "cli-default" {
-		expected = append(expected, "-m", request.Model)
-	}
-	for _, feature := range []string{
-		"shell_tool", "apps", "multi_agent", "goals", "hooks", "memories", "remote_plugin", "plugins",
-		"browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "image_generation",
-		"code_mode", "code_mode_host", "skill_search", "tool_suggest", "workspace_dependencies",
-	} {
-		expected = append(expected, "--disable", feature)
-	}
-	expected = append(expected, "--json", "--output-schema", schemaPath, "-")
-	if !reflect.DeepEqual(os.Args[1:], expected) {
-		return false
-	}
-	local := strings.Contains(filepath.Base(os.Args[0]), "-local")
-	if local {
-		body, err := os.ReadFile(filepath.Join(mustWorkingDirectory(), "auth.json"))
-		if err != nil || string(body) != `{"fixture_login":true}` || os.Getenv("CODEX_API_KEY") != "" || containsArgument("-m") {
-			return false
-		}
-	}
-	if (!local && os.Getenv("CODEX_API_KEY") != "fixture-codex-key") || os.Getenv("OPENAI_API_KEY") != "" {
-		return false
-	}
-	workingDirectory := mustWorkingDirectory()
-	for _, name := range []string{"HOME", "USERPROFILE", "CODEX_HOME", "CLAUDE_CONFIG_DIR"} {
-		if os.Getenv(name) != workingDirectory {
-			return false
-		}
-	}
-	allowedEnvironment := map[string]bool{
-		"HOME": true, "USERPROFILE": true, "CODEX_HOME": true, "CLAUDE_CONFIG_DIR": true,
-		"CODEX_API_KEY": true, "SystemRoot": true, "WINDIR": true, "TEMP": true, "TMP": true,
-		"HTTPS_PROXY": true, "HTTP_PROXY": true, "NO_PROXY": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
-	}
-	for _, entry := range os.Environ() {
-		name, _, _ := strings.Cut(entry, "=")
-		if !allowedEnvironment[name] {
-			return false
-		}
-	}
-	schema, err := os.ReadFile(schemaPath)
-	if err != nil {
-		return false
-	}
-	expectedSchema := []byte(`{"type":"object","properties":{"content":{"type":["string","null"]},"reasoning":{"type":["string","null"]},"tool_calls":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"arguments":{"type":"string"}},"required":["id","name","arguments"],"additionalProperties":false}},"finish_reason":{"type":"string","enum":["stop","length","content_filter","tool_call"]}},"required":["content","tool_calls","finish_reason"],"additionalProperties":false}`)
-	var compact bytes.Buffer
-	if json.Compact(&compact, schema) != nil || !bytes.Equal(compact.Bytes(), expectedSchema) {
-		return false
-	}
-	return strings.HasPrefix(filepath.Base(workingDirectory), "stock-ai-web-harness-")
 }
 
 func copyHarnessFixture(t *testing.T, name string) string {

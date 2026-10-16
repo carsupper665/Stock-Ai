@@ -8,19 +8,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"stock-ai/llm-provider-server/internal/providers"
 	"strings"
 	"time"
 )
 
 const (
-	CodexHarnessVersion      = "codex-cli 0.145.0"
+	CodexHarnessVersion      = "codex-cli 0.162.1"
 	ClaudeCodeHarnessVersion = "2.1.269 (Claude Code)"
 	maxHarnessOutput         = 1 << 20
 	maxHarnessErrorOutput    = 64 << 10
@@ -79,12 +81,6 @@ type WebHarnessResponse struct {
 	InvocationCount int                  `json:"invocation_count,omitempty"`
 }
 
-type CodexWebHarness struct {
-	Executable string
-	AuthFile   string
-	Effort     string
-}
-
 type ClaudeCodeWebHarness struct {
 	Executable string
 	AuthFile   string
@@ -101,58 +97,6 @@ type claudeHarnessSession struct {
 	lastUsed         time.Time
 	active           int
 	retired          bool
-}
-
-func (h CodexWebHarness) Generate(ctx context.Context, credential string, request WebHarnessRequest) (WebHarnessResponse, error) {
-	workingDirectory, err := prepareHarness(h.Executable, credential, h.AuthFile, request)
-	if err != nil {
-		return WebHarnessResponse{}, err
-	}
-	defer os.RemoveAll(workingDirectory)
-	if err := verifyHarnessVersion(ctx, h.Executable, CodexHarnessVersion, workingDirectory, harnessEnvironment(workingDirectory, "", "")); err != nil {
-		return WebHarnessResponse{}, err
-	}
-	if err := copyHarnessLogin(h.AuthFile, filepath.Join(workingDirectory, "auth.json")); err != nil {
-		return WebHarnessResponse{}, err
-	}
-	environment := harnessEnvironment(workingDirectory, "CODEX_API_KEY", credential)
-	schemaPath := filepath.Join(workingDirectory, "response-schema.json")
-	if err := os.WriteFile(schemaPath, []byte(webHarnessResponseSchema), 0o600); err != nil {
-		return WebHarnessResponse{}, ErrWebHarnessUnavailable
-	}
-	prompt, err := webHarnessPrompt(request)
-	if err != nil {
-		return WebHarnessResponse{}, err
-	}
-	arguments := []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
-		"--sandbox", "read-only", "-c", `web_search="live"`,
-	}
-	if h.Effort != "" {
-		arguments = append(arguments, "-c", `model_reasoning_effort="`+h.Effort+`"`)
-	}
-	if request.Model != "cli-default" {
-		arguments = append(arguments, "-m", request.Model)
-	}
-	for _, feature := range []string{
-		"shell_tool", "apps", "multi_agent", "goals", "hooks", "memories", "remote_plugin", "plugins",
-		"browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "image_generation",
-		"code_mode", "code_mode_host", "skill_search", "tool_suggest", "workspace_dependencies",
-	} {
-		arguments = append(arguments, "--disable", feature)
-	}
-	arguments = append(arguments, "--json", "--output-schema", schemaPath, "-")
-	stdout, stderr, runErr := runHarnessCommand(ctx, h.Executable, arguments, workingDirectory, environment, prompt)
-	if ctx.Err() != nil {
-		return WebHarnessResponse{}, ctx.Err()
-	}
-	if runErr != nil {
-		if errors.Is(runErr, errHarnessOutputLimit) {
-			return WebHarnessResponse{}, ErrWebHarnessResponse
-		}
-		return WebHarnessResponse{}, classifyHarnessFailure(stdout, stderr)
-	}
-	return parseCodexHarnessResponse(stdout, request.Messages)
 }
 
 func (h ClaudeCodeWebHarness) Generate(ctx context.Context, credential string, request WebHarnessRequest) (WebHarnessResponse, error) {
@@ -425,31 +369,20 @@ func classifyHarnessFailure(stdout, stderr []byte) error {
 	return harnessFailure(string(stdout) + "\n" + string(stderr) + "\n" + reason)
 }
 
-// Both CLIs report failures as JSON on stdout: Claude Code as one result object with
-// is_error/result, Codex as a stream of turn.failed / error events. The last such message wins.
+// Claude Code reports failures as one JSON result object with is_error/result on stdout.
 func harnessReason(stdout []byte) string {
 	decoder := json.NewDecoder(bytes.NewReader(stdout))
 	reason := ""
 	for {
 		var event struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
 			IsError *bool  `json:"is_error"`
 			Result  string `json:"result"`
-			Error   struct {
-				Message string `json:"message"`
-			} `json:"error"`
 		}
 		if decoder.Decode(&event) != nil {
 			return reason
 		}
-		switch {
-		case event.IsError != nil && *event.IsError && event.Result != "":
+		if event.IsError != nil && *event.IsError && event.Result != "" {
 			reason = event.Result
-		case event.Type == "turn.failed" && event.Error.Message != "":
-			reason = event.Error.Message
-		case event.Type == "error" && event.Message != "":
-			reason = event.Message
 		}
 	}
 }
@@ -490,58 +423,6 @@ func HarnessDetail(err error) string {
 		}
 	}
 	return ""
-}
-
-func parseCodexHarnessResponse(output []byte, history []WebHarnessMessage) (WebHarnessResponse, error) {
-	decoder := json.NewDecoder(bytes.NewReader(output))
-	var structured []byte
-	var normalizedUsage *WebHarnessUsage
-	completed := false
-	failure := ""
-	for {
-		var event struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-			Error   struct {
-				Message string `json:"message"`
-			} `json:"error"`
-			Item struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"item"`
-			Usage *struct {
-				InputTokens  *int `json:"input_tokens"`
-				OutputTokens *int `json:"output_tokens"`
-				CachedTokens *int `json:"cached_input_tokens"`
-			} `json:"usage"`
-		}
-		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			return WebHarnessResponse{}, ErrWebHarnessResponse
-		}
-		if event.Type == "item.completed" && event.Item.Type == "agent_message" {
-			structured = []byte(event.Item.Text)
-		}
-		if event.Type == "turn.completed" {
-			completed = true
-			if event.Usage != nil {
-				normalizedUsage = &WebHarnessUsage{InputTokens: event.Usage.InputTokens, OutputTokens: event.Usage.OutputTokens, CachedTokens: event.Usage.CachedTokens}
-			}
-		}
-		if event.Type == "turn.failed" && event.Error.Message != "" {
-			failure = event.Error.Message
-		} else if event.Type == "error" && event.Message != "" {
-			failure = event.Message
-		}
-	}
-	if failure != "" && !completed {
-		return WebHarnessResponse{}, harnessFailure(failure)
-	}
-	if !completed || len(structured) == 0 {
-		return WebHarnessResponse{}, ErrWebHarnessResponse
-	}
-	return decodeWebHarnessResponse(structured, normalizedUsage, history)
 }
 
 func parseClaudeHarnessResponse(output []byte, history []WebHarnessMessage) (WebHarnessResponse, error) {
@@ -700,4 +581,117 @@ func HarnessFileAvailable(file string) bool {
 	}
 	info, err := os.Stat(file)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// Each CLI names its own effort scale, and neither rejects an unknown value: Codex passes it
+// to the API and Claude Code warns and silently uses its default. The Gateway validates instead,
+// so a typo cannot quietly downgrade every Run.
+var harnessEffortLevels = map[string]map[string]bool{
+	"codex":       {"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true},
+	"claude_code": {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
+}
+
+func HarnessEffort(kind string, options map[string]json.RawMessage) (string, error) {
+	for name := range options {
+		if name != "reasoning_effort" {
+			return "", errors.New("CLI Harness accepts only the reasoning_effort option; executable, authentication files and capabilities are Server-controlled")
+		}
+	}
+	raw, exists := options["reasoning_effort"]
+	if !exists {
+		return "", nil
+	}
+	var effort string
+	if json.Unmarshal(raw, &effort) != nil || !harnessEffortLevels[kind][effort] {
+		return "", fmt.Errorf("reasoning_effort for %s must be one of %s", kind, strings.Join(sortedKeys(harnessEffortLevels[kind]), ", "))
+	}
+	return effort, nil
+}
+
+func sortedKeys(values map[string]bool) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// HarnessPath resolves a relative path in .env against the working directory like
+// LLM_SERVER_DB_PATH; HarnessFileAvailable and prepareHarness still only accept absolute paths.
+func HarnessPath(variable string) string {
+	value := os.Getenv(variable)
+	if value == "" {
+		return ""
+	}
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return value
+	}
+	return absolute
+}
+
+// HarnessSetup is the Server-controlled executable, login file and effort of one CLI Provider request.
+type HarnessSetup struct {
+	Executable, AuthFile, Credential, Effort string
+}
+
+// ResolveHarness checks the CLI Provider configuration before any process starts. A managed
+// Claude conversation may create its own login snapshot, so its login file need not exist yet.
+func ResolveHarness(kind string, config json.RawMessage, credential string, managedClaude bool, options map[string]json.RawMessage) (HarnessSetup, error) {
+	effort, err := HarnessEffort(kind, options)
+	if err != nil {
+		return HarnessSetup{}, providers.ProviderError{Status: 400, Code: "REQUEST_INVALID", Message: err.Error()}
+	}
+	var configuration struct {
+		AuthMode string `json:"auth_mode"`
+	}
+	if json.Unmarshal(config, &configuration) != nil {
+		return HarnessSetup{}, providers.ProviderError{Status: 400, Code: "PROVIDER_INVALID_CONFIG", Message: "Invalid Harness configuration."}
+	}
+	setup := HarnessSetup{Executable: HarnessPath("LLM_SERVER_CODEX_EXECUTABLE"), AuthFile: HarnessPath("LLM_SERVER_CODEX_AUTH_FILE"), Credential: credential, Effort: effort}
+	if kind == "claude_code" {
+		setup.Executable, setup.AuthFile = HarnessPath("LLM_SERVER_CLAUDE_EXECUTABLE"), HarnessPath("LLM_SERVER_CLAUDE_AUTH_FILE")
+	}
+	if !HarnessFileAvailable(setup.Executable) {
+		log.Printf("web_harness event=error harness=%s category=not_configured", kind)
+		return HarnessSetup{}, providers.ProviderError{Status: 503, Code: "HARNESS_NOT_CONFIGURED", Message: "Configure and install the pinned CLI executable on the Gateway Server, then restart it."}
+	}
+	if configuration.AuthMode == "local_login" {
+		if setup.AuthFile == "" || (!managedClaude && !HarnessFileAvailable(setup.AuthFile)) {
+			log.Printf("web_harness event=error harness=%s category=login_required", kind)
+			return HarnessSetup{}, providers.ProviderError{Status: 503, Code: "HARNESS_LOGIN_REQUIRED", Message: "The Server has no configured CLI login file. Log in on the Server and configure its authentication file."}
+		}
+		return setup, nil
+	}
+	setup.AuthFile = ""
+	if credential == "" {
+		log.Printf("web_harness event=error harness=%s category=credential_unavailable", kind)
+		return HarnessSetup{}, providers.ProviderError{Status: 503, Code: "TOKEN_UNAVAILABLE", Message: "Add an enabled Provider API Token, or select configured local CLI login."}
+	}
+	return setup, nil
+}
+
+// HarnessProviderError logs a failed CLI invocation and maps it to the Gateway error envelope;
+// only the fixed safe category from harnessFailure ever reaches the caller.
+func HarnessProviderError(kind string, err error) providers.ProviderError {
+	log.Printf("web_harness event=error harness=%s category=%s", kind, HarnessErrorCategory(err))
+	detail := ""
+	if reason := HarnessDetail(err); reason != "" {
+		detail = " CLI: " + reason
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return providers.ProviderError{Status: 504, Code: "PROVIDER_TIMEOUT", Message: "CLI invocation exceeded the Provider timeout."}
+	case errors.Is(err, context.Canceled):
+		return providers.ProviderError{Status: 408, Code: "REQUEST_CANCELED", Message: "CLI invocation was canceled."}
+	case errors.Is(err, ErrWebHarnessAuthentication):
+		return providers.ProviderError{Status: 502, Code: "AUTHENTICATION_FAILED", Message: "CLI authentication failed. Refresh the Server login or Provider API Token." + detail}
+	case errors.Is(err, ErrWebHarnessVersion):
+		return providers.ProviderError{Status: 503, Code: "HARNESS_VERSION_MISMATCH", Message: "Install the pinned version shown in the Harness status panel."}
+	case errors.Is(err, ErrWebHarnessResponse):
+		return providers.ProviderError{Status: 502, Code: "PROVIDER_RESPONSE_INVALID", Message: "CLI returned invalid structured output." + detail}
+	default:
+		return providers.ProviderError{Status: 502, Code: "PROVIDER_UNAVAILABLE", Message: "CLI invocation failed. Verify the model ID, authentication and installed executable on the Server." + detail}
+	}
 }

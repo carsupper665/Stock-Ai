@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -53,6 +52,8 @@ type Server struct {
 	closeOnce      sync.Once
 	closeErr       error
 	claudeSessions *webharness.ClaudeSessions
+	codex          *webharness.CodexAppServer
+	apis           map[string]providers.Api
 }
 
 type providerRequestSnapshot struct {
@@ -206,7 +207,8 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 		db: db, adminToken: adminToken, runtimeToken: runtimeToken,
 		masterKey: masterKey, modelCatalog: modelCatalog,
 		requestContext: requestContext, cancelRequests: cancelRequests,
-		claudeSessions: webharness.NewClaudeSessions(harnessPath("LLM_SERVER_CLAUDE_EXECUTABLE"), harnessSessionTTL),
+		claudeSessions: webharness.NewClaudeSessions(webharness.HarnessPath("LLM_SERVER_CLAUDE_EXECUTABLE"), harnessSessionTTL),
+		codex:          webharness.NewCodexAppServer(),
 		httpClient: &http.Client{
 			Timeout: providerTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -214,7 +216,13 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 			},
 		},
 	}
+	// Provider type → wire protocol Api, as in pi-ai; claude_code keeps its CLI session path.
+	server.apis = map[string]providers.Api{
+		"openai": providers.OpenAICompletions{OpenAI: true}, "openai_compatible": providers.OpenAICompletions{},
+		"anthropic": providers.AnthropicMessages{}, "gemini": providers.GoogleGenerativeAI{}, "codex": server.codex,
+	}
 	if err := server.loadSavedCatalog(); err != nil {
+		server.codex.Close()
 		_ = db.Close()
 		return nil, fmt.Errorf("load model catalog: %w", err)
 	}
@@ -288,95 +296,18 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "TOKEN_UNAVAILABLE", "Provider credential is unavailable.")
 		return
 	}
-	if isHarnessType(provider.Type) {
+	if provider.Type == "claude_code" {
 		s.generateHarness(w, r, provider, snapshot.Credential, *model, request, options)
 		return
 	}
-	aliases := providers.NewToolAliases(request)
-	var call providers.ProviderCall
-	switch provider.Type {
-	case "anthropic":
-		call, err = providers.AnthropicCall(provider.BaseURL, *model, request, options, aliases.WireByRuntime)
-	case "gemini":
-		call, err = providers.GeminiCall(provider.BaseURL, *model, request, options, aliases.WireByRuntime)
-	default:
-		call, err = providers.CompatibleCall(provider.Type, provider.BaseURL, *model, request, options, aliases.WireByRuntime)
-	}
-	if err != nil {
-		var failure providers.ProviderError
-		if errors.As(err, &failure) {
-			writeProviderError(w, err)
-			return
-		}
-		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
-		return
-	}
-	credential := snapshot.Credential
-	if provider.Type != "openai_compatible" && credential == "" {
-		writeError(w, http.StatusServiceUnavailable, "TOKEN_UNAVAILABLE", "This Provider type requires a Provider credential.")
-		return
-	}
-	switch {
-	case credential == "":
-	case provider.Type == "anthropic":
-		call.Headers["x-api-key"] = credential
-	case provider.Type == "gemini":
-		call.Headers["x-goog-api-key"] = credential
-	default:
-		call.Headers["Authorization"] = "Bearer " + credential
-	}
-	response := s.callProvider(w, r, call)
-	if response == nil {
-		return
-	}
-	defer response.Body.Close()
-	var normalized providers.GenerateResponse
-	switch provider.Type {
-	case "anthropic":
-		normalized, err = providers.NormalizeAnthropicResponse(response, aliases.RuntimeByWire, providers.HistoricalToolCallIDs(request.Messages))
-	case "gemini":
-		normalized, err = providers.NormalizeGeminiResponse(response, aliases.RuntimeByWire, providers.HistoricalToolCallIDs(request.Messages))
-	default:
-		normalized, err = providers.NormalizeCompatibleResponse(response, provider.Type == "openai", aliases.RuntimeByWire,
-			providers.HistoricalToolCallIDs(request.Messages))
-	}
+	response, err := s.apis[provider.Type].Complete(r.Context(),
+		providers.Model{Provider: provider.Type, ID: *model, BaseURL: provider.BaseURL, Config: provider.Config}, request,
+		providers.Options{APIKey: snapshot.Credential, Options: options, Client: s.httpClient})
 	if err != nil {
 		writeProviderError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, normalized)
-}
-
-func (s *Server) callProvider(w http.ResponseWriter, r *http.Request, call providers.ProviderCall) *http.Response {
-	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost, call.URL, bytes.NewReader(call.Body))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Unable to create provider request.")
-		return nil
-	}
-	upstream.Header.Set("Content-Type", "application/json")
-	for name, value := range call.Headers {
-		upstream.Header.Set(name, value)
-	}
-	response, err := s.httpClient.Do(upstream)
-	if err != nil {
-		if providers.IsTimeout(err) {
-			writeError(w, http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out.")
-			return nil
-		}
-		writeError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed.")
-		return nil
-	}
-	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		response.Body.Close()
-		writeError(w, http.StatusBadGateway, "AUTHENTICATION_FAILED", "Provider rejected its configured credential.")
-		return nil
-	}
-	if response.StatusCode == http.StatusTooManyRequests {
-		response.Body.Close()
-		writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", "Provider rate limit was reached.")
-		return nil
-	}
-	return response
+	writeJSON(w, http.StatusOK, response)
 }
 
 func writeProviderError(w http.ResponseWriter, err error) {
@@ -548,6 +479,7 @@ func (s *Server) Close() error {
 	s.WaitForRequests()
 	s.closeOnce.Do(func() {
 		s.claudeSessions.Stop()
+		s.codex.Close()
 		s.closeErr = s.db.Close()
 	})
 	return s.closeErr

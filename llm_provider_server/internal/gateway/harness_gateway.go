@@ -6,92 +6,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"stock-ai/llm-provider-server/internal/providers"
 	"stock-ai/llm-provider-server/internal/webharness"
-	"strings"
 )
 
 func isHarnessType(kind string) bool { return kind == "codex" || kind == "claude_code" }
 
-// Each CLI names its own effort scale, and neither rejects an unknown value: Codex passes it
-// to the API and Claude Code warns and silently uses its default. The Gateway validates instead,
-// so a typo cannot quietly downgrade every Run.
-var harnessEffortLevels = map[string]map[string]bool{
-	"codex":       {"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true},
-	"claude_code": {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
-}
-
-func harnessEffort(kind string, options map[string]json.RawMessage) (string, error) {
-	for name := range options {
-		if name != "reasoning_effort" {
-			return "", errors.New("CLI Harness accepts only the reasoning_effort option; executable, authentication files and capabilities are Server-controlled")
-		}
-	}
-	raw, exists := options["reasoning_effort"]
-	if !exists {
-		return "", nil
-	}
-	var effort string
-	if json.Unmarshal(raw, &effort) != nil || !harnessEffortLevels[kind][effort] {
-		return "", fmt.Errorf("reasoning_effort for %s must be one of %s", kind, strings.Join(sortedKeys(harnessEffortLevels[kind]), ", "))
-	}
-	return effort, nil
-}
-
-func sortedKeys(values map[string]bool) []string {
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
+// generateHarness runs claude_code through its CLI, with per-conversation transport sessions (spec §37).
 func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provider Provider, credential, model string, request providers.GenerateRequest, options map[string]json.RawMessage) {
-	effort, err := harnessEffort(provider.Type, options)
+	setup, err := webharness.ResolveHarness(provider.Type, provider.Config, credential, request.ConversationID != nil, options)
 	if err != nil {
-		writeError(w, 400, "REQUEST_INVALID", err.Error())
+		writeProviderError(w, err)
 		return
 	}
-	var configuration struct {
-		AuthMode string `json:"auth_mode"`
-	}
-	if json.Unmarshal(provider.Config, &configuration) != nil {
-		writeError(w, 400, "PROVIDER_INVALID_CONFIG", "Invalid Harness configuration.")
-		return
-	}
-	executable, authFile := harnessPath("LLM_SERVER_CODEX_EXECUTABLE"), harnessPath("LLM_SERVER_CODEX_AUTH_FILE")
-	if provider.Type == "claude_code" {
-		executable, authFile = harnessPath("LLM_SERVER_CLAUDE_EXECUTABLE"), harnessPath("LLM_SERVER_CLAUDE_AUTH_FILE")
-	}
-	if !webharness.HarnessFileAvailable(executable) {
-		log.Printf("web_harness event=error harness=%s category=not_configured", provider.Type)
-		writeError(w, 503, "HARNESS_NOT_CONFIGURED", "Configure and install the pinned CLI executable on the Gateway Server, then restart it.")
-		return
-	}
-	if configuration.AuthMode == "local_login" {
-		managedClaude := provider.Type == "claude_code" && request.ConversationID != nil
-		if authFile == "" || (!managedClaude && !webharness.HarnessFileAvailable(authFile)) {
-			log.Printf("web_harness event=error harness=%s category=login_required", provider.Type)
-			writeError(w, 503, "HARNESS_LOGIN_REQUIRED", "The Server has no configured CLI login file. Log in on the Server and configure its authentication file.")
-			return
-		}
-	} else {
-		authFile = ""
-		if credential == "" {
-			log.Printf("web_harness event=error harness=%s category=credential_unavailable", provider.Type)
-			writeError(w, 503, "TOKEN_UNAVAILABLE", "Add an enabled Provider API Token, or select configured local CLI login.")
-			return
-		}
-	}
+	effort, authFile := setup.Effort, setup.AuthFile
 	normalized := webharness.WebHarnessRequest{Model: model, Messages: normalizeHarnessMessages(request.Messages), Tools: make([]webharness.WebHarnessTool, 0, len(request.Tools))}
 	for _, tool := range request.Tools {
 		normalized.Tools = append(normalized.Tools, webharness.WebHarnessTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
@@ -104,7 +35,7 @@ func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provide
 		continuation = &webharness.Continuation{AfterMessages: request.Continuation.AfterMessages, Messages: normalizeHarnessMessages(request.Continuation.Messages)}
 	}
 	var loginSnapshot []byte
-	if provider.Type == "claude_code" && request.ConversationID != nil && authFile != "" {
+	if request.ConversationID != nil && authFile != "" {
 		loginSnapshot, err = webharness.ReadHarnessLogin(authFile)
 		if err != nil {
 			log.Printf("web_harness event=error harness=claude_code category=authentication")
@@ -112,13 +43,11 @@ func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provide
 			return
 		}
 	}
-	if provider.Type == "codex" {
-		response, err = (webharness.CodexWebHarness{Executable: executable, AuthFile: authFile, Effort: effort}).Generate(ctx, credential, normalized)
-	} else if request.ConversationID != nil {
+	if request.ConversationID != nil {
 		key := *request.ConversationID + "\x00" + claudeSessionSignature(provider, model, effort, credential, loginSnapshot, normalized.Tools)
 		response, err = webharness.GenerateClaudeSession(ctx, s.claudeSessions, key, credential, loginSnapshot, effort, normalized, continuation)
 	} else {
-		response, err = (webharness.ClaudeCodeWebHarness{Executable: executable, AuthFile: authFile, Effort: effort}).Generate(ctx, credential, normalized)
+		response, err = (webharness.ClaudeCodeWebHarness{Executable: setup.Executable, AuthFile: authFile, Effort: effort}).Generate(ctx, credential, normalized)
 	}
 	if err == nil {
 		calls := make([]providers.ToolCall, 0, len(response.ToolCalls))
@@ -131,25 +60,7 @@ func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provide
 			FallbackReason: response.FallbackReason, InvocationCount: response.InvocationCount})
 		return
 	}
-	log.Printf("web_harness event=error harness=%s category=%s", provider.Type, webharness.HarnessErrorCategory(err))
-	detail := ""
-	if reason := webharness.HarnessDetail(err); reason != "" {
-		detail = " CLI: " + reason
-	}
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		writeError(w, 504, "PROVIDER_TIMEOUT", "CLI invocation exceeded the Provider timeout.")
-	case errors.Is(err, context.Canceled):
-		writeError(w, 408, "REQUEST_CANCELED", "CLI invocation was canceled.")
-	case errors.Is(err, webharness.ErrWebHarnessAuthentication):
-		writeError(w, 502, "AUTHENTICATION_FAILED", "CLI authentication failed. Refresh the Server login or Provider API Token."+detail)
-	case errors.Is(err, webharness.ErrWebHarnessVersion):
-		writeError(w, 503, "HARNESS_VERSION_MISMATCH", "Install the pinned version shown in the Harness status panel.")
-	case errors.Is(err, webharness.ErrWebHarnessResponse):
-		writeError(w, 502, "PROVIDER_RESPONSE_INVALID", "CLI returned invalid structured output."+detail)
-	default:
-		writeError(w, 502, "PROVIDER_UNAVAILABLE", "CLI invocation failed. Verify the model ID, authentication and installed executable on the Server."+detail)
-	}
+	writeProviderError(w, webharness.HarnessProviderError(provider.Type, err))
 }
 
 func normalizeHarnessMessages(messages []providers.Message) []webharness.WebHarnessMessage {
@@ -191,20 +102,6 @@ func harnessUsage(value *webharness.WebHarnessUsage) *providers.Usage {
 	return &providers.Usage{InputTokens: value.InputTokens, OutputTokens: value.OutputTokens, CachedTokens: value.CachedTokens, TotalTokens: value.TotalTokens}
 }
 
-// Relative paths in .env resolve against the working directory like LLM_SERVER_DB_PATH does;
-// webharness.HarnessFileAvailable and prepareHarness still only accept absolute paths.
-func harnessPath(variable string) string {
-	value := os.Getenv(variable)
-	if value == "" {
-		return ""
-	}
-	absolute, err := filepath.Abs(value)
-	if err != nil {
-		return value
-	}
-	return absolute
-}
-
 func (s *Server) harnessStatus(w http.ResponseWriter, r *http.Request) {
 	if !authorized(r, s.adminToken) {
 		writeError(w, 401, "AUTHENTICATION_FAILED", "Valid admin credentials are required.")
@@ -215,8 +112,8 @@ func (s *Server) harnessStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"harnesses": []any{
-		map[string]any{"type": "codex", "version": webharness.CodexHarnessVersion, "executable_configured": webharness.HarnessFileAvailable(harnessPath("LLM_SERVER_CODEX_EXECUTABLE")), "local_login_configured": webharness.HarnessFileAvailable(harnessPath("LLM_SERVER_CODEX_AUTH_FILE")), "auth_modes": []string{"api_key", "local_login"}, "default_model": "cli-default"},
-		map[string]any{"type": "claude_code", "version": webharness.ClaudeCodeHarnessVersion, "executable_configured": webharness.HarnessFileAvailable(harnessPath("LLM_SERVER_CLAUDE_EXECUTABLE")), "local_login_configured": webharness.HarnessFileAvailable(harnessPath("LLM_SERVER_CLAUDE_AUTH_FILE")), "auth_modes": []string{"api_key", "local_login"}, "default_model": "claude-sonnet-4-6"},
+		map[string]any{"type": "codex", "version": webharness.CodexHarnessVersion, "executable_configured": webharness.HarnessFileAvailable(webharness.HarnessPath("LLM_SERVER_CODEX_EXECUTABLE")), "local_login_configured": webharness.HarnessFileAvailable(webharness.HarnessPath("LLM_SERVER_CODEX_AUTH_FILE")), "auth_modes": []string{"api_key", "local_login"}, "default_model": "cli-default"},
+		map[string]any{"type": "claude_code", "version": webharness.ClaudeCodeHarnessVersion, "executable_configured": webharness.HarnessFileAvailable(webharness.HarnessPath("LLM_SERVER_CLAUDE_EXECUTABLE")), "local_login_configured": webharness.HarnessFileAvailable(webharness.HarnessPath("LLM_SERVER_CLAUDE_AUTH_FILE")), "auth_modes": []string{"api_key", "local_login"}, "default_model": "claude-sonnet-4-6"},
 	}})
 }
 

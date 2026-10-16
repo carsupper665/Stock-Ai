@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"stock-ai/llm-provider-server/internal/providers"
+	"stock-ai/llm-provider-server/internal/webharness"
 	"strings"
 )
 
@@ -123,7 +124,7 @@ func (s *Server) manageModels(w http.ResponseWriter, request *http.Request) {
 		// that can never be invoked is never stored.
 		if isHarnessType(provider.Type) {
 			for _, options := range append([]map[string]json.RawMessage{input.Options}, levelOptions(input.Levels)...) {
-				if _, err := harnessEffort(provider.Type, options); err != nil {
+				if _, err := webharness.HarnessEffort(provider.Type, options); err != nil {
 					writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
 					return
 				}

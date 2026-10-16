@@ -57,12 +57,6 @@ type ToolAliases struct {
 	RuntimeByWire map[string]string
 }
 
-type ProviderCall struct {
-	URL     string
-	Headers map[string]string
-	Body    []byte
-}
-
 // ProviderError is a Provider status already classified into the §22 envelope.
 type ProviderError struct {
 	Status  int

@@ -9,6 +9,13 @@
 > supersedes the older stateless-Claude wording in this specification and ticket
 > 13; it must not be used to revert Claude to one cold invocation per turn. The
 > Gateway still owns no Agent loop, tool execution, memory, or semantic session.
+>
+> 2026-10-17 user-requested amendment: the Provider layer follows pi-ai's
+> (`earendil-works/pi`, `packages/ai`) Api layering — one `providers.Api` per wire
+> protocol behind a registry keyed by Provider type (§15) — and Codex runs through
+> `codex app-server` instead of one `codex exec` per Generate (§19, §37.4). The
+> HTTP contract, database, environment and error codes are unchanged. Claude Code
+> is unchanged.
 
 **Status:** Draft V1  
 **Scope:** LLM API Server only  
@@ -480,17 +487,27 @@ Adapter
 
 ## 15. Provider Adapter Interface
 
-```python
-class ProviderAdapter:
+Implemented as pi-ai-style Apis (`internal/providers/api.go`): each wire protocol
+builds its vendor request, owns its authentication, calls the Provider once and
+normalizes the reply.
 
-    async def generate(
-        self,
-        request: GenerateRequest,
-    ) -> GenerateResponse:
-        ...
+```go
+type Api interface {
+	Complete(ctx context.Context, model Model, request GenerateRequest, options Options) (GenerateResponse, error)
+}
 ```
 
-This is the only required V1 runtime method.
+| Provider type | Api |
+|---|---|
+| `openai`, `openai_compatible` | `OpenAICompletions` (`openai-completions`) |
+| `anthropic` | `AnthropicMessages` (`anthropic-messages`) |
+| `gemini` | `GoogleGenerativeAI` (`google-generative-ai`) |
+| `codex` | `webharness.CodexAppServer` (`codex app-server`) |
+| `claude_code` | CLI harness with per-Run sessions (§37), outside the registry |
+
+`Complete` is the only required V1 runtime method. pi-ai's streaming events, OAuth
+flows, cost tables and thought-signature replay are not adopted: `/v1/generate`
+returns one JSON response.
 
 Do not add:
 
@@ -632,12 +649,19 @@ web fetch
 
 are retained.
 
-Domain tools reach the CLI through the prompt: the harness serializes the request's
-`tools` into the invocation prompt as return-only schemas (the CLI never executes
-them and returns structured calls for the Go runtime). The stable instructions and
-tool schemas precede the conversation messages so CLI prompt caching can reuse the
-prefix. The Claude managed-session key includes the tool set, so a changed tool set
-starts a fresh CLI session instead of resuming a stale one.
+Claude Code: domain tools reach the CLI through the prompt. The harness serializes
+the request's `tools` into the invocation prompt as return-only schemas (the CLI
+never executes them and returns structured calls for the Go runtime). The stable
+instructions and tool schemas precede the conversation messages so CLI prompt
+caching can reuse the prefix. The Claude managed-session key includes the tool set,
+so a changed tool set starts a fresh CLI session instead of resuming a stale one.
+
+Codex: domain tools are native `dynamicTools` of an ephemeral app-server thread, so
+Codex can only ask the Gateway to run them (`item/tool/call`). The first such call
+interrupts the turn and is returned as a `tool_call` response; the Gateway never
+executes it. Tool declarations are sent at `thread/start`, before the injected
+history, so the stable prefix stays first. The Codex flow is described in
+`test/harness-validation.md`.
 
 ## 20. Database
 
@@ -2167,16 +2191,19 @@ or credential was used for this amendment.
 
 ### 37.4 Codex ticket-12 consistency status
 
-Offline process fixtures now compare the complete ordered Codex 0.145.0 argument
-vector, isolated environment allowlist, exact structured-output schema, API-key
-and copied-local-login modes, model/default-model behavior, Web Search setting,
-every disabled feature, process-tree cancellation, bounded output, JSONL Usage and
-HTTP error mapping. Codex remains ephemeral and receives full context; no resume
-scope was added.
+Codex runs through `codex app-server` (`codex-cli 0.162.1`), one long-lived
+process per credential or local-login snapshot. Each Generate is a fresh ephemeral
+read-only thread: leading system messages become `baseInstructions`, tools become
+`dynamicTools`, earlier history is injected with `thread/inject_items`, and the turn
+input is the trailing user messages (empty after tool results). The first
+`item/tool/call` interrupts the turn and returns `finish_reason: "tool_call"`.
+Codex keeps no Gateway-side state and still ignores `conversation_id` and
+`continuation`; no resume scope was added.
 
-The original ticket-12 live gaps remain: this amendment made no real Provider
-call and did not verify an approved API credential, actual model entitlement,
-live Web Search/Fetch, live structured domain-tool return, malicious live config
-override rejection, quota/billing behavior, or current vendor capability drift.
-The 2026-09-13 observations in `test/harness-validation.md` remain historical
-evidence, not current live acceptance.
+Offline fixtures cover the app-server launch flags, isolated environment, JSON-RPC
+thread/turn contract, API-key and copied-local-login modes, one process per
+credential, version pin, timeout/cancellation, oversized output, diagnostics and
+shutdown cleanup. The 2026-10-17 live run in `test/harness-validation.md` verified
+the local-login path end to end (native tool call, then answer from the injected
+tool result). API-key authentication, explicit model entitlement and live web
+search results remain unverified.

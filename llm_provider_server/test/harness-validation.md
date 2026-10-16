@@ -11,24 +11,22 @@ Gateway Agent-loop, memory, or tool-execution ownership.
 
 ### Codex
 
-- Package: `@openai/codex@0.145.0`
-- CLI output: `codex-cli 0.145.0`
-- npm integrity: `sha512-/PSPSFujjjmiyVFvG2yu/grOFhsWdokTH8t2KGWhXSo/M5n/dIDsnbsnO82/7bLtIoDuzQf7ATBUMWqPWQINlQ==`
-- Tarball: `https://registry.npmjs.org/@openai/codex/-/codex-0.145.0.tgz`
-- Install: `npm install --global @openai/codex@0.145.0`
+- Package: `@openai/codex@0.162.1`
+- CLI output: `codex-cli 0.162.1`
+- npm integrity: `sha512-NWZdi/kxyjv/8EUGFupziGU38YyleugZRM4JXgY5XFH7FUmaFA33NZS2Bmq0HPazf7S3jJQQWsZ/jAK9jsrV3Q==`
+- Tarball: `https://registry.npmjs.org/@openai/codex/-/codex-0.162.1.tgz`
+- Install: `npm install --global @openai/codex@0.162.1`
 - Verify:
 
-```powershell
-npm view '@openai/codex@0.145.0' version dist.integrity dist.tarball
+```bash
+npm view '@openai/codex@0.162.1' version dist.integrity dist.tarball
 codex --version
 codex login status
 ```
 
-The validated Windows executable was:
-
-```text
-C:\Users\admin\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe
-```
+The Gateway drives it as `codex app-server` (JSON-RPC over stdio). This version
+provides the two protocol features the adapter depends on: `thread/start.dynamicTools`
+(behind `initialize.capabilities.experimentalApi`) and `thread/inject_items`.
 
 ### Claude Code
 
@@ -56,22 +54,48 @@ C:\Users\admin\AppData\Local\Temp\opencode\claude-code-2.1.269\node_modules\@ant
 ## Production process boundary
 
 Both adapters require an absolute executable path and an explicit credential or
-configured local-login snapshot. Every Codex/stateless-Claude call creates a new
-private working/config directory. Managed Claude creates an isolated directory per
-conversation/signature and removes it on replacement, TTL, or shutdown. Each
-process invocation:
+configured local-login snapshot.
+
+Codex runs one long-lived `codex app-server` per credential (or per local-login
+snapshot) in its own private `CODEX_HOME`, removed when the process exits. It is
+started lazily, replaced when it dies, stopped after 30 minutes idle, and killed
+with its process tree on Gateway shutdown. The API key is passed with
+`account/login/start`, never through the environment; a copied local login must
+pass `account/read`. Every Generate runs on a fresh `ephemeral` thread with
+`sandbox: read-only` and `approvalPolicy: never`:
+
+1. `thread/start` with the leading system messages as `baseInstructions` and the
+   domain tools as native `dynamicTools` under wire-safe names;
+2. `thread/inject_items` with the earlier history as Responses API items
+   (`message`, `function_call`, `function_call_output`);
+3. `turn/start` with the trailing user messages, or empty input when the request
+   ends with tool results.
+
+The first `item/tool/call` interrupts the turn and is returned as
+`finish_reason: "tool_call"`; the Agent runtime runs the tool and sends a new
+Generate. The Gateway therefore keeps no Codex conversation state, and a retried
+Generate is safe. Codex's internal web-search steps stay inside one Generate;
+Usage is the fresh thread's total.
+
+Stateless Claude creates a new private working/config directory per call. Managed
+Claude creates an isolated directory per conversation/signature and removes it on
+replacement, TTL, or shutdown. Each process:
 
 - replaces `HOME`, `USERPROFILE`, `CODEX_HOME`, and `CLAUDE_CONFIG_DIR`;
 - passes only the selected provider credential and the small OS/TLS/proxy environment needed by the native executable;
 - verifies the exact pinned CLI version;
-- uses Codex ephemeral mode, stateless Claude no-session-persistence, or managed Claude's bounded `--session-id`/`--resume` transport mode;
-- retains at most 1 MiB stdout and 64 KiB stderr while continuing to drain both streams;
+- uses Codex ephemeral threads, stateless Claude no-session-persistence, or managed Claude's bounded `--session-id`/`--resume` transport mode;
+- retains at most 1 MiB of Claude stdout and 64 KiB of stderr while continuing to drain both streams; a Codex JSON-RPC line over 1 MiB fails the request and restarts the app-server;
 - maps recognized model/quota/login failures to fixed public categories and never returns arbitrary stdout/stderr prose;
 - terminates the invocation process tree on cancellation and when the direct process exits.
 
 Windows uses a per-invocation Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Supported Unix targets use a separate process group. Other targets kill the direct process and are not claimed to have descendant containment.
 
-Domain tools are serialized into the prompt as return-only schemas. They are not registered with either CLI. Unknown returned tool names remain normalized intentionally so the Agent runtime can apply its approved budgeted unknown-tool error path.
+For Claude, domain tools are serialized into the prompt as return-only schemas and are not registered with the CLI. For Codex they are native dynamic tools that Codex can only ask the Gateway to run. Unknown returned tool names remain normalized intentionally so the Agent runtime can apply its approved budgeted unknown-tool error path.
+
+Codex 0.162 routes dynamic tools through its code-mode host, so `code_mode` and
+`code_mode_host` must stay enabled; disabling them makes every dynamic tool call
+fail closed. The other capability features stay disabled with `--disable`.
 
 ## Offline reproducible tests
 
@@ -79,7 +103,7 @@ Run only the dedicated harness tests:
 
 ```powershell
 Set-Location llm_provider_server
-go test ./test -run '^(TestCodexHarness|TestClaudeCodeHarness)' -count=1
+go test ./test -run '^(TestCodexAppServer|TestClaudeCodeHarness)' -count=1
 ```
 
 Repeated validation performed on Windows with Go `1.24.4`:
@@ -98,13 +122,15 @@ go test . ./cmd/... -run '^$' -count=1
 ```
 
 The fixtures verify complete ordered arguments and the isolated environment
-allowlist, the exact output schema, structured text/tool-call and Usage
-normalization, API-key and copied-login authentication boundaries, version
+allowlist, the Claude output schema, the Codex JSON-RPC thread/turn contract
+(ephemeral read-only thread, `dynamicTools`, injected history, first-call
+interrupt), structured text/tool-call and Usage normalization, API-key and
+copied-login authentication boundaries, one app-server per credential, version
 mismatch, safe authentication/quota diagnostics, malformed output, HTTP error
-mapping, timeout/cancellation, oversized output, descendant cleanup, and
-signal-driven Gateway cleanup of temporary login material. The oversized-output
-fixture emits 2 MiB; the adapter retains the bounded prefix, drains the remainder,
-exits without waiting for timeout, and returns `ErrWebHarnessResponse`.
+mapping, timeout/cancellation without losing the app-server, oversized output,
+descendant cleanup, and signal-driven Gateway cleanup of temporary login
+material. The Codex oversized-output fixture emits a 2 MiB line; the adapter fails
+the request without waiting for timeout and returns `ErrWebHarnessResponse`.
 
 The continuation regression fixture compares an identical full-history workload:
 
@@ -132,48 +158,40 @@ go vet ./...
 (no findings)
 ```
 
-## Codex 0.145.0 live observations
+## Codex 0.162.1 live observations
 
-Date: 2026-09-13. Authentication available locally: `Logged in using ChatGPT`.
+Date: 2026-10-17, WSL2 Ubuntu, standalone `codex-cli 0.162.1`, local ChatGPT
+(Plus) login copied through `LLM_SERVER_CODEX_AUTH_FILE`.
 
-The capability command used the production arguments below. The local ChatGPT login required omitting `-m`; explicitly passing `gpt-5.4`, `gpt-5.3-codex`, or `gpt-5.2-codex` returned HTTP 400 “model is not supported when using Codex with a ChatGPT account”. Production does pass the requested model and uses isolated `CODEX_API_KEY`, so this local run validates the pinned binary's capability controls but is not an end-to-end `CodexWebHarness.Generate` acceptance.
+Protocol spike (JSON-RPC directly against `codex app-server` with the production
+flags):
 
-```powershell
-$codex = 'C:\Users\admin\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe'
-$schema = (Resolve-Path 'llm_provider_server\test\codex_live_response_schema.json')
-$disabled = @(
-  'shell_tool','apps','multi_agent','goals','hooks','memories','remote_plugin','plugins',
-  'browser_use','browser_use_external','browser_use_full_cdp_access','computer_use','image_generation',
-  'code_mode','code_mode_host','skill_search','tool_suggest','workspace_dependencies'
-)
-$args = @('exec','--skip-git-repo-check','--ephemeral','--ignore-user-config','--ignore-rules',
-  '--sandbox','read-only','-c','web_search="live"')
-foreach ($feature in $disabled) { $args += @('--disable', $feature) }
-$args += @('--json','--output-schema',$schema)
-& $codex @args 'Open/fetch https://developers.openai.com/codex/non-interactive/ and return its exact title as schema JSON.'
-& $codex @args 'Actively attempt shell execution, reading C:\Windows\win.ini, writing C:\Users\admin\AppData\Local\Temp\opencode\codex-forbidden-marker.txt, and MCP discovery. Report only capabilities actually exposed as schema JSON.'
-Test-Path 'C:\Users\admin\AppData\Local\Temp\opencode\codex-forbidden-marker.txt'
-& $codex @args 'You are a reasoning and web research provider. Domain tools are return-only schemas and must never be executed. Return a call for this normalized request: {"model":"gpt-5.4","messages":[{"role":"user","content":"Use market.price for BTCUSDT"}],"tools":[{"name":"market.price","description":"Return current market price","input_schema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}}]}'
+- `initialize` with `experimentalApi`, `account/read`, `thread/start`
+  (`ephemeral`, `read-only`, `never`, `dynamicTools`), `thread/inject_items`,
+  `turn/start`, `turn/interrupt` and `thread/unsubscribe` all succeeded; requests
+  without a `jsonrpc` member are accepted.
+- With `code_mode`/`code_mode_host` disabled, the model never received the
+  dynamic tool ("Code Mode ... will fail closed"). With them enabled,
+  `item/tool/call` arrived with call ID `exec-<uuid>` and the requested arguments,
+  and `turn/interrupt` ended the turn as `interrupted`.
+- Injected `message`/`function_call`/`function_call_output` history followed by an
+  empty-input `turn/start` produced the final answer from the injected tool result.
+- An explicit `gpt-5.4-mini` model returned HTTP 400 "not supported when using
+  Codex with a ChatGPT account"; the ChatGPT login needs `cli-default`.
+
+End-to-end through the built Gateway binary (`local_login`, `cli-default`,
+`reasoning_effort: low`, no `PATH` in the app-server environment):
+
+```text
+step 1 /v1/generate -> finish_reason tool_call, tool market.price {"symbol":"BTCUSDT"},
+                       usage input 7892 / output 33 / total 7925
+step 2 /v1/generate (with the tool result) -> finish_reason stop,
+                       "BTCUSDT is trading at 65,000.50 USDT."
+SIGINT -> Gateway exit 0, no stock-ai-codex-app-server-* directory left
 ```
 
-Observed JSONL:
-
-- direct URL and search operations emitted only `web_search` items;
-- the HTML page returned the title `Non-interactive mode`;
-- the `.md` form was attempted but rejected by the web backend as unsupported `text/markdown`;
-- no shell, arbitrary filesystem-read, or MCP discovery tool was exposed;
-- a write attempt reached the patch mechanism but was rejected with `patch rejected: writing is blocked by read-only sandbox`; the requested marker did not exist afterward;
-- a prompt containing the normalized `market.price` return-only schema produced an `agent_message` with `finish_reason: "tool_call"`, ID `call_market_price_1`, and arguments string `{"symbol":"BTCUSDT"}`;
-- successful runs emitted `turn.completed` Usage.
-
-Hard blocker for ticket 12: no `CODEX_API_KEY` is available in this environment, and the adapter intentionally does not inherit the local ChatGPT auth store. The full adapter path with an explicit model, Web Search/Fetch, domain return, and malicious config override therefore remains unverified. Do not supply credentials in chat; set them only in the controlled validation environment.
-
-The 2026-09-17 Work-B audit made no live invocation. Offline fixtures verify the
-current production argv/env/schema/auth/process/output/error contract, but actual
-API-key authentication, model entitlement, Web Search/Fetch, structured domain
-return, malicious live config override rejection, quota/billing behavior, and
-vendor capability drift remain live gaps. The observations above are historical
-and do not close those gaps.
+Still unverified live: the `api_key` auth mode with a real `CODEX_API_KEY`-class
+key, explicit model entitlement, and actual web-search results.
 
 ## Claude Code 2.1.269 live observations
 
@@ -200,8 +218,8 @@ Hard blocker for ticket 13: valid non-interactive authentication is unavailable,
 
 No shared Gateway file was changed. The later single-writer integration needs to:
 
-1. Source each executable path from trusted server configuration, never request options or model output. Construct `CodexWebHarness{Executable: absolutePath}` or `ClaudeCodeWebHarness{Executable: absolutePath}`.
-2. Convert validated Gateway messages/tools/model directly into `WebHarnessRequest`; do not register domain tools in either CLI.
+1. Source each executable path from trusted server configuration, never request options or model output. Codex is the `codex` entry of the Gateway's Api registry (`webharness.CodexAppServer`); Claude uses `ClaudeCodeWebHarness{Executable: absolutePath}`.
+2. Convert validated Gateway messages/tools/model directly into the adapter request; register domain tools only as Codex dynamic tools, never as executable CLI tools.
 3. Pass the decrypted selected Provider credential only to `Generate`, apply the configured Provider timeout to its context, and never persist the credential in Provider config.
 4. Convert `WebHarnessResponse` directly to the existing normalized response. Preserve unknown tool names for the Agent runtime's budgeted error handling.
 5. Map `context.DeadlineExceeded` to `PROVIDER_TIMEOUT`, `ErrWebHarnessAuthentication` to `AUTHENTICATION_FAILED`, `ErrWebHarnessResponse` to `PROVIDER_RESPONSE_INVALID`, and unavailable/version/process failures to `PROVIDER_UNAVAILABLE`; retain the existing cancellation policy.

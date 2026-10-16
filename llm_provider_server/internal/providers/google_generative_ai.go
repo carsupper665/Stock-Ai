@@ -2,6 +2,7 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,21 +24,43 @@ var GeminiOptionNames = map[string]bool{
 	"topP":             true,
 }
 
-func GeminiCall(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (ProviderCall, error) {
+// GoogleGenerativeAI is pi-ai's google-generative-ai Api: one non-streaming generateContent call with an
+// x-goog-api-key credential, limited to the model whose state needs no thought signatures.
+type GoogleGenerativeAI struct{}
+
+func (api GoogleGenerativeAI) Complete(ctx context.Context, model Model, request GenerateRequest, options Options) (GenerateResponse, error) {
+	aliases := NewToolAliases(request)
+	call, err := api.buildParams(model.BaseURL, model.ID, request, options.Options, aliases.WireByRuntime)
+	if err != nil {
+		return GenerateResponse{}, invalidRequest(err)
+	}
+	if options.APIKey == "" {
+		return GenerateResponse{}, errCredentialRequired
+	}
+	call.headers["x-goog-api-key"] = options.APIKey
+	response, err := postJSON(ctx, options.Client, call)
+	if err != nil {
+		return GenerateResponse{}, err
+	}
+	defer response.Body.Close()
+	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages))
+}
+
+func (api GoogleGenerativeAI) buildParams(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (providerCall, error) {
 	if model != geminiSupportedModel {
-		return ProviderCall{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini model is outside the Gateway's supported stateless protocol scope."}
+		return providerCall{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini model is outside the Gateway's supported stateless protocol scope."}
 	}
 	for name := range options {
 		if !GeminiOptionNames[name] {
-			return ProviderCall{}, fmt.Errorf("Gemini option %s is not supported by the normalized Generate contract", name)
+			return providerCall{}, fmt.Errorf("Gemini option %s is not supported by the normalized Generate contract", name)
 		}
 	}
 	contents, err := geminiContents(request.Messages, WireByRuntime)
 	if err != nil {
-		return ProviderCall{}, err
+		return providerCall{}, err
 	}
 	if len(contents) == 0 {
-		return ProviderCall{}, errors.New("Gemini requires at least one non-system message")
+		return providerCall{}, errors.New("Gemini requires at least one non-system message")
 	}
 	body := map[string]any{"contents": contents}
 	if system := geminiSystem(request.Messages); len(system) != 0 {
@@ -57,10 +80,10 @@ func GeminiCall(baseURL, model string, request GenerateRequest, options map[stri
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return ProviderCall{}, errors.New("Options contain an invalid value.")
+		return providerCall{}, errors.New("Options contain an invalid value.")
 	}
-	return ProviderCall{
-		URL: strings.TrimRight(baseURL, "/") + "/models/" + model + ":generateContent", Headers: map[string]string{}, Body: encoded,
+	return providerCall{
+		url: strings.TrimRight(baseURL, "/") + "/models/" + model + ":generateContent", headers: map[string]string{}, body: encoded,
 	}, nil
 }
 
@@ -125,7 +148,7 @@ func geminiToolResult(content *string) (map[string]json.RawMessage, error) {
 	return result, nil
 }
 
-func NormalizeGeminiResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
+func (api GoogleGenerativeAI) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
 	switch upstream.StatusCode {
 	case http.StatusBadRequest:
 		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "Gemini rejected the generated request."}
@@ -133,9 +156,9 @@ func NormalizeGeminiResponse(upstream *http.Response, RuntimeByWire map[string]s
 		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini does not provide the requested model to this credential."}
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return GenerateResponse{}, UpstreamStatusFailure(upstream)
+		return GenerateResponse{}, upstreamStatusFailure(upstream)
 	}
-	body, err := ReadProviderBody(upstream.Body)
+	body, err := readProviderBody(upstream.Body)
 	if err != nil {
 		return GenerateResponse{}, err
 	}
