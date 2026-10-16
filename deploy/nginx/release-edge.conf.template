@@ -3,8 +3,8 @@ upstream stock_ai_gateway { server oidc-gateway:4180; keepalive 8; }
 
 server {
     listen 8443 ssl default_server;
-    server_name app.localrelease;
-    set $release_host app.localrelease;
+    server_name ${RELEASE_SERVER_NAME};
+    set $release_host ${RELEASE_SERVER_NAME};
     absolute_redirect off;
     if ($host != $release_host) { return 421; }
 
@@ -135,15 +135,8 @@ server {
         return 404;
     }
 
-    # Only public protocol routes; fixture control routes remain private.
-    location ~ ^/realms/stock-ai-release/(?:authorize|token|jwks|logout|\.well-known/openid-configuration)$ {
-        proxy_pass https://idp:8443;
-        proxy_ssl_verify on;
-        proxy_ssl_trusted_certificate /run/release-tls/fullchain.pem;
-        proxy_ssl_server_name on;
-        proxy_ssl_name app.localrelease;
-        proxy_set_header Host app.localrelease:8443;
-    }
+    # Deployment-specific routes, e.g. the local fixture IdP; empty for an external IdP.
+    include /etc/nginx/release-extra/*.conf;
 
     location = /healthz {
         default_type text/plain;

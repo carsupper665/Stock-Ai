@@ -156,26 +156,22 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertIn('"GET /oauth2/callback HTTP/1.1" 302', rendered)
         self.assertNotIn(marker, rendered)
 
-    def test_issuer_checker_policy_has_negative_unit_cases(self):
-        checks = (ROOT / "scripts/issuer-check/main_test.go").read_text(encoding="utf-8")
-        self.assertIn("func TestValidateIssuerURL", checks)
-        self.assertIn("func TestValidateJWKSURLRequiresSameOriginAndRealmPath", checks)
+    def test_gateway_preflight_has_negative_unit_cases(self):
+        gateway_tests = ROOT / "oidc_gateway/internal/gateway"
+        checks = (gateway_tests / "external_idp_test.go").read_text(encoding="utf-8")
         for case in (
-            'name: "userinfo"',
-            'name: "nonstandard port"',
-            'name: "stable issuer with explicit 443"',
-            'name: "localhost"',
-            'name: "loopback name"',
-            'name: "loopback subdomain"',
-            'name: "single-label host"',
-            'name: "IPv4 loopback"',
-            'name: "IPv6 loopback"',
-            'name: "foreign origin"',
-            'name: "different port"',
-            'name: "outside realm"',
-            'name: "traversal"',
+            "func TestPreflightReportsExternalIdPMismatches",
+            "func TestPreflightExplainsIncompleteCertificateChain",
+            '"issuer mismatch"',
+            '"token URL mismatch"',
+            '"auth method missing"',
+            '"redirect not registered"',
+            '"token endpoint on another origin"',
+            '"plain http issuer"',
         ):
             self.assertIn(case, checks)
+        self.assertIn("func TestConfigRejectsLoopbackAndLocalhostAliasesInBothEnvironments",
+                      (gateway_tests / "gateway_test.go").read_text(encoding="utf-8"))
 
     def test_live_probe_covers_matrix_route_classes_and_role_rejection(self):
         script = EXTERNAL_CHECK.read_text(encoding="utf-8")
@@ -191,9 +187,8 @@ class TestEdgePolicyTest(unittest.TestCase):
         ):
             self.assertIn(check, script)
         self.assertIn("oidc_gateway/internal/**/*_test.go", DOCKERIGNORE.read_text(encoding="utf-8"))
-        self.assertIn("!scripts/issuer-check/**/*.go", DOCKERIGNORE.read_text(encoding="utf-8"))
         self.assertIn("COPY oidc_gateway/ ./", gateway_dockerfile)
-        self.assertIn("COPY scripts/issuer-check/", gateway_dockerfile)
+        self.assertNotIn("issuer-check", gateway_dockerfile)
 
     def test_http_redirect_and_auth_routes_preserve_browser_contract(self):
         self.assertIn("return 301 https://${TEST_APP_HOST}$request_uri;", self.nginx)
@@ -213,7 +208,7 @@ class TestEdgePolicyTest(unittest.TestCase):
             "stock-ai-test",
             "stock-ai-test_oidc_client_secret",
             "stock-ai-test_oidc_cookie_key",
-            "issuer-check",
+            "oidc-gateway preflight",
             "evidence",
             "not run",
         ):

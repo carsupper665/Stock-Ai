@@ -24,6 +24,9 @@ type fakeIDP struct {
 	nonce, challenge string
 	loginCookie      *http.Cookie
 	tokenCalls       int
+	access           string
+	discovery        map[string]any
+	authorizeStatus  int
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -34,7 +37,7 @@ func validConfig(environment string) Config {
 	suffix := strings.ToLower(environment)
 	clientID := "stock-ai-" + suffix
 	issuer := "https://issuer.example/realms/" + clientID
-	return Config{Environment: environment, Issuer: issuer, AuthorizationURL: issuer + "/authorize", TokenURL: issuer + "/token", JWKSURL: issuer + "/jwks", ClientID: clientID, ClientSecret: strings.Repeat("s", 40), RedirectURI: "https://app.example/oauth2/callback", EndSessionURL: issuer + "/logout", PostLogoutURI: "https://app.example/", CookieName: "__Host-" + clientID + "-session", CookieKey: []byte("0123456789abcdef0123456789abcdef"), UserSubject: "user-123", SessionTTL: time.Hour, LoginTTL: 10 * time.Minute}
+	return Config{Environment: environment, Issuer: issuer, AuthorizationURL: issuer + "/authorize", TokenURL: issuer + "/token", JWKSURL: issuer + "/jwks", ClientID: clientID, ClientSecret: strings.Repeat("s", 40), TokenAuthMethod: "client_secret_basic", AccessTokenType: "at+jwt", Audience: "stock-ai-api-" + suffix, RedirectURI: "https://app.example/oauth2/callback", EndSessionURL: issuer + "/logout", PostLogoutURI: "https://app.example/", CookieName: "__Host-" + clientID + "-session", CookieKey: []byte("0123456789abcdef0123456789abcdef"), UserSubject: "user-123", SessionTTL: time.Hour, LoginTTL: 10 * time.Minute}
 }
 
 func newFixture(t *testing.T) (*Server, *fakeIDP) {
@@ -44,7 +47,10 @@ func newFixture(t *testing.T) (*Server, *fakeIDP) {
 		t.Fatal(err)
 	}
 	f := &fakeIDP{t: t, key: key}
+	f.access = f.signTyped("at+jwt", map[string]any{"iss": "https://issuer.example/realms/stock-ai-test", "aud": []string{"stock-ai-api-test", "account"}, "sub": "user-123", "exp": time.Now().Add(time.Hour).Unix()})
 	cfg := validConfig("Test")
+	issuer := cfg.Issuer
+	f.discovery = map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token", "jwks_uri": issuer + "/jwks", "end_session_endpoint": issuer + "/logout", "token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"}}
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +88,14 @@ func TestHealthEndpointIsUnauthenticatedAndNoContent(t *testing.T) {
 
 func (f *fakeIDP) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
+	case "/realms/stock-ai-test/.well-known/openid-configuration":
+		_ = json.NewEncoder(w).Encode(f.discovery)
+	case "/realms/stock-ai-test/authorize":
+		if f.authorizeStatus != 0 {
+			http.Error(w, "Invalid parameter: redirect_uri", f.authorizeStatus)
+			return
+		}
+		_, _ = io.WriteString(w, "<html>login</html>")
 	case "/realms/stock-ai-test/jwks":
 		n := base64.RawURLEncoding.EncodeToString(f.key.N.Bytes())
 		e := base64.RawURLEncoding.EncodeToString([]byte{1, 0, 1})
@@ -91,12 +105,27 @@ func (f *fakeIDP) serve(w http.ResponseWriter, r *http.Request) {
 		f.tokenCalls++
 		nonce, challenge := f.nonce, f.challenge
 		f.mu.Unlock()
-		if id, secret, ok := r.BasicAuth(); !ok || id != "stock-ai-test" || secret != strings.Repeat("s", 40) {
-			http.Error(w, "bad client", 401)
-			return
-		}
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad form", 400)
+			return
+		}
+		id, secret, basic := r.BasicAuth()
+		if !basic {
+			id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
+		} else if r.PostForm.Has("client_secret") {
+			http.Error(w, "two client authentication methods", 400)
+			return
+		}
+		if decodedID, err := url.QueryUnescape(id); basic && err == nil {
+			id = decodedID
+		}
+		if decodedSecret, err := url.QueryUnescape(secret); basic && err == nil {
+			secret = decodedSecret
+		}
+		if id != "stock-ai-test" || secret != strings.Repeat("s", 40) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(401)
+			_, _ = io.WriteString(w, `{"error":"invalid_client","error_description":"echoed client secret"}`)
 			return
 		}
 		code := r.Form.Get("code")
@@ -113,15 +142,17 @@ func (f *fakeIDP) serve(w http.ResponseWriter, r *http.Request) {
 			nonce = "wrong"
 		}
 		idToken := f.sign(map[string]any{"iss": "https://issuer.example/realms/stock-ai-test", "aud": "stock-ai-test", "sub": "user-123", "nonce": nonce, "preferred_username": "Alice", "email": "alice@example.test", "exp": time.Now().Add(time.Hour).Unix()})
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "server-only-access-token", "id_token": idToken, "token_type": "Bearer", "expires_in": 3600})
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": f.access, "id_token": idToken, "token_type": "Bearer", "expires_in": 3600})
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-func (f *fakeIDP) sign(claims map[string]any) string {
+func (f *fakeIDP) sign(claims map[string]any) string { return f.signTyped("JWT", claims) }
+
+func (f *fakeIDP) signTyped(typ string, claims map[string]any) string {
 	enc := func(v any) string { b, _ := json.Marshal(v); return base64.RawURLEncoding.EncodeToString(b) }
-	unsigned := enc(map[string]string{"alg": "RS256", "kid": "key-1", "typ": "JWT"}) + "." + enc(claims)
+	unsigned := enc(map[string]string{"alg": "RS256", "kid": "key-1", "typ": typ}) + "." + enc(claims)
 	d := sha256.Sum256([]byte(unsigned))
 	sig, err := rsa.SignPKCS1v15(rand.Reader, f.key, crypto.SHA256, d[:])
 	if err != nil {
@@ -202,7 +233,7 @@ func TestBrowserFirstLoginRefreshAndSessionFixation(t *testing.T) {
 	if cookie.Value == planted || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" || cookie.Domain != "" {
 		t.Fatalf("unsafe or fixed cookie: %#v", cookie)
 	}
-	if strings.Contains(cookie.Value, "server-only-access-token") {
+	if strings.Contains(cookie.Value, f.access) {
 		t.Fatal("access token leaked in cookie")
 	}
 	for i := 0; i < 2; i++ {
@@ -214,7 +245,7 @@ func TestBrowserFirstLoginRefreshAndSessionFixation(t *testing.T) {
 			t.Fatalf("refresh %d=%d", i, out.Code)
 		}
 		body := out.Body.String()
-		if !strings.Contains(body, "Alice") || strings.Contains(body, "server-only-access-token") {
+		if !strings.Contains(body, "Alice") || strings.Contains(body, f.access) {
 			t.Fatalf("unsafe /me: %s", body)
 		}
 	}
@@ -222,7 +253,7 @@ func TestBrowserFirstLoginRefreshAndSessionFixation(t *testing.T) {
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
 	s.Handler().ServeHTTP(out, req)
-	if out.Code != 204 || out.Header().Get("X-Auth-Request-Access-Token") != "server-only-access-token" {
+	if out.Code != 204 || out.Header().Get("X-Auth-Request-Access-Token") != f.access {
 		t.Fatalf("private auth failed: %d", out.Code)
 	}
 	tampered := *cookie
@@ -327,7 +358,7 @@ func TestAuthorizationURLAndResponsesContainNoSecrets(t *testing.T) {
 	state := begin(t, s, f, "//evil.example/")
 	res := callback(t, s, f, state, "ok", "")
 	raw := res.Header().Get("Location") + res.Body.String()
-	for _, secret := range []string{s.cfg.ClientSecret, "server-only-access-token"} {
+	for _, secret := range []string{s.cfg.ClientSecret, f.access} {
 		if strings.Contains(raw, secret) {
 			t.Fatal("credential leaked to browser response")
 		}

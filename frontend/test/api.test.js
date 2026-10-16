@@ -91,3 +91,12 @@ it('管理路由只用 Gateway cookie 驗證 console，401 會登出', async () 
   expect(err.status).toBe(401)
 	expect(location.assign).toHaveBeenCalledWith('/login?expired=1')
 })
+
+it('已在登入頁時 Gateway session 401 只清除登入狀態，不再重載登入頁', async () => {
+  history.replaceState(null, '', '/login')
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond(401, { error: { code: 'UNAUTHORIZED', message: 'login required' } }))
+  const err = await api('GET', '/llm/healthz', undefined, null).catch((e) => e)
+  history.replaceState(null, '', '/')
+  expect(err.status).toBe(401)
+  expect(location.assign).not.toHaveBeenCalled()
+})

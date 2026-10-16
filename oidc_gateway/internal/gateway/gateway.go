@@ -11,7 +11,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -171,12 +173,21 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	tokens, err := s.exchange(r.Context(), r.URL.Query().Get("code"), a.Verifier)
 	if err != nil {
+		log.Printf("OIDC login failed: %v", err)
 		s.clearSession(w, r)
 		s.callbackFailure(w, r, "login_failed")
 		return
 	}
 	claims, err := s.verifyIDToken(r.Context(), tokens.IDToken, a.Nonce)
 	if err != nil {
+		log.Printf("OIDC login failed: ID token rejected: %v", err)
+		s.clearSession(w, r)
+		s.callbackFailure(w, r, "login_failed")
+		return
+	}
+	// Reject here what the backend would reject later, so a bad IdP mapping fails at login instead of as API 401s.
+	if err := s.checkAccessToken(tokens.AccessToken); err != nil {
+		log.Printf("OIDC login failed: access token rejected: %v", err)
 		s.clearSession(w, r)
 		s.callbackFailure(w, r, "login_failed")
 		return
@@ -225,28 +236,51 @@ type tokenResponse struct {
 
 func (s *Server) exchange(ctx context.Context, code, verifier string) (tokenResponse, error) {
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {s.cfg.RedirectURI}, "code_verifier": {verifier}}
+	if s.cfg.TokenAuthMethod == "client_secret_post" {
+		form.Set("client_id", s.cfg.ClientID)
+		form.Set("client_secret", s.cfg.ClientSecret)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return tokenResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	req.SetBasicAuth(s.cfg.ClientID, s.cfg.ClientSecret)
+	if s.cfg.TokenAuthMethod == "client_secret_basic" {
+		// RFC 6749 §2.3.1: credentials are form-urlencoded before Basic encoding.
+		req.SetBasicAuth(url.QueryEscape(s.cfg.ClientID), url.QueryEscape(s.cfg.ClientSecret))
+	}
 	res, err := s.client.Do(req)
 	if err != nil {
-		return tokenResponse{}, err
+		return tokenResponse{}, explainTLS(err)
 	}
 	defer res.Body.Close()
 	reader := io.LimitReader(res.Body, maxOIDCResponse+1)
 	raw, err := io.ReadAll(reader)
-	if err != nil || len(raw) > maxOIDCResponse || res.StatusCode != http.StatusOK {
-		return tokenResponse{}, errors.New("token exchange failed")
+	if err != nil || len(raw) > maxOIDCResponse {
+		return tokenResponse{}, errors.New("token endpoint response is unreadable or too large")
+	}
+	if res.StatusCode != http.StatusOK {
+		return tokenResponse{}, fmt.Errorf("token endpoint returned %d (error=%s, OIDC_TOKEN_AUTH_METHOD=%s)", res.StatusCode, oauthErrorCode(raw), s.cfg.TokenAuthMethod)
 	}
 	var out tokenResponse
 	if json.Unmarshal(raw, &out) != nil || out.AccessToken == "" || out.IDToken == "" || !strings.EqualFold(out.TokenType, "Bearer") {
-		return tokenResponse{}, errors.New("invalid token response")
+		return tokenResponse{}, errors.New("token endpoint response lacks access_token, id_token or Bearer token_type")
 	}
 	return out, nil
+}
+
+// oauthErrorCode keeps only the RFC 6749 error code; descriptions may echo request data.
+func oauthErrorCode(raw []byte) string {
+	var body struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(raw, &body) != nil || body.Error == "" || len(body.Error) > 64 || strings.IndexFunc(body.Error, func(r rune) bool {
+		return !(r == '_' || r == '-' || r == '.' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
+	}) >= 0 {
+		return "unknown"
+	}
+	return body.Error
 }
 
 func (s *Server) auth(w http.ResponseWriter, r *http.Request) {
@@ -396,6 +430,13 @@ type idClaims struct {
 type jwtHeader struct {
 	Algorithm string `json:"alg"`
 	KeyID     string `json:"kid"`
+	Type      string `json:"typ"`
+}
+
+type accessClaims struct {
+	Issuer   string          `json:"iss"`
+	Audience json.RawMessage `json:"aud"`
+	Subject  string          `json:"sub"`
 }
 
 func decodePart(part string, target any) error {
@@ -465,6 +506,55 @@ func (s *Server) verifyIDToken(ctx context.Context, token, nonce string) (idClai
 		c.PreferredUsername = c.Subject
 	}
 	return c, nil
+}
+
+// checkAccessToken compares the unverified access token shape with the backend's rules; the backend still verifies the signature.
+func (s *Server) checkAccessToken(token string) error {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return errors.New("access token is not a JWT")
+	}
+	var h jwtHeader
+	if decodePart(parts[0], &h) != nil {
+		return errors.New("access token header is not valid JSON")
+	}
+	if h.Type != s.cfg.AccessTokenType {
+		return fmt.Errorf("header typ=%q but OIDC_TOKEN_TYPE=%q", h.Type, s.cfg.AccessTokenType)
+	}
+	if h.Algorithm != "RS256" || h.KeyID == "" {
+		return fmt.Errorf("header alg=%q kid_present=%t, want RS256 with kid", h.Algorithm, h.KeyID != "")
+	}
+	var c accessClaims
+	if decodePart(parts[1], &c) != nil {
+		return errors.New("access token claims are not valid JSON")
+	}
+	if c.Issuer != s.cfg.Issuer {
+		return fmt.Errorf("iss=%q but OIDC_ISSUER=%q", c.Issuer, s.cfg.Issuer)
+	}
+	if !containsAudience(c.Audience, s.cfg.Audience) {
+		return fmt.Errorf("aud=%s does not contain OIDC_AUDIENCE=%q", c.Audience, s.cfg.Audience)
+	}
+	if c.Subject != s.cfg.UserSubject {
+		return errors.New("sub does not match OIDC_USER_SUBJECT")
+	}
+	return nil
+}
+
+func containsAudience(raw json.RawMessage, want string) bool {
+	var one string
+	if json.Unmarshal(raw, &one) == nil {
+		return one == want
+	}
+	var many []string
+	if json.Unmarshal(raw, &many) != nil {
+		return false
+	}
+	for _, v := range many {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 type jwksDocument struct {

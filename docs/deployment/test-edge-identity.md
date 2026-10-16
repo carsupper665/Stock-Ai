@@ -92,17 +92,18 @@ Run static policy tests from the repository root:
 
     python -m unittest scripts.test.test_test_edge
 
-After deployment, prove DNS, certificate trust, exact issuer discovery, and
-JWKS reachability from the private Compose network, not merely from the Windows
-host. The Gateway image includes an issuer-check command for this purpose:
+Before starting the stack, prove DNS, certificate trust, exact issuer
+discovery, and JWKS reachability from the private Compose network, not merely
+from the Windows host. The Gateway image runs `oidc-gateway preflight` with the
+same configuration and trust store as the running Gateway:
 
-    docker compose --env-file C:\ProgramData\StockAI\Test\compose.env -f deploy/compose/compose.yaml -f deploy/compose/compose.test-edge.yaml exec -T oidc-gateway /issuer-check Test https://idp-test.example/realms/stock-ai-test
+    docker compose --env-file C:\ProgramData\StockAI\Test\compose.env -f deploy/compose/compose.yaml -f deploy/compose/compose.test-edge.yaml run --rm --no-deps oidc-gateway preflight
 
-Use the actual configured issuer in the command. It fails on DNS/TLS/HTTP
-errors, a non-443 or local/IP-literal issuer, issuer mismatch, a cross-origin
-or out-of-realm JWKS URL, or an empty key set. A
-successful output records the exact issuer, JWKS host, and key count without
-recording key material.
+It fails on DNS/TLS/HTTP errors (and explains an incomplete IdP certificate
+chain), a discovery issuer or endpoint that differs from the configured URLs,
+an unsupported `OIDC_TOKEN_AUTH_METHOD`, an unusable JWKS, or an authorization
+endpoint that rejects the redirect URI. A successful run prints the Redirect URI
+and Post-logout URI to register in the IdP client, without key material.
 
 From a network outside the Test computer, verify the A/AAAA records, the
 certificate chain and hostname, HTTP-to-HTTPS redirect, required response

@@ -49,7 +49,8 @@ def project_containers():
 def preflight(operator, manifest):
     deployment = operator.compose_files[0].parents[2]
     bundle = ("deploy/compose/compose.yaml", "deploy/compose/compose.local-release.yaml",
-              "deploy/nginx/release-nginx.conf", "deploy/nginx/release-edge.conf.template")
+              "deploy/nginx/release-nginx.conf", "deploy/nginx/release-edge.conf.template",
+              "deploy/nginx/release-fixture-idp.conf")
     if any((deployment / name).is_symlink() or (deployment / name).read_bytes() != (ROOT / name).read_bytes()
            for name in bundle):
         raise WorkflowError("Persistent deployment bundle differs from reviewed checkout")

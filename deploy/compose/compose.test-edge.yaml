@@ -24,6 +24,9 @@ services:
       OIDC_POST_LOGOUT_URI: "https://${TEST_APP_HOST}/"
       OIDC_COOKIE_NAME: __Host-stock-ai-test-session
       OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the approved stable Test subject}"
+      OIDC_AUDIENCE: "${OIDC_AUDIENCE:?set the Test API audience}"
+      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
+      OIDC_TOKEN_AUTH_METHOD: "${OIDC_TOKEN_AUTH_METHOD:-client_secret_basic}"
     secrets:
       - source: test_oidc_client_secret
         target: stock-ai-test_oidc_client_secret

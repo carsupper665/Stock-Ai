@@ -10,8 +10,6 @@
 !oidc_gateway/internal/**/*.go
 oidc_gateway/internal/**/*_test.go
 !scripts
-!scripts/issuer-check
-!scripts/issuer-check/**/*.go
 !backend
 !backend/go.mod
 !backend/go.sum

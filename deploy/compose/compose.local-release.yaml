@@ -58,6 +58,8 @@ services:
       OIDC_POST_LOGOUT_URI: "https://${RELEASE_APP_HOST}/"
       OIDC_COOKIE_NAME: __Host-stock-ai-release-session
       OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the approved stable Release subject}"
+      OIDC_AUDIENCE: "${OIDC_AUDIENCE:?set the Release API audience}"
+      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
     secrets:
       - source: release_oidc_client_secret
         target: stock-ai-release_oidc_client_secret
@@ -97,12 +99,13 @@ services:
     command:
       - /bin/sh
       - -ec
-      - envsubst '$$RELEASE_APP_HOST' < /etc/nginx/templates/release-edge.conf.template > /tmp/release-edge.conf; exec nginx -c /etc/nginx/release-nginx.conf -g 'daemon off;'
+      - export RELEASE_SERVER_NAME=$$(printf %s "$$RELEASE_APP_HOST" | sed 's/:.*//'); envsubst '$$RELEASE_APP_HOST $$RELEASE_SERVER_NAME' < /etc/nginx/templates/release-edge.conf.template > /tmp/release-edge.conf; exec nginx -c /etc/nginx/release-nginx.conf -g 'daemon off;'
     ports:
       - "127.0.0.1:8443:8443"
     volumes:
       - ../nginx/release-nginx.conf:/etc/nginx/release-nginx.conf:ro
       - ../nginx/release-edge.conf.template:/etc/nginx/templates/release-edge.conf.template:ro
+      - ../nginx/release-fixture-idp.conf:/etc/nginx/release-extra/fixture-idp.conf:ro
       - "${RELEASE_TLS_DIR:?set the Release TLS directory}:/run/release-tls:ro"
     networks: [edge]
     depends_on:

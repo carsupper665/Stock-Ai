@@ -44,16 +44,19 @@ only from namespaced files. Direct secret environment values are rejected.
 | Setting | Test | Release |
 |---|---|---|
 | `STOCK_AI_ENVIRONMENT` | `Test` | `Release` |
-| `OIDC_CLIENT_ID` | `stock-ai-test` | `stock-ai-release` |
+| `OIDC_CLIENT_ID` | IdP client ID (no whitespace) | IdP client ID (no whitespace) |
 | `OIDC_COOKIE_NAME` | `__Host-stock-ai-test-session` | `__Host-stock-ai-release-session` |
 | `OIDC_CLIENT_SECRET_FILE` | `.../stock-ai-test_oidc_client_secret` | `.../stock-ai-release_oidc_client_secret` |
 | `OIDC_COOKIE_KEY_FILE` | `.../stock-ai-test_oidc_cookie_key` | `.../stock-ai-release_oidc_cookie_key` |
-| issuer | exact HTTPS `/realms/stock-ai-test` | exact HTTPS `/realms/stock-ai-release` |
+| issuer | exact HTTPS issuer of the Test IdP | exact HTTPS issuer of the Release IdP |
 | redirect | `https://<test-app>/oauth2/callback` | `https://<release-app>/oauth2/callback` |
 | post logout | `https://<test-app>/` | `https://<release-app>/` |
+| `OIDC_TOKEN_AUTH_METHOD` | `client_secret_basic` (default) or `client_secret_post` | same |
+| `OIDC_TOKEN_TYPE` | access token `typ`, default `at+jwt` | same as Backend |
+| `OIDC_AUDIENCE` | API audience in the access token | same as Backend |
 
-Authorization, token, JWKS, and end-session URLs must be below the configured
-environment issuer. Redirect and post-logout URLs must share one non-local HTTPS
+Authorization, token, JWKS, and end-session URLs must use the issuer's HTTPS
+origin; their paths follow the IdP's discovery document. Redirect and post-logout URLs must share one non-local HTTPS
 host and contain no wildcard, userinfo, fragment, or query. `localhost`, any
 `*.localhost` alias (with or without a trailing dot), the entire IPv4 loopback
 range, and IPv6 loopback are rejected in both Test and Release. The cookie key is
@@ -75,6 +78,16 @@ expire any presented application cookie and redirect to a clean login URL with
 only a generic error code. IdP descriptions, codes, tokens, claims, secrets,
 and verifier material are never reflected. A successful callback always issues
 a fresh random session ID, ignoring any attacker-planted cookie.
+
+The Gateway log records why a login failed without tokens or secrets: the token
+endpoint status and OAuth `error` code, an ID-token rejection, or the access-token
+field that the Backend would reject (`typ`, `alg`/`kid`, `iss`, `aud`, `sub`) with
+its actual and configured values. A login whose access token the Backend would
+reject never gets a session, so it cannot turn into API 401s after login.
+
+`oidc-gateway preflight` checks the deployed configuration against the IdP from
+inside the Gateway image and prints the Redirect URI and Post-logout URI to
+register; at startup the Gateway logs the same two URIs.
 
 Gateway JWKS handling accepts at most 32 supported RSA signing keys. Each
 accepted key must have a non-empty unique `kid`, optional `use=sig`, optional

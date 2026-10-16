@@ -308,7 +308,7 @@ try {
         'docker/llm-provider-server.Dockerfile', 'docker/console.Dockerfile', 'docker/oidc-gateway.Dockerfile', 'docker/healthcheck.go',
         'oidc_gateway/go.mod', 'oidc_gateway/cmd/gateway/main.go',
         'oidc_gateway/internal/gateway/config.go', 'oidc_gateway/internal/gateway/gateway.go',
-        'scripts/issuer-check/main.go',
+        'oidc_gateway/internal/gateway/preflight.go',
         'backend/go.mod', 'backend/go.sum', 'agent_server/go.mod', 'agent_server/go.sum',
         'llm_provider_server/go.mod', 'llm_provider_server/go.sum',
         'frontend/package.json', 'frontend/package-lock.json'

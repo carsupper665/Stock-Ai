@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a fresh, loopback-only WSL/Linux fixture release from offline images."""
+"""Install a fresh WSL/Linux release from offline images: local fixtures, or an external IdP with --idp-env."""
 import argparse
 import base64
 import hashlib
@@ -37,12 +37,29 @@ def verify(bundle):
     return manifest
 
 
+def verify_external_edge(idp, runtime):
+    """The edge answers on RELEASE_APP_HOST and /oauth2/start hands the browser to the external IdP."""
+    host = idp["RELEASE_APP_HOST"]
+    hostname, _, port = host.partition(":")
+    published = idp["RELEASE_BIND"].rpartition(":")[2]
+    curl = ["curl", "-sS", "--max-time", "10", "--resolve", f"{hostname}:{port or 443}:127.0.0.1",
+            "--cacert", str(runtime / "certs/fullchain.pem"), "-o", "/dev/null", "-w", "%{http_code} %{redirect_url}"]
+    if published != (port or "443"):
+        curl[4:6] = ["--connect-to", f"{hostname}:{port or 443}:127.0.0.1:{published}"]
+    health = run(*curl, f"https://{host}/healthz").stdout.split(" ", 1)
+    start = run(*curl, f"https://{host}/oauth2/start").stdout.split(" ", 1)
+    if health[0] != "200" or start[0] != "302" or not start[1].startswith(idp["OIDC_AUTHORIZATION_URL"]):
+        raise RuntimeError("Release edge did not serve /healthz or redirect /oauth2/start to the IdP")
+
+
 def main(args):
     bundle = args.bundle.resolve()
     manifest = verify(bundle)
     if args.verify_only:
-        print("Package checksums verified; Linux/amd64 fixture release")
+        print("Package checksums verified; Linux/amd64 release")
         return
+    if bool(args.idp_env) != bool(args.oidc_client_secret_file):
+        raise ValueError("--idp-env and --oidc-client-secret-file must be given together")
     import cryptography  # Require the host dependency before any Docker mutation.
     runtime = args.runtime.expanduser().resolve()
     if runtime.exists() and any(runtime.iterdir()):
@@ -50,9 +67,20 @@ def main(args):
     info = json.loads(run("docker", "info", "--format", "{{json .}}").stdout)
     if info.get("OSType") != "linux" or info.get("Architecture") not in ("x86_64", "amd64"):
         raise ValueError("A Linux/amd64 Docker engine is required")
-    for port in (5000, 8443):
+    with tarfile.open(bundle / "source.tar.gz") as archive:
+        archive.extractall(bundle, filter="data")
+    source = bundle / "source"
+    sys.path.insert(0, str(source))
+    sys.path.insert(0, str(source / "scripts/local-release"))
+    from prepare import prepare, approved_images, read_external_idp, DEFAULT_MANIFEST
+    idp = read_external_idp(args.idp_env) if args.idp_env else None
+    bind_host, _, bind_port = (idp["RELEASE_BIND"] if idp else "127.0.0.1:8443").rpartition(":")
+    for host, port in (("127.0.0.1", 5000), (bind_host, int(bind_port))):
         with socket.socket() as probe:
-            probe.bind(("127.0.0.1", port))
+            try:
+                probe.bind((host, port))
+            except PermissionError:  # Privileged ports (e.g. 443) cannot be probed unprivileged; Docker still binds them.
+                pass
     registry_name, volume_name = "stock-ai-release-registry", "stock-ai-release-registry-data"
     for kind, name in (("container", registry_name), ("volume", volume_name)):
         if subprocess.run(["docker", kind, "inspect", name], capture_output=True).returncode == 0:
@@ -62,12 +90,6 @@ def main(args):
     for volume in ("backend_state", "agent_state", "llm_state"):
         if subprocess.run(["docker", "volume", "inspect", "stock-ai-local-release_" + volume], capture_output=True).returncode == 0:
             raise ValueError("Existing application data volume found; fresh installation refused")
-    with tarfile.open(bundle / "source.tar.gz") as archive:
-        archive.extractall(bundle, filter="data")
-    source = bundle / "source"
-    sys.path.insert(0, str(source))
-    sys.path.insert(0, str(source / "scripts/local-release"))
-    from prepare import prepare, approved_images, DEFAULT_MANIFEST
     images, promotion = approved_images(DEFAULT_MANIFEST)
     if images != manifest["images"] or promotion != manifest["promotion_manifest_sha256"]:
         raise ValueError("Packaged source approvals differ from bundled images")
@@ -96,17 +118,25 @@ def main(args):
         run("docker", "pull", reference)
         run("docker", "image", "inspect", reference)
     run("docker", "stop", registry_name)
-    env_file = prepare(runtime=runtime)
+    env_file = prepare(runtime=runtime, idp=idp, client_secret_file=args.oidc_client_secret_file)
     from accept import sync_bundle
     deployment = runtime / "deployment"
     sync_bundle(deployment)
     shutil.copytree(source / "docs/deployment", deployment / "docs/deployment", dirs_exist_ok=True)
-    files = [deployment / "deploy/compose" / name for name in ("compose.yaml", "compose.local-release.yaml")]
+    overlay = "compose.release.yaml" if idp else "compose.local-release.yaml"
+    files = [deployment / "deploy/compose" / name for name in ("compose.yaml", overlay)]
     compose = ["docker", "compose", "--env-file", str(env_file), "-f", str(files[0]), "-f", str(files[1])]
+    if idp:
+        # Runs in the Gateway image with the deployment's trust store; prints the URIs to register in the IdP.
+        if subprocess.run(compose + ["run", "--rm", "--no-deps", "oidc-gateway", "preflight"]).returncode:
+            raise ValueError("OIDC preflight failed; fix the IdP settings shown above, then install into a new runtime")
     subprocess.run(compose + ["up", "-d", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180"], check=True)
-    from verify_ingress import verify as ingress
-    if ingress(runtime)["status"] != "passed":
-        raise RuntimeError("Verified TLS/login acceptance failed")
+    if idp:
+        verify_external_edge(idp, runtime)
+    else:
+        from verify_ingress import verify as ingress
+        if ingress(runtime)["status"] != "passed":
+            raise RuntimeError("Verified TLS/login acceptance failed")
     from deploy import snapshot, project_containers
     from scripts.local_operations import Operator
     with os.fdopen(os.open(runtime / "recovery.key", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as key:
@@ -114,7 +144,13 @@ def main(args):
     operator = Operator(env_file, files, runtime / "evidence/install", 180)
     backup = snapshot(operator, operator.compose_config(), project_containers(), runtime / "backups", runtime / "recovery.key")
     operator.write_evidence("initial-backup.json", backup)
-    print("Installed: https://app.localrelease:8443 (loopback-only local fixtures)")
+    if idp:
+        print(f"Installed: https://{idp['RELEASE_APP_HOST']} (external IdP {idp['OIDC_ISSUER']})")
+        print(f"IdP client {idp['OIDC_CLIENT_ID']} must register redirect URI https://{idp['RELEASE_APP_HOST']}/oauth2/callback"
+              f" and post-logout URI https://{idp['RELEASE_APP_HOST']}/")
+        print("Finish with the login acceptance checklist in docs/deployment/remote-windows-release.md")
+    else:
+        print("Installed: https://app.localrelease:8443 (loopback-only local fixtures)")
     print("Private runtime: " + str(runtime))
     print("Fresh data and credentials; no source-machine database, secret or private key was transferred")
 
@@ -124,6 +160,8 @@ if __name__ == "__main__":
     parser.add_argument("--bundle", type=Path, default=Path(__file__).resolve().parent)
     parser.add_argument("--runtime", type=Path, default=Path.home() / "stock-ai-runtime")
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--idp-env", type=Path, help="External IdP settings (deploy/compose/release.env.example)")
+    parser.add_argument("--oidc-client-secret-file", type=Path, help="File holding the IdP client secret")
     args = parser.parse_args()
     try:
         main(args)

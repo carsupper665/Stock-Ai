@@ -156,7 +156,8 @@ def validate_material(config, values, runtime, deployment_root=ROOT):
                 if not source.exists() or source.is_symlink() or not mount.get("read_only"):
                     raise WorkflowError("Release bind mount must exist and be read-only.")
                 if source != certs and source.parent != certs and source not in (
-                    deployment_root / "deploy/nginx/release-nginx.conf", deployment_root / "deploy/nginx/release-edge.conf.template"):
+                    deployment_root / "deploy/nginx/release-nginx.conf", deployment_root / "deploy/nginx/release-edge.conf.template",
+                    deployment_root / "deploy/nginx/release-fixture-idp.conf"):
                     raise WorkflowError("Unexpected Release bind mount detected.")
 
 

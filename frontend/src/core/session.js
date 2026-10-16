@@ -29,7 +29,8 @@ export function clear() {
 
 export function expire() {
   clear()
-  location.assign('/login?expired=1')
+  // 已在登入頁時再導向只會重載同一頁，造成 401 重載循環
+  if (location.pathname !== '/login') location.assign('/login?expired=1')
 }
 
 export async function restore() {

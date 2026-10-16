@@ -39,7 +39,8 @@ async function probe(s) {
     s.tone = e.status === 503 ? 'warn' : 'neg'
   }
 }
-const probeAll = () => services.forEach(probe)
+// 未登入時 /agent、/llm 會回 401 並觸發登出重載，登入頁上查詢會變成無限重載
+const probeAll = () => { if (isAuthenticated()) services.forEach(probe) }
 function logout() { oidc.logout() }
 
 const now = ref(Date.now())
@@ -53,7 +54,7 @@ onUnmounted(() => {
   clearInterval(tick)
   clearInterval(poll)
 })
-watch(() => sync.key, probeAll)
+watch(() => [sync.key, isAuthenticated()], probeAll)
 </script>
 
 <template>

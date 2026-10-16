@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type Config struct {
 	Environment, ListenAddress, Issuer, AuthorizationURL, TokenURL, JWKSURL string
 	ClientID, ClientSecret, RedirectURI, EndSessionURL, PostLogoutURI       string
 	CookieName, UserSubject                                                 string
+	TokenAuthMethod, AccessTokenType, Audience                              string
 	CookieKey                                                               []byte
 	SessionTTL, LoginTTL                                                    time.Duration
 }
@@ -46,6 +48,8 @@ func LoadConfig() (Config, error) {
 		RedirectURI: strings.TrimSpace(os.Getenv("OIDC_REDIRECT_URI")), EndSessionURL: strings.TrimSpace(os.Getenv("OIDC_END_SESSION_URL")),
 		PostLogoutURI: strings.TrimSpace(os.Getenv("OIDC_POST_LOGOUT_URI")), CookieName: strings.TrimSpace(os.Getenv("OIDC_COOKIE_NAME")),
 		CookieKey: key, UserSubject: strings.TrimSpace(os.Getenv("OIDC_USER_SUBJECT")), SessionTTL: 8 * time.Hour, LoginTTL: 10 * time.Minute,
+		TokenAuthMethod: value("OIDC_TOKEN_AUTH_METHOD", "client_secret_basic"), AccessTokenType: value("OIDC_TOKEN_TYPE", "at+jwt"),
+		Audience: strings.TrimSpace(os.Getenv("OIDC_AUDIENCE")),
 	}
 	return c, c.Validate()
 }
@@ -88,17 +92,21 @@ func readSecret(name, logical, environment string, key bool) (string, error) {
 }
 
 func (c Config) Validate() error {
-	expectedSuffix := strings.ToLower(c.Environment)
-	expectedClient := "stock-ai-" + expectedSuffix
-	expectedCookie := "__Host-stock-ai-" + expectedSuffix + "-session"
-	if c.ClientID != expectedClient {
-		return fmt.Errorf("OIDC_CLIENT_ID must be %q in %s", expectedClient, c.Environment)
+	expectedCookie := "__Host-stock-ai-" + strings.ToLower(c.Environment) + "-session"
+	if c.ClientID == "" || strings.IndexFunc(c.ClientID, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return errors.New("OIDC_CLIENT_ID must be a non-empty identifier without whitespace")
 	}
 	if c.CookieName != expectedCookie {
 		return fmt.Errorf("OIDC_COOKIE_NAME must be %q in %s", expectedCookie, c.Environment)
 	}
 	if c.ClientSecret == "" || len(c.CookieKey) != 32 || c.UserSubject == "" {
 		return errors.New("OIDC secrets and OIDC_USER_SUBJECT are required")
+	}
+	if c.TokenAuthMethod != "client_secret_basic" && c.TokenAuthMethod != "client_secret_post" {
+		return errors.New("OIDC_TOKEN_AUTH_METHOD must be client_secret_basic or client_secret_post")
+	}
+	if c.AccessTokenType == "" || c.Audience == "" {
+		return errors.New("OIDC_TOKEN_TYPE and OIDC_AUDIENCE are required")
 	}
 	parsed := make(map[string]*url.URL)
 	for name, raw := range map[string]string{"OIDC_ISSUER": c.Issuer, "OIDC_AUTHORIZATION_URL": c.AuthorizationURL, "OIDC_TOKEN_URL": c.TokenURL, "OIDC_JWKS_URL": c.JWKSURL, "OIDC_REDIRECT_URI": c.RedirectURI, "OIDC_POST_LOGOUT_URI": c.PostLogoutURI} {
@@ -109,13 +117,13 @@ func (c Config) Validate() error {
 		parsed[name] = u
 	}
 	issuer := parsed["OIDC_ISSUER"]
-	if issuer.Path != "/realms/"+expectedClient || issuer.RawQuery != "" {
-		return fmt.Errorf("OIDC_ISSUER must identify the isolated %s realm", expectedClient)
+	if issuer.RawQuery != "" {
+		return errors.New("OIDC_ISSUER must not contain a query")
 	}
 	for _, name := range []string{"OIDC_AUTHORIZATION_URL", "OIDC_TOKEN_URL", "OIDC_JWKS_URL"} {
 		u := parsed[name]
-		if u.Scheme != issuer.Scheme || u.Host != issuer.Host || !strings.HasPrefix(u.Path, issuer.Path+"/") {
-			return fmt.Errorf("%s must be below the configured environment issuer", name)
+		if u.Scheme != issuer.Scheme || u.Host != issuer.Host {
+			return fmt.Errorf("%s must use the issuer origin", name)
 		}
 	}
 	redirect := parsed["OIDC_REDIRECT_URI"]
@@ -131,8 +139,8 @@ func (c Config) Validate() error {
 	}
 	if c.EndSessionURL != "" {
 		u, err := url.Parse(c.EndSessionURL)
-		if err != nil || u.Scheme != issuer.Scheme || u.Host != issuer.Host || !strings.HasPrefix(u.Path, issuer.Path+"/") || u.User != nil || u.Fragment != "" {
-			return errors.New("OIDC_END_SESSION_URL must be below the configured environment issuer")
+		if err != nil || u.Scheme != issuer.Scheme || u.Host != issuer.Host || u.User != nil || u.Fragment != "" {
+			return errors.New("OIDC_END_SESSION_URL must use the issuer origin")
 		}
 	}
 	if c.SessionTTL <= 0 || c.SessionTTL > 24*time.Hour || c.LoginTTL <= 0 || c.LoginTTL > 15*time.Minute {

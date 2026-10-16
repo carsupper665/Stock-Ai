@@ -24,6 +24,10 @@ ISSUER = f"https://{HOST}/realms/{NAMESPACE}"
 SUFFIXES = ("backend_user_token", "backend_account_token_key", "agent_admin_token",
             "llm_admin_token", "llm_runtime_token", "llm_master_key", "oidc_client_secret",
             "oidc_cookie_key", "fixture_provider_secret")
+EXTERNAL_IDP_REQUIRED = ("RELEASE_APP_HOST", "OIDC_ISSUER", "OIDC_AUTHORIZATION_URL", "OIDC_TOKEN_URL", "OIDC_JWKS_URL",
+                         "OIDC_CLIENT_ID", "OIDC_USER_SUBJECT", "OIDC_AUDIENCE", "RELEASE_TLS_CERT", "RELEASE_TLS_KEY")
+EXTERNAL_IDP_OPTIONAL = {"RELEASE_BIND": "127.0.0.1:8443", "OIDC_END_SESSION_URL": "", "OIDC_TOKEN_AUTH_METHOD": "client_secret_basic",
+                         "OIDC_TOKEN_TYPE": "at+jwt", "OIDC_CA_BUNDLE": ""}
 DEFAULT_MANIFEST = ROOT / "deploy/evidence/local-test/promotion/promotion.json"
 AUXILIARY = ROOT / "deploy/local-release/auxiliary-images.json"
 
@@ -91,7 +95,44 @@ def install_private(path, content, gid, preserve=False):
         staged.unlink(missing_ok=True)
 
 
-def prepare(manifest=DEFAULT_MANIFEST, runtime=None):
+def read_external_idp(env_file):
+    values = {}
+    for line in env_file.read_text().splitlines():
+        if line.strip() and not line.lstrip().startswith("#"):
+            key, separator, value = line.partition("=")
+            if not separator:
+                raise WorkflowError("External IdP settings must be KEY=VALUE lines")
+            values[key.strip()] = value.strip().strip('"')
+    unknown = set(values) - set(EXTERNAL_IDP_REQUIRED) - set(EXTERNAL_IDP_OPTIONAL)
+    missing = [key for key in EXTERNAL_IDP_REQUIRED if not values.get(key)]
+    if unknown or missing:
+        raise WorkflowError(f"External IdP settings: missing {missing}, unknown {sorted(unknown)}")
+    return {**EXTERNAL_IDP_OPTIONAL, **{key: value for key, value in values.items() if value}}
+
+
+def install_external_material(idp, client_secret_file, certs, secrets, gid):
+    """Operator-supplied IdP client secret, CA bundle and TLS pair for RELEASE_APP_HOST."""
+    host = idp["RELEASE_APP_HOST"].split(":")[0]
+    cert, key = Path(idp["RELEASE_TLS_CERT"]), Path(idp["RELEASE_TLS_KEY"])
+    # `openssl x509 -checkhost` exits 0 on a mismatch, so its verdict text is checked.
+    if b"does match certificate" not in material._run("openssl", "x509", "-in", str(cert), "-noout", "-checkhost", host):
+        raise WorkflowError("RELEASE_TLS_CERT does not cover RELEASE_APP_HOST")
+    material._run("openssl", "x509", "-in", str(cert), "-noout", "-checkend", "0")
+    if material._run("openssl", "x509", "-in", str(cert), "-pubkey", "-noout").strip() != \
+            material._run("openssl", "pkey", "-in", str(key), "-pubout").strip():
+        raise WorkflowError("RELEASE_TLS_CERT and RELEASE_TLS_KEY do not match")
+    install_private(certs / "fullchain.pem", cert.read_bytes(), gid)
+    install_private(certs / "privkey.pem", key.read_bytes(), gid)
+    bundle = Path(idp["OIDC_CA_BUNDLE"]).read_bytes() if idp["OIDC_CA_BUNDLE"] else b""
+    install_private(certs / "oidc-ca.pem", bundle, gid)
+    secret = Path(client_secret_file).read_bytes().strip()
+    if len(secret) < 32:
+        raise WorkflowError("The OIDC Gateway requires an IdP client secret of at least 32 bytes")
+    install_private(secrets / f"{NAMESPACE}_oidc_client_secret", secret + b"\n", gid)
+
+
+def prepare(manifest=DEFAULT_MANIFEST, runtime=None, idp=None, client_secret_file=None):
+    """Without idp: the local fixture Release. With idp (read_external_idp): an external IdP Release."""
     images, checksum = approved_images(manifest)
     if runtime is None:
         raise WorkflowError("An explicit persistent Release runtime is required")
@@ -100,11 +141,16 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None):
     gid = os.getgid()
     for path, mode in ((runtime, 0o700), (certs, 0o750), (secrets, 0o700)):
         material._secure_directory(path, mode, gid)
-    material._ensure_tls_pair(certs / "fullchain.pem", certs / "privkey.pem", gid, ("app.localrelease", "api.binance.com"))
-    material._ensure_jwks_key(certs / "jwks-signing-key.pem", gid)
-    for suffix in SUFFIXES:
+    if idp:
+        install_external_material(idp, client_secret_file, certs, secrets, gid)
+        suffixes = [suffix for suffix in SUFFIXES if suffix not in ("oidc_client_secret", "fixture_provider_secret")]
+    else:
+        material._ensure_tls_pair(certs / "fullchain.pem", certs / "privkey.pem", gid, ("app.localrelease", "api.binance.com"))
+        material._ensure_jwks_key(certs / "jwks-signing-key.pem", gid)
+        install_private(certs / "config.json", (json.dumps(fixture_config(), indent=2) + "\n").encode(), gid, True)
+        suffixes = SUFFIXES
+    for suffix in suffixes:
         material._write_secret(f"{NAMESPACE}_{suffix}", gid, secrets)
-    install_private(certs / "config.json", (json.dumps(fixture_config(), indent=2) + "\n").encode(), gid, True)
     values = {
         "STOCK_AI_INSTANCE": INSTANCE, "STOCK_AI_ENVIRONMENT": "Release",
         "STOCK_AI_SECRET_NAMESPACE": NAMESPACE, "STOCK_AI_SECRETS_DIR": str(secrets.resolve()),
@@ -117,10 +163,15 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None):
     for suffix, endpoint in (("AUTHORIZATION", "authorize"), ("TOKEN", "token"),
                              ("JWKS", "jwks"), ("END_SESSION", "logout")):
         values[f"OIDC_{suffix}_URL"] = f"{ISSUER}/{endpoint}"
-    for service, variable in (("backend", "BACKEND_IMAGE"), ("agent-server", "AGENT_SERVER_IMAGE"),
-                              ("llm-provider-server", "LLM_PROVIDER_SERVER_IMAGE"), ("console", "CONSOLE_IMAGE"),
-                              ("oidc-gateway", "OIDC_GATEWAY_IMAGE"), ("nginx", "NGINX_IMAGE"),
-                              ("idp", "LOCAL_RELEASE_FIXTURE_IMAGE")):
+    image_variables = [("backend", "BACKEND_IMAGE"), ("agent-server", "AGENT_SERVER_IMAGE"),
+                       ("llm-provider-server", "LLM_PROVIDER_SERVER_IMAGE"), ("console", "CONSOLE_IMAGE"),
+                       ("oidc-gateway", "OIDC_GATEWAY_IMAGE"), ("nginx", "NGINX_IMAGE")]
+    if idp:
+        values.update({key: value for key, value in idp.items() if key not in ("RELEASE_TLS_CERT", "RELEASE_TLS_KEY")})
+        values["OIDC_CA_BUNDLE"] = str((certs / "oidc-ca.pem").resolve())
+    else:
+        image_variables.append(("idp", "LOCAL_RELEASE_FIXTURE_IMAGE"))
+    for service, variable in image_variables:
         values[variable] = images[service]
     install_private(runtime / "compose.env", "".join(f"{key}={value}\n" for key, value in values.items()).encode(), gid)
     (runtime / "compose.env").chmod(0o600)

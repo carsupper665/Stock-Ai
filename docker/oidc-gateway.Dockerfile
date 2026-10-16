@@ -3,11 +3,9 @@ WORKDIR /src/oidc_gateway
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 COPY oidc_gateway/ ./
 COPY docker/healthcheck.go /src/healthcheck.go
-COPY scripts/issuer-check/ /src/scripts/issuer-check/
 RUN mkdir -p /out /run/secrets \
  && go build -trimpath -buildvcs=false -tags=timetzdata -ldflags="-s -w -buildid=" -o /out/oidc-gateway ./cmd/gateway \
- && go build -trimpath -buildvcs=false -tags=timetzdata -ldflags="-s -w -buildid=" -o /out/healthcheck /src/healthcheck.go \
- && GO111MODULE=off go build -trimpath -ldflags="-s -w -buildid=" -o /out/issuer-check /src/scripts/issuer-check/main.go
+ && go build -trimpath -buildvcs=false -tags=timetzdata -ldflags="-s -w -buildid=" -o /out/healthcheck /src/healthcheck.go
 
 FROM scratch
 ARG BUILD_DATE
@@ -21,7 +19,6 @@ LABEL org.opencontainers.image.created=$BUILD_DATE \
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/oidc-gateway /oidc-gateway
 COPY --from=build /out/healthcheck /healthcheck
-COPY --from=build /out/issuer-check /issuer-check
 COPY --from=build /run/secrets /run/secrets
 USER 65532:65532
 EXPOSE 4180

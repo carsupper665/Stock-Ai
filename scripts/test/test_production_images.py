@@ -99,7 +99,8 @@ class ProductionImagePolicyTest(unittest.TestCase):
         ):
             self.assertIn(value, build)
         self.assertIn("/run/secrets", gateway)
-        self.assertIn("/issuer-check", gateway)
+        self.assertIn('ENTRYPOINT ["/oidc-gateway"]', gateway)
+        self.assertNotIn("issuer-check", gateway)
         self.assertIn("/healthz", gateway)
 
     def test_context_excludes_secrets_tests_and_local_state(self):
