@@ -1,6 +1,7 @@
 package test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -63,5 +64,57 @@ func TestModelManagementPersistsAndGeneratesWithoutRestart(t *testing.T) {
 	listed = request(t, server.Handler(), http.MethodGet, "/v1/models", runtimeToken, nil)
 	if strings.Contains(listed.Body.String(), "new-choice") {
 		t.Fatal("deleted mapping restored", listed.Body)
+	}
+}
+
+func TestModelManagementPersistsContextWindowWithoutForwardingIt(t *testing.T) {
+	t.Setenv("LLM_SERVER_MODEL_CATALOG", "[]")
+	upstreamBodies := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBodies <- string(body)
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+	path := filepath.Join(t.TempDir(), "gateway.db")
+	server, err := gateway.Open(path, adminToken, runtimeToken, masterKey, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { server.Close() }()
+	createProvider(t, server.Handler(), upstream.URL, "window-model", true)
+
+	negative := []byte(`{"model_name":"windowed","provider_id":"fixture","model":"window-model","context_window":-1}`)
+	assertError(t, request(t, server.Handler(), http.MethodPost, "/v1/model-catalog", adminToken, negative), http.StatusBadRequest, "REQUEST_INVALID")
+	fractional := []byte(`{"model_name":"windowed","provider_id":"fixture","model":"window-model","context_window":1.5}`)
+	assertError(t, request(t, server.Handler(), http.MethodPost, "/v1/model-catalog", adminToken, fractional), http.StatusBadRequest, "REQUEST_INVALID")
+
+	created := request(t, server.Handler(), http.MethodPost, "/v1/model-catalog", adminToken,
+		[]byte(`{"model_name":"windowed","provider_id":"fixture","model":"window-model","context_window":256000}`))
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"context_window":256000`) {
+		t.Fatalf("create = %d %s", created.Code, created.Body)
+	}
+	generated := request(t, server.Handler(), http.MethodPost, "/v1/generate", runtimeToken,
+		[]byte(`{"provider":"fixture","model":"window-model","messages":[{"role":"user","content":"hello"}]}`))
+	if generated.Code != http.StatusOK {
+		t.Fatalf("generate=%d %s", generated.Code, generated.Body)
+	}
+	if upstream := <-upstreamBodies; strings.Contains(upstream, "context_window") {
+		t.Fatalf("context_window leaked upstream: %s", upstream)
+	}
+
+	server.Close()
+	server, err = gateway.Open(path, adminToken, runtimeToken, masterKey, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := request(t, server.Handler(), http.MethodGet, "/v1/models", runtimeToken, nil)
+	if !strings.Contains(listed.Body.String(), `"context_window":256000`) {
+		t.Fatal("saved context_window lost", listed.Body)
+	}
+	updated := request(t, server.Handler(), http.MethodPut, "/v1/model-catalog/windowed", adminToken,
+		[]byte(`{"model_name":"windowed","provider_id":"fixture","model":"window-model"}`))
+	if updated.Code != http.StatusOK || strings.Contains(updated.Body.String(), "context_window") {
+		t.Fatalf("unset context_window = %d %s", updated.Code, updated.Body)
 	}
 }

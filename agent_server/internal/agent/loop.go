@@ -171,7 +171,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		if finalizing {
 			attemptOffset = finalizationAttempts
 		}
-		response, attempts, ok := r.callModel(ctx, session, runID, iteration, attemptType, messages, toolsEnabled,
+		response, attempts, ok := r.callModel(ctx, session, runID, iteration, attemptType, &messages, toolsEnabled,
 			attemptLimit, attemptOffset, &progress, &modelCalls, toolCalls, continuation)
 		if !ok {
 			return
@@ -328,7 +328,7 @@ func terminalFinalizationPrompt(reason string) string {
 }
 
 func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int64, iteration int, attemptType string,
-	messages []gatewayMessage, toolsEnabled bool, attemptLimit, attemptOffset int, progress *[]traceEntry,
+	messages *[]gatewayMessage, toolsEnabled bool, attemptLimit, attemptOffset int, progress *[]traceEntry,
 	modelCalls *int, toolCalls int, continuationState *continuationState,
 ) (gatewayResponse, int, bool) {
 	if ctx.Err() != nil {
@@ -369,7 +369,14 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 		}
 		return gatewayResponse{}, 0, false
 	}
-	projection, err := projectModelContext(messages)
+	if compacted, entry := r.compactContext(ctx, session, runID, iteration, model, *messages, toolsEnabled); entry != nil {
+		if ctx.Err() != nil {
+			return gatewayResponse{}, 0, false
+		}
+		*messages = compacted
+		*progress = append(*progress, *entry)
+	}
+	projection, err := projectModelContext(*messages)
 	if err != nil {
 		*progress = append(*progress, traceEntry{Type: "context_projection", AttemptType: attemptType,
 			Iteration: iteration, Error: "CONTEXT_LIMIT_EXCEEDED", ContextOriginalBytes: projection.OriginalBytes,

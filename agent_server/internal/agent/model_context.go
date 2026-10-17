@@ -1,12 +1,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"stock-ai/agent-server/internal/history"
@@ -17,6 +20,19 @@ const (
 	maxGatewayRequestBytes = 1 << 20
 	maxModelMessageBytes   = 768 << 10
 	compactStringRunes     = 512
+
+	defaultContextWindow = 128000
+	// Compaction starts when the estimate reaches 80% of the window. The LLM pass runs only
+	// when the rule-compacted history alone still takes 20%, since it cannot shrink the
+	// system prompt or the initial context.
+	compactTriggerRatio    = 0.80
+	llmCompactRatio        = 0.20
+	compactArgumentRunes   = 160
+	compactAssistantRunes  = 1000
+	compactedHistoryHeader = "[Context compacted] Earlier steps of this Run. Tool outputs were removed; re-query tools if exact data is needed."
+	compactionInstruction  = "Summarize the earlier steps of a trading agent Run so the agent can continue the same task. " +
+		"Keep decisions made, key numbers learned, every order/position/event id with its status, uncertain outcomes, and pending plans. " +
+		"Drop tool output detail, retries, and errors. Reply with plain text under 1000 words."
 )
 
 type gatewayContinuation struct {
@@ -242,4 +258,181 @@ func acknowledgeContinuation(state *continuationState, request []gatewayMessage,
 	}
 	state.request = cloneGatewayMessages(request)
 	state.assistant = gatewayMessage{Role: "assistant", Content: response.Content, ToolCalls: append([]gatewayTool(nil), response.ToolCalls...)}
+}
+
+// compactContext applies the two-stage context compaction when the estimated request reaches
+// compactTriggerRatio of the model's window. It returns nil when nothing was compacted.
+func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runID int64, iteration int,
+	model modelMapping, messages []gatewayMessage, toolsEnabled bool,
+) ([]gatewayMessage, *traceEntry) {
+	window := model.ContextWindow
+	if window <= 0 {
+		window = defaultContextWindow
+	}
+	before := estimateContextTokens(messages, toolsEnabled)
+	if float64(before) < compactTriggerRatio*float64(window) {
+		return messages, nil
+	}
+	compacted, changed := compactRunHistory(messages)
+	if !changed {
+		return messages, nil
+	}
+	started := time.Now()
+	entry := traceEntry{Type: "context_compaction", ToolName: "context_compaction", Iteration: iteration,
+		StartedAt: started.UTC().Format(time.RFC3339Nano)}
+	stage := "rules"
+	if float64(estimateTokens(compacted[2])) >= llmCompactRatio*float64(window) {
+		summary, response, err := r.summarizeHistory(ctx, session, runID, model, *compacted[2].Content)
+		if validGatewayUsage(response.Usage) {
+			entry.Usage = response.Usage
+		}
+		if err != nil {
+			entry.Error = err.Error()
+		} else {
+			stage = "llm"
+			compacted[2].Content = &summary
+			entry.Content = &summary
+		}
+	}
+	entry.Result = tools.SuccessResult(map[string]any{"stage": stage, "context_window": window,
+		"tokens_before": before, "tokens_after": estimateContextTokens(compacted, toolsEnabled)})
+	finishTraceTiming(&entry, started, time.Now())
+	return compacted, &entry
+}
+
+// summarizeHistory is the one-shot LLM pass. A failed, empty, or longer summary is rejected so
+// the caller keeps the rule-compacted history.
+func (r *AgentRuntime) summarizeHistory(ctx context.Context, session Session, runID int64, model modelMapping, history string) (string, gatewayResponse, error) {
+	instruction := compactionInstruction
+	messages := []gatewayMessage{{Role: "system", Content: &instruction}, {Role: "user", Content: &history}}
+	conversationID := session.ID + "/" + strconv.FormatInt(runID, 10) + "/compaction"
+	response, _, _, err := r.generate(ctx, model, session.ModelLevel, conversationID, messages, false, nil)
+	if err != nil {
+		return "", response, err
+	}
+	if response.Content == nil || strings.TrimSpace(*response.Content) == "" {
+		return "", response, errors.New("compaction summary is empty")
+	}
+	summary := compactedHistoryHeader + "\n" + strings.TrimSpace(*response.Content)
+	if len(summary) >= len(history) {
+		return "", response, errors.New("compaction summary is not shorter than the compacted history")
+	}
+	return summary, response, nil
+}
+
+func estimateContextTokens(messages []gatewayMessage, toolsEnabled bool) int {
+	tokens := estimateTokens(messages)
+	if toolsEnabled {
+		tokens += estimateTokens(tools.Definitions())
+	}
+	return tokens
+}
+
+// estimateTokens approximates tokens without a tokenizer: ASCII JSON averages about four bytes
+// per token, while CJK text is closer to one token per character.
+func estimateTokens(value any) int {
+	encoded, _ := json.Marshal(value)
+	ascii, other := 0, 0
+	for _, char := range string(encoded) {
+		if char < utf8.RuneSelf {
+			ascii++
+		} else {
+			other++
+		}
+	}
+	return ascii/4 + other
+}
+
+// compactRunHistory keeps the system prompt, the initial context, and the tail from the last
+// assistant message verbatim, and folds everything between them into one user message with a
+// semantic line per step. Tool/assistant pairs in the tail stay intact, so no result is orphaned.
+func compactRunHistory(messages []gatewayMessage) ([]gatewayMessage, bool) {
+	tail := 0
+	for index := len(messages) - 1; index > 2; index-- {
+		if messages[index].Role == "assistant" {
+			tail = index
+			break
+		}
+	}
+	if tail == 0 || (tail == 3 && isCompactedHistory(messages[2])) {
+		return messages, false
+	}
+	results := make(map[string]string)
+	for _, message := range messages[2:tail] {
+		if message.Role == "tool" && message.ToolCallID != nil && message.Content != nil {
+			results[*message.ToolCallID] = *message.Content
+		}
+	}
+	lines := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, message := range messages[2:tail] {
+		if isCompactedHistory(message) {
+			if earlier := strings.TrimSpace(strings.TrimPrefix(*message.Content, compactedHistoryHeader)); earlier != "" {
+				lines = append(lines, earlier)
+				for _, line := range strings.Split(earlier, "\n") {
+					seen[line] = true
+				}
+			}
+			continue
+		}
+		// Assistant messages without tool calls here are rejected final responses, and other user
+		// messages are terminal repair instructions; both are retries and are dropped.
+		if message.Role != "assistant" || len(message.ToolCalls) == 0 {
+			continue
+		}
+		if message.Content != nil && strings.TrimSpace(*message.Content) != "" {
+			lines = append(lines, "assistant: "+truncateRunes(strings.TrimSpace(*message.Content), compactAssistantRunes))
+		}
+		for _, call := range message.ToolCalls {
+			if line, keep := compactToolCallLine(call, results[call.ID], seen); keep {
+				lines = append(lines, line)
+			}
+		}
+	}
+	history := compactedHistoryHeader
+	if len(lines) != 0 {
+		history += "\n" + strings.Join(lines, "\n")
+	}
+	compacted := make([]gatewayMessage, 0, 3+len(messages)-tail)
+	compacted = append(compacted, messages[0], messages[1], gatewayMessage{Role: "user", Content: &history})
+	return append(compacted, messages[tail:]...), true
+}
+
+func isCompactedHistory(message gatewayMessage) bool {
+	return message.Role == "user" && message.Content != nil && strings.HasPrefix(*message.Content, compactedHistoryHeader)
+}
+
+// compactToolCallLine drops read outputs, errors, and repeated reads. Mutation results and
+// mutations with an unknown outcome keep a compact result: losing an order or position id
+// could make the model repeat the order.
+func compactToolCallLine(call gatewayTool, result string, seen map[string]bool) (string, bool) {
+	line := strings.TrimSpace("- " + call.Name + " " + truncateRunes(string(call.Arguments), compactArgumentRunes))
+	var envelope struct {
+		OK    bool `json:"ok"`
+		Error *struct {
+			Outcome string `json:"outcome"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal([]byte(result), &envelope)
+	if !tools.IsMutation(call.Name) {
+		if !envelope.OK || seen[line] {
+			return "", false
+		}
+		seen[line] = true
+		return line, true
+	}
+	if !envelope.OK && (envelope.Error == nil || envelope.Error.Outcome != "unknown") {
+		return "", false
+	}
+	var value any
+	_ = json.Unmarshal([]byte(result), &value)
+	encoded, _ := json.Marshal(compactJSONValue(value, 0))
+	return line + " -> " + string(encoded), true
+}
+
+func truncateRunes(value string, limit int) string {
+	if utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	return string([]rune(value)[:limit]) + "…"
 }

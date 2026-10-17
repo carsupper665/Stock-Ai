@@ -20,6 +20,7 @@ Create/replace body:
   "model": "upstream-model-id",
   "options": {},
   "levels": {"high": {"reasoning_effort": "high"}},
+  "context_window": 128000,
   "enabled": true
 }
 ```
@@ -27,6 +28,9 @@ Create/replace body:
 `model_name`, `provider_id`, `model` are required. Existing catalog name/level/
 reserved-option validation applies. Legal levels: low, medium, high, max; actual
 options depend on the provider. Omitted enabled defaults true; null is invalid.
+`context_window` is the optional model token window used only by the Agent
+Runtime's context compaction (never sent upstream); it must be a nonnegative
+integer, and omitted or 0 means unset (the Agent then uses 128000).
 
 CLI Harness Providers (`codex`, `claude_code`) accept exactly one option,
 `reasoning_effort`, in `options` and in each level; any other key is 400

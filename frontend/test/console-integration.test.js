@@ -41,6 +41,44 @@ it('模型 options 非物件時顯示錯誤，不發送請求', async () => {
   expect(fetch).not.toHaveBeenCalled()
 })
 
+it('上下文視窗輸入數字＋K 或 M，送出時轉成整數 context_window', async () => {
+  for (const [text, tokens] of [['48K', 48000], ['256K', 256000], ['1M', 1000000]]) {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond({ model_name: 'windowed' }, 201))
+    const saved = vi.fn()
+    mount(ModelEditor, { providers: [{ id: 'p', name: 'P', enabled: true }], providerId: 'p', onSaved: saved })
+    const inputs = document.querySelectorAll('input')
+    expect(inputs[2].value).toBe('128K')
+    await fill(inputs[0], 'windowed')
+    await fill(inputs[1], 'actual-model')
+    await fill(inputs[2], text)
+    document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(saved).toHaveBeenCalled())
+    expect(JSON.parse(fetch.mock.calls[0][1].body).context_window).toBe(tokens)
+    app.unmount(); app = null; document.body.innerHTML = ''; vi.restoreAllMocks()
+  }
+})
+
+it('上下文視窗沒有單位或單位不是 K／M 時顯示錯誤，不發送請求', async () => {
+  for (const text of ['400000', '12G', '0K', 'abc']) {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+    mount(ModelEditor, { providers: [] })
+    await fill(document.querySelectorAll('input')[2], text)
+    document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(document.querySelector('[role=alert]').textContent).toContain('數字＋K 或 M')
+    expect(fetch).not.toHaveBeenCalled()
+    app.unmount(); app = null; document.body.innerHTML = ''; vi.restoreAllMocks()
+  }
+})
+
+it('編輯既有模型時把 context_window 顯示成 K／M', async () => {
+  mount(ModelEditor, { providers: [], model: { model_name: 'm', provider_id: 'p', model: 'x', context_window: 256000 } })
+  expect(document.querySelectorAll('input')[2].value).toBe('256K')
+  app.unmount(); app = null; document.body.innerHTML = ''
+  mount(ModelEditor, { providers: [], model: { model_name: 'm', provider_id: 'p', model: 'x', context_window: 2000000 } })
+  expect(document.querySelectorAll('input')[2].value).toBe('2M')
+})
+
 it('Memory 列表不載入全文，選取後才呼叫 detail', async () => {
   const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => respond(url.includes('?') ? { memories: [{ id: 'm_1', summary: '可讀摘要', type: 'fact', importance: 2, run_id: 1 }] } : { id: 'm_1', summary: '可讀摘要', content: '完整記憶正文', run_id: 1 }))
   mount(Memories, { session: { id: 's_1', status: 'stopped' } })

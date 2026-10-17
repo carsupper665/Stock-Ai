@@ -43,7 +43,7 @@ func catalogConfig(models []modelMapping) []modelMappingConfig {
 	for _, model := range models {
 		enabled, _ := json.Marshal(model.Enabled)
 		entries = append(entries, modelMappingConfig{ModelName: model.ModelName, ProviderID: model.ProviderID,
-			Model: model.Model, Options: model.Options, Levels: model.Levels, Enabled: enabled})
+			Model: model.Model, Options: model.Options, Levels: model.Levels, ContextWindow: model.ContextWindow, Enabled: enabled})
 	}
 	return entries
 }

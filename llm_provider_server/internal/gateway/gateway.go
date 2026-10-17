@@ -121,17 +121,20 @@ type modelMapping struct {
 	Model      string                                `json:"model"`
 	Options    map[string]json.RawMessage            `json:"options"`
 	Levels     map[string]map[string]json.RawMessage `json:"levels"`
-	Enabled    bool                                  `json:"enabled"`
-	Available  bool                                  `json:"available"`
+	// ContextWindow is the model's token window for the agent's compaction; 0 means unset.
+	ContextWindow int64 `json:"context_window,omitempty"`
+	Enabled       bool  `json:"enabled"`
+	Available     bool  `json:"available"`
 }
 
 type modelMappingConfig struct {
-	ModelName  string                                `json:"model_name"`
-	ProviderID string                                `json:"provider_id"`
-	Model      string                                `json:"model"`
-	Options    map[string]json.RawMessage            `json:"options"`
-	Levels     map[string]map[string]json.RawMessage `json:"levels"`
-	Enabled    json.RawMessage                       `json:"enabled"`
+	ModelName     string                                `json:"model_name"`
+	ProviderID    string                                `json:"provider_id"`
+	Model         string                                `json:"model"`
+	Options       map[string]json.RawMessage            `json:"options"`
+	Levels        map[string]map[string]json.RawMessage `json:"levels"`
+	ContextWindow int64                                 `json:"context_window,omitempty"`
+	Enabled       json.RawMessage                       `json:"enabled"`
 }
 
 func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTimeout time.Duration) (*Server, error) {
@@ -378,12 +381,15 @@ func parseModelCatalog(value string) ([]modelMapping, error) {
 				return nil, fmt.Errorf("model %q level %q: %w", entry.ModelName, level, err)
 			}
 		}
+		if entry.ContextWindow < 0 {
+			return nil, fmt.Errorf("model %q context_window must be a positive integer", entry.ModelName)
+		}
 		enabled := true
 		if len(entry.Enabled) != 0 && (providers.IsJSONNull(entry.Enabled) || json.Unmarshal(entry.Enabled, &enabled) != nil) {
 			return nil, fmt.Errorf("model %q enabled must be a boolean", entry.ModelName)
 		}
 		models = append(models, modelMapping{ModelName: entry.ModelName, ProviderID: entry.ProviderID,
-			Model: entry.Model, Options: entry.Options, Levels: entry.Levels, Enabled: enabled})
+			Model: entry.Model, Options: entry.Options, Levels: entry.Levels, ContextWindow: entry.ContextWindow, Enabled: enabled})
 		byName[entry.ModelName] = true
 		byProviderModel[providerModel] = true
 	}

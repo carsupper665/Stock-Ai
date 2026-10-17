@@ -109,12 +109,13 @@ type Run struct {
 }
 
 type modelMapping struct {
-	ModelName  string                                `json:"model_name"`
-	ProviderID string                                `json:"provider_id"`
-	Model      string                                `json:"model"`
-	Levels     map[string]map[string]json.RawMessage `json:"levels"`
-	Enabled    bool                                  `json:"enabled"`
-	Available  bool                                  `json:"available"`
+	ModelName     string                                `json:"model_name"`
+	ProviderID    string                                `json:"provider_id"`
+	Model         string                                `json:"model"`
+	Levels        map[string]map[string]json.RawMessage `json:"levels"`
+	ContextWindow int64                                 `json:"context_window"`
+	Enabled       bool                                  `json:"enabled"`
+	Available     bool                                  `json:"available"`
 }
 
 type gatewayMessage struct {

@@ -3690,7 +3690,24 @@ candle samples, and prior Run History retains its reference, summary/counters an
 preview rather than recursively copying old iterations. Mutation results are only reduced as a
 last resort and retain identifiers, status, errors and uncertainty. Each model-call trace records
 original/projected message bytes, compacted-message count and actual request bytes. Healthy
-prefixes are unchanged while below the bound; the Runtime does not call a summarizer model.
+prefixes are unchanged while below the bound.
+
+Before that byte projection, the Runtime compacts the transport context against the model's token
+window: the Gateway catalog's optional `context_window`, default 128000. Tokens are estimated as
+ASCII bytes/4 plus one per non-ASCII character over the messages and enabled tool definitions.
+When the estimate reaches 80% of the window, the system message, the initial user context and the
+tail from the last assistant message stay verbatim, and everything between them is replaced, for
+the rest of the Run, by one user message starting `[Context compacted]`. It keeps assistant text and
+one line per tool call (name and bounded arguments); read outputs, error results, repeated
+identical reads, rejected final responses and terminal repair instructions are dropped. Successful
+mutation calls, and mutations with an `unknown` outcome, keep a compacted result so ids and
+uncertainty survive. If that message alone is still at least 20% of the window, the Runtime makes
+one tool-less Generate call with conversation id `<session>/<run>/compaction` and replaces the
+message with the returned summary; a failed, empty or longer summary keeps the rule-compacted
+message and the Run continues. Each compaction appends a `context_compaction` progress entry with
+`stage` (`rules` or `llm`), `context_window`, `tokens_before`, `tokens_after`, and the summary's
+usage and content when the model was called. These entries are not model calls and do not change
+decision, model-call or usage counts.
 
 After a successful Generate request containing `N` full normalized messages, the next request
 may additionally contain:

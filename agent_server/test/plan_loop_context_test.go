@@ -289,6 +289,8 @@ func TestPlanAgentRepairsMemoryReferenceBeforeAtomicPublication(t *testing.T) {
 
 func TestPlanAgentBoundsContextWithoutOrphaningToolResults(t *testing.T) {
 	fixture := newRuntimeFixture()
+	// A window far above the 1 MiB byte bound isolates the byte projection from token-window compaction.
+	fixture.models = compactionModels(100000000)
 	var calls atomic.Int32
 	large := strings.Repeat("x", 700<<10)
 	var thirdSize int64

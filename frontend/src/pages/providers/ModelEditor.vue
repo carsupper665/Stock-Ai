@@ -5,10 +5,22 @@ import { createModel, updateModel } from './api.js'
 
 const props = defineProps({ providers: Array, model: Object, providerId: String })
 const emit = defineEmits(['close', 'saved'])
+const windowUnits = { K: 1000, M: 1000000 }
+function formatWindow(tokens) {
+  if (!tokens) return '128K'
+  if (tokens % windowUnits.M === 0) return `${tokens / windowUnits.M}M`
+  return tokens % windowUnits.K === 0 ? `${tokens / windowUnits.K}K` : String(tokens)
+}
+function parseWindow(text) {
+  const match = /^([1-9]\d*)\s*([KM])$/i.exec(text.trim())
+  if (!match) throw new Error('上下文視窗格式為數字＋K 或 M，例如 48K、256K、1M')
+  return Number(match[1]) * windowUnits[match[2].toUpperCase()]
+}
 const form = reactive({
   model_name: props.model?.model_name ?? '',
   provider_id: props.model?.provider_id ?? props.providerId ?? '',
   model: props.model?.model ?? '',
+  context_window: formatWindow(props.model?.context_window),
   enabled: props.model?.enabled ?? true,
   options: JSON.stringify(props.model?.options ?? {}, null, 2),
   levels: JSON.stringify(props.model?.levels ?? {}, null, 2),
@@ -21,7 +33,7 @@ async function save() {
   error.value = ''
   busy.value = true
   try {
-    const body = { ...form, options: JSON.parse(form.options), levels: JSON.parse(form.levels) }
+    const body = { ...form, context_window: parseWindow(form.context_window), options: JSON.parse(form.options), levels: JSON.parse(form.levels) }
     for (const field of ['options', 'levels']) {
       if (!body[field] || Array.isArray(body[field]) || typeof body[field] !== 'object') throw new Error(`${field} 必須是 JSON 物件`)
     }
@@ -38,6 +50,7 @@ async function save() {
       <label>模型名稱（Session 選用的名稱）<input v-model="form.model_name" :readonly="!!model" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" required /></label>
       <label>Provider<select v-model="form.provider_id" required><option value="" disabled>選擇 Provider</option><option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name }} · {{ p.id }}{{ p.enabled ? '' : '（停用）' }}</option></select></label>
       <label>上游模型 ID<input v-model="form.model" placeholder="Provider 實際提供的模型 ID" required /></label>
+      <label>上下文視窗（數字＋K 或 M）<input v-model="form.context_window" class="mono" placeholder="例如 48K、256K、1M" required /></label>
       <label>基礎 options（JSON）<textarea v-model="form.options" class="mono" rows="3" /></label>
       <label>Level 對應 options（JSON，選填）<textarea v-model="form.levels" class="mono" rows="3" /></label>
       <p class="note">Level 可用 low／medium／high／max，例如 {"high":{"reasoning_effort":"high"}}；實際 options 由 Provider 決定。</p>
