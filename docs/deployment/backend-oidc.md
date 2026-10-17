@@ -36,4 +36,15 @@ falls back to static USER or Account lookup after failure.
 Static USER authentication is disabled by default. Local development (or a
 non-Release test fixture) must deliberately set both
 `ALLOW_STATIC_USER_TOKEN=true` and `USER_TOKEN`. Release startup rejects the
-setting. Test and Release should use OIDC.
+setting. Test and Release should use OIDC for browser USER identity.
+
+Agent account lookup uses `AGENT_SERVICE_TOKEN_FILE`, independently of static
+USER authentication. For existing deployments this mounts the private
+`<namespace>_backend_user_token` file already shared by Backend and Agent;
+`AGENT_SERVER_BACKEND_USER_TOKEN_FILE` remains the Agent's setting name.
+This credential only authorizes `GET /v1/accounts/:id`, including the bound
+Account's runtime token. It does not authenticate `/v1/me`, list or modify
+Accounts, or place orders. The Agent continues using each Account's own token
+for domain tools. Release keeps `ALLOW_STATIC_USER_TOKEN=false`.
+Deploy Backend and Compose changes together: an older Backend does not consume
+`AGENT_SERVICE_TOKEN_FILE` and will continue rejecting the Agent lookup.

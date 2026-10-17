@@ -209,6 +209,10 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				}
 				continue
 			}
+			if final.Status == "failed" {
+				r.persistRunFailure(session.ID, runID, "TASK_FAILED: "+final.Output)
+				return
+			}
 			completed, err := r.completeFinalizedRun(session.ID, runID, final)
 			if err != nil {
 				var referenceError *memory.ReferenceError

@@ -9,8 +9,14 @@ services:
       - "${OIDC_CA_BUNDLE:?set OIDC_CA_BUNDLE to a PEM file with extra IdP CA/intermediate certificates (may be empty)}:/etc/ssl/certs/oidc-ca.pem:ro"
   agent-server:
     user: "65532:${LOCAL_RELEASE_GID}"
+    volumes:
+      - "${OIDC_CA_BUNDLE}:/etc/ssl/certs/oidc-ca.pem:ro"
   llm-provider-server:
     user: "65532:${LOCAL_RELEASE_GID}"
+    environment:
+      CODEX_CA_CERTIFICATE: "${CODEX_CA_CERTIFICATE:-}"
+    volumes:
+      - "${OIDC_CA_BUNDLE}:/etc/ssl/certs/oidc-ca.pem:ro"
   console:
     user: "65532:${LOCAL_RELEASE_GID}"
     volumes:

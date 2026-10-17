@@ -342,7 +342,7 @@ func (r *AgentRuntime) fetchAccount(ctx context.Context, accountID string) (back
 	case http.StatusNotFound:
 		return backendAccount{}, &dependencyError{http.StatusNotFound, "ACCOUNT_NOT_FOUND", "Backend Account does not exist"}
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_AUTH_FAILED", "Backend rejected its configured USER credential"}
+		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_AUTH_FAILED", "Backend rejected its configured account lookup credential"}
 	default:
 		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_UNAVAILABLE", "Backend account lookup is unavailable"}
 	}

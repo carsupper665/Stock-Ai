@@ -61,10 +61,18 @@ class ExternalIdPPreparationTest(unittest.TestCase):
         self.assertNotIn("LOCAL_RELEASE_FIXTURE_IMAGE", values)
         self.assertNotIn("RELEASE_TLS_KEY", values)
         self.assertEqual(Path(values["OIDC_CA_BUNDLE"]).read_bytes(), bundle.read_bytes())
+        self.assertEqual(values["CODEX_CA_CERTIFICATE"], "/etc/ssl/certs/oidc-ca.pem")
         self.assertEqual((runtime / "secrets/stock-ai-release_oidc_client_secret").read_text(), "x" * 40 + "\n")
         self.assertFalse((runtime / "secrets/stock-ai-release_fixture_provider_secret").exists())
         self.assertFalse((runtime / "certs/config.json").exists())
         self.assertTrue((runtime / "secrets/stock-ai-release_oidc_cookie_key").exists())
+
+    def test_empty_extra_ca_keeps_codex_public_trust_defaults(self):
+        idp = prepare.read_external_idp(self.write_settings(self.settings))
+        env_file = prepare.prepare(runtime=self.base / "runtime-public-ca", idp=idp, client_secret_file=self.secret)
+        values = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
+        self.assertFalse(values.get("CODEX_CA_CERTIFICATE"))
+        self.assertEqual(Path(values["OIDC_CA_BUNDLE"]).read_bytes(), b"")
 
     def test_prepare_rejects_tls_pair_for_another_host_and_short_client_secret(self):
         idp = prepare.read_external_idp(self.write_settings({**self.settings, "RELEASE_APP_HOST": "other.corp.internal"}))

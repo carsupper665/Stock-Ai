@@ -17,6 +17,7 @@ import (
 type Config struct {
 	UserToken            string // 僅明確啟用時作為非 Release 靜態 USER token
 	AllowStaticUserToken bool
+	AgentServiceToken    string
 	OIDCIssuer           string
 	OIDCAudience         string
 	OIDCUserSubject      string
@@ -64,6 +65,14 @@ func Load(envPath string) (*Config, error) {
 			return nil, err
 		}
 	}
+	var agentServiceToken string
+	if os.Getenv("AGENT_SERVICE_TOKEN") != "" || os.Getenv("AGENT_SERVICE_TOKEN_FILE") != "" {
+		// Reuse the existing private Agent/Backend secret file without enabling static USER login.
+		agentServiceToken, err = Secret("AGENT_SERVICE_TOKEN", "backend_user_token")
+		if err != nil {
+			return nil, err
+		}
+	}
 	accountTokenKey, err := Secret("ACCOUNT_TOKEN_KEY", "backend_account_token_key")
 	if err != nil {
 		return nil, err
@@ -78,6 +87,7 @@ func Load(envPath string) (*Config, error) {
 
 	cfg := &Config{
 		UserToken:            userToken,
+		AgentServiceToken:    agentServiceToken,
 		AllowStaticUserToken: allowStaticUserToken,
 		OIDCIssuer:           strings.TrimSpace(os.Getenv("OIDC_ISSUER")),
 		OIDCAudience:         strings.TrimSpace(os.Getenv("OIDC_AUDIENCE")),

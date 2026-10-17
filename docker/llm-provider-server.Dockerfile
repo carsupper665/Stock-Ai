@@ -6,6 +6,16 @@ ARG VERSION
 WORKDIR /src/llm_provider_server
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 RUN test -n "$BUILD_DATE" && test -n "$REVISION" && test -n "$SOURCE_DATE_EPOCH" && test -n "$VERSION"
+# Keep the complete native package: Codex locates the tool host and resources beside its entrypoint.
+RUN wget -q -O /tmp/codex.tgz https://registry.npmjs.org/@openai/codex/-/codex-0.162.1-linux-x64.tgz \
+ && echo "7232b699d1c87c47a9675950d4c5f7693402fbc9dc22cbe769c97feaf23674821c7cff3f32b853436faa46591714d0f32528f5777eaab88b333fedffe0250959  /tmp/codex.tgz" | sha512sum -c - \
+ && mkdir -p /out/codex \
+ && tar -xzf /tmp/codex.tgz -C /out/codex --strip-components=3 \
+ && test -x /out/codex/bin/codex-code-mode-host \
+ && test -f /out/codex/codex-package.json \
+ && test "$(/out/codex/bin/codex --version)" = "codex-cli 0.162.1" \
+ && /out/codex/bin/codex-code-mode-host --help >/dev/null \
+ && rm /tmp/codex.tgz
 COPY llm_provider_server/go.mod llm_provider_server/go.sum ./
 RUN go mod download
 COPY llm_provider_server/ ./
@@ -25,8 +35,10 @@ LABEL org.opencontainers.image.created=$BUILD_DATE \
       org.opencontainers.image.version=$VERSION
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build --chown=65532:65532 /out/data /data
+COPY --from=build /out/codex /opt/codex
 COPY --from=build /out/llm-provider-server /llm-provider-server
 COPY --from=build /out/healthcheck /healthcheck
+ENV LLM_SERVER_CODEX_EXECUTABLE=/opt/codex/bin/codex
 ENV LLM_SERVER_ADDR=0.0.0.0:8090 LLM_SERVER_DB_PATH=/data/llm-provider.db
 EXPOSE 8090
 USER 65532:65532

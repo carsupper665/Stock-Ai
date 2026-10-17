@@ -1,0 +1,12 @@
+# Optional local-login overlay. CODEX_AUTH_FILE must be a durable auth.json outside the checkout.
+services:
+  llm-provider-server:
+    environment:
+      LLM_SERVER_CODEX_AUTH_FILE: /run/codex-auth/auth.json
+    volumes:
+      - type: bind
+        source: "${CODEX_AUTH_FILE:?set CODEX_AUTH_FILE to a persistent Codex auth.json}"
+        target: /run/codex-auth/auth.json
+        read_only: true
+        bind:
+          create_host_path: false

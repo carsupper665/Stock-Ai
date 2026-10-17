@@ -35,6 +35,11 @@ persistent files are also preserved byte-for-byte after a successful rebuild.
 are optional: request them with `-CodexExecutable <path-to-codex.exe>` and/or
 `-ClaudeExecutable <path-to-claude.exe>`. An explicitly requested missing CLI is
 an error; omitting an option leaves that installed tool directory unchanged.
+For Codex 0.162.1, select the official package's `bin/codex.exe`. Packaging copies
+the complete package, including `bin/codex-code-mode-host.exe`, metadata and
+resource directories, and rejects an incomplete input before building. The new
+entrypoint is `tools/codex/bin/codex.exe`. When upgrading an existing distribution,
+update `LLM_SERVER_CODEX_EXECUTABLE` in its preserved `.env` to that path.
 When creating the distribution for the first time, use `-ConfigurationFile` to
 select the launch configuration used only to generate the initial `.env`.
 

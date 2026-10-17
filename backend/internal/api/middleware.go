@@ -1,8 +1,10 @@
 package api
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
+	"strings"
 
 	"backend/internal/auth"
 
@@ -25,6 +27,18 @@ func (s *Server) requireUser() gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+// The Agent credential only permits reading one Account, including its runtime token.
+func (s *Server) requireAccountReader() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := auth.BearerToken(c.GetHeader("Authorization"))
+		if strings.Count(token, ".") != 2 && s.cfg.AgentServiceToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.AgentServiceToken)) == 1 {
+			c.Next()
+			return
+		}
+		s.requireUser()(c)
 	}
 }
 

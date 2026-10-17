@@ -82,7 +82,7 @@ function Write-InitialEnvironment([string]$Path, [string]$Source, [bool]$Include
         'CONSOLE_ADDR=127.0.0.1:8088', 'CONSOLE_PUBLIC_DIR=public', 'CONSOLE_TLS_CERT=', 'CONSOLE_TLS_KEY='
     )
     if ($IncludeCodex) {
-        $lines += 'LLM_SERVER_CODEX_EXECUTABLE=tools/codex/codex.exe'
+        $lines += 'LLM_SERVER_CODEX_EXECUTABLE=tools/codex/bin/codex.exe'
         $lines += ('LLM_SERVER_CODEX_AUTH_FILE=' + (Join-Path $HOME '.codex/auth.json'))
     }
     if ($IncludeClaude) {
@@ -105,6 +105,13 @@ try {
     }
     if ($codexRequested -and !(Test-Path -LiteralPath $CodexExecutable -PathType Leaf)) {
         throw "Requested Codex executable not found: $CodexExecutable"
+    }
+    if ($codexRequested) {
+        $codexBinDirectory = Split-Path $CodexExecutable -Parent
+        if ((Split-Path $codexBinDirectory -Leaf) -ne 'bin') { throw 'Select bin/codex.exe from the complete official Codex package' }
+        $codexPackageRoot = Split-Path $codexBinDirectory -Parent
+        Assert-File (Join-Path $codexBinDirectory 'codex-code-mode-host.exe') 'Codex tool host'
+        Assert-File (Join-Path $codexPackageRoot 'codex-package.json') 'Codex package metadata'
     }
     if ($claudeRequested -and !(Test-Path -LiteralPath $ClaudeExecutable -PathType Leaf)) {
         throw "Requested Claude executable not found: $ClaudeExecutable"
@@ -144,8 +151,9 @@ try {
     if ($codexRequested) {
         $codexStage = Join-Path $releaseStage 'tools/codex'
         New-Item -ItemType Directory -Path $codexStage -Force | Out-Null
-        Copy-Item -Path (Join-Path (Split-Path $CodexExecutable -Parent) '*.exe') -Destination $codexStage -Force
-        Assert-File (Join-Path $codexStage 'codex.exe') 'tools/codex/codex.exe'
+        Get-ChildItem -LiteralPath $codexPackageRoot -Force | Copy-Item -Destination $codexStage -Recurse -Force
+        Assert-File (Join-Path $codexStage 'bin/codex.exe') 'tools/codex/bin/codex.exe'
+        Assert-File (Join-Path $codexStage 'bin/codex-code-mode-host.exe') 'Codex tool host'
         $managedPaths += 'tools/codex'
     }
     if ($claudeRequested) {

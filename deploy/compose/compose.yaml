@@ -33,6 +33,7 @@ services:
       STOCK_AI_ENVIRONMENT: "${STOCK_AI_ENVIRONMENT:?set STOCK_AI_ENVIRONMENT to Test or Release}"
       ALLOW_STATIC_USER_TOKEN: "${ALLOW_STATIC_USER_TOKEN:-false}"
       USER_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE:?set STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+      AGENT_SERVICE_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
       ACCOUNT_TOKEN_KEY_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_backend_account_token_key"
       OIDC_ISSUER: "${OIDC_ISSUER:-}"
       OIDC_AUDIENCE: "${OIDC_AUDIENCE:-}"

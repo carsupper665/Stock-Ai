@@ -359,6 +359,23 @@ func serveCodexFixture() int {
 				effort = "none"
 			}
 			switch thread.model {
+			case "tool-host-empty-error":
+				emit("error", map[string]any{"threadId": thread.id, "willRetry": false, "error": map[string]any{}})
+				completeWith(thread, "Unable to execute tools.")
+			case "ca-bundle-presence-report":
+				_, exists := os.LookupEnv("CODEX_CA_CERTIFICATE")
+				completeWith(thread, strconv.FormatBool(exists))
+			case "ca-bundle-report":
+				completeWith(thread, os.Getenv("CODEX_CA_CERTIFICATE"))
+			case "tool-host-error":
+				emit("error", map[string]any{"threadId": thread.id, "willRetry": false,
+					"error": map[string]any{"message": "codex-code-mode-host is missing"}})
+				completeWith(thread, "I cannot execute tools because the tool host is unavailable.")
+			case "interrupted-without-tools":
+				emit("item/completed", map[string]any{"threadId": thread.id,
+					"item": map[string]any{"type": "agentMessage", "text": "Unable to execute."}})
+				emit("turn/completed", map[string]any{"threadId": thread.id,
+					"turn": map[string]any{"id": "turn-" + thread.id, "status": "interrupted"}})
 			case "hang":
 			case "invalid-output":
 				emit("turn/completed", map[string]any{"threadId": thread.id, "turn": map[string]any{"id": "turn-" + thread.id, "status": "completed"}})
@@ -439,7 +456,7 @@ func codexAppServerIsRestricted() bool {
 	}
 	allowedEnvironment := map[string]bool{
 		"HOME": true, "USERPROFILE": true, "CODEX_HOME": true, "CLAUDE_CONFIG_DIR": true, "SystemRoot": true, "WINDIR": true,
-		"TEMP": true, "TMP": true, "HTTPS_PROXY": true, "HTTP_PROXY": true, "NO_PROXY": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
+		"TEMP": true, "TMP": true, "HTTPS_PROXY": true, "HTTP_PROXY": true, "NO_PROXY": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "CODEX_CA_CERTIFICATE": true,
 	}
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
@@ -537,4 +554,43 @@ func value(number *int) int {
 
 func isError(got, want error) bool {
 	return got != nil && (got == want || strings.Contains(got.Error(), want.Error()))
+}
+
+func TestCodexToolHostErrorsCannotBecomeSuccessfulResponses(t *testing.T) {
+	for _, model := range []string{"tool-host-error", "tool-host-empty-error", "interrupted-without-tools"} {
+		t.Run(model, func(t *testing.T) {
+			t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+			server := webharness.NewCodexAppServer()
+			defer server.Close()
+			response, err := codexComplete(t, context.Background(), server, "fixture-codex-key", model, time.Second,
+				userMessages("Read the account using the provided tool."),
+				[]providers.ToolSchema{{Name: "account.get", InputSchema: json.RawMessage(`{"type":"object"}`)}})
+			if err == nil {
+				t.Fatalf("tool host failure returned success: %+v", response)
+			}
+		})
+	}
+}
+
+func TestCodexReceivesConfiguredInspectionCAInItsIsolatedEnvironment(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	bundle := filepath.Join(t.TempDir(), "inspection-ca.pem")
+	t.Setenv("CODEX_CA_CERTIFICATE", bundle)
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
+	response, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "ca-bundle-report", time.Second, userMessages("report"), nil)
+	if err != nil || response.Content == nil || *response.Content != bundle {
+		t.Fatalf("custom CA not forwarded to Codex: response=%+v err=%v", response, err)
+	}
+}
+
+func TestCodexDoesNotReceiveAnEmptyCustomCASetting(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	t.Setenv("CODEX_CA_CERTIFICATE", "")
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
+	response, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "ca-bundle-presence-report", time.Second, userMessages("report"), nil)
+	if err != nil || response.Content == nil || *response.Content != "false" {
+		t.Fatalf("empty CA setting reached Codex: response=%+v err=%v", response, err)
+	}
 }

@@ -106,6 +106,7 @@ type Expiration struct {
 }
 
 type Finalization struct {
+	Status            string       `json:"status,omitempty"`
 	Output            string       `json:"output"`
 	Summary           string       `json:"summary"`
 	CandidateMemories []Candidate  `json:"candidate_memories"`
@@ -126,12 +127,13 @@ const Instruction = `
 
 When your work is normally complete, finish with finish_reason "stop" and content containing exactly one JSON object:
 {"output":"human-readable final decision","summary":"short summary (max 500 Unicode characters)","candidate_memories":[],"expire_memories":[]}
-All four fields are required. candidate_memories may contain at most 20 objects with only type (max 64 Unicode characters), summary (max 500 Unicode characters), content (max 65536 UTF-8 bytes), and importance (1, 2, or 3). expire_memories may contain at most 20 objects with only a Server-issued memory id and a reason of at most 500 Unicode characters. Do not include session_id, run_id, timestamps, credentials, hidden reasoning, or extra fields. Tool calls continue to use the structured tool channel; do not put this final object in a tool call.`
+All four fields are required. Also include status="completed" when the requested work succeeded or a deliberate no-action decision was reached. If a required tool or dependency is unavailable and prevents the work, include status="failed" and explain the blocker in output. Never claim completion merely because you produced a final response. candidate_memories may contain at most 20 objects with only type (max 64 Unicode characters), summary (max 500 Unicode characters), content (max 65536 UTF-8 bytes), and importance (1, 2, or 3). expire_memories may contain at most 20 objects with only a Server-issued memory id and a reason of at most 500 Unicode characters. Do not include session_id, run_id, timestamps, credentials, hidden reasoning, or extra fields. Tool calls continue to use the structured tool channel; do not put this final object in a tool call.`
 
 func ParseFinalization(content string) (Finalization, error) {
 	decoder := json.NewDecoder(strings.NewReader(content))
 	decoder.DisallowUnknownFields()
 	var envelope struct {
+		Status            string        `json:"status"`
 		Output            *string       `json:"output"`
 		Summary           *string       `json:"summary"`
 		CandidateMemories *[]Candidate  `json:"candidate_memories"`
@@ -141,7 +143,11 @@ func ParseFinalization(content string) (Finalization, error) {
 		envelope.Output == nil || envelope.Summary == nil || envelope.CandidateMemories == nil || envelope.ExpireMemories == nil {
 		return Finalization{}, errors.New("content must be exactly one finalization JSON object with known fields")
 	}
+	if envelope.Status != "" && envelope.Status != "completed" && envelope.Status != "failed" {
+		return Finalization{}, errors.New("status must be completed or failed")
+	}
 	output := Finalization{
+		Status: envelope.Status,
 		Output: *envelope.Output, Summary: *envelope.Summary,
 		CandidateMemories: *envelope.CandidateMemories, ExpireMemories: *envelope.ExpireMemories,
 	}

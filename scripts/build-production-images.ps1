@@ -175,6 +175,15 @@ try {
                 $_ -match '(^|/)(auth|credentials|token|secret)[^/]*\.(json|txt|env)$'
             }
             if ($forbidden) { throw "$name contains forbidden runtime files: $($forbidden -join ', ')" }
+            if ($name -eq 'llm-provider-server') {
+                foreach ($required in @('opt/codex/bin/codex', 'opt/codex/bin/codex-code-mode-host', 'opt/codex/codex-package.json')) {
+                    if ($inventory -notcontains $required) { throw "$name is missing Codex package file $required" }
+                }
+                $codexVersion = (& docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint /opt/codex/bin/codex $tag --version)
+                if ($LASTEXITCODE -ne 0 -or $codexVersion.Trim() -ne 'codex-cli 0.162.1') { throw 'Codex runtime version check failed' }
+                & docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint /opt/codex/bin/codex-code-mode-host $tag --help | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'Codex tool host does not execute in the runtime image' }
+            }
             if ($inventory -notcontains 'etc/ssl/certs/ca-certificates.crt') {
                 throw "$name does not contain the approved CA root bundle."
             }

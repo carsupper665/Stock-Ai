@@ -169,6 +169,8 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None, idp=None, client_secret_fil
     if idp:
         values.update({key: value for key, value in idp.items() if key not in ("RELEASE_TLS_CERT", "RELEASE_TLS_KEY")})
         values["OIDC_CA_BUNDLE"] = str((certs / "oidc-ca.pem").resolve())
+        if (certs / "oidc-ca.pem").stat().st_size:
+            values["CODEX_CA_CERTIFICATE"] = "/etc/ssl/certs/oidc-ca.pem"
     else:
         image_variables.append(("idp", "LOCAL_RELEASE_FIXTURE_IMAGE"))
     for service, variable in image_variables:

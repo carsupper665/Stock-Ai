@@ -3728,3 +3728,12 @@ on a reference error the transaction rolls back, a tool-disabled repair instruct
 and no Memory is published. SQLite, History filesystem, commit and other persistence failures are
 not model-repairable. Successful Run completion, candidate publication, expirations and History
 staging remain one atomic completion path. No Tool or mutation is automatically replayed.
+
+
+### 明確回報任務失敗
+
+Finalization 可加上 `status`，值只允許 `completed` 或 `failed`；省略時延續既有完成語意。
+模型因必要工具或依賴不可用而無法執行時，必須回報 `status: "failed"`，並在 `output` 說明原因。
+此時 Run 立即標記 `failed`，錯誤為 `TASK_FAILED`，不發佈完成摘要或候選 Memory。
+正常的無交易決策可以零工具呼叫完成；部署工具驗收另行要求成功的實際工具紀錄。
+Codex 非重試錯誤、失敗回合或沒有工具呼叫的中斷不得正規化成成功回應。

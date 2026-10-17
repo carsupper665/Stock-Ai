@@ -315,8 +315,8 @@ func harnessEnvironment(workingDirectory, credentialName, credential string) []s
 	if credentialName != "" && credential != "" {
 		environment = append(environment, credentialName+"="+credential)
 	}
-	for _, name := range []string{"SystemRoot", "WINDIR", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
-		if value, exists := os.LookupEnv(name); exists {
+	for _, name := range []string{"SystemRoot", "WINDIR", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR", "CODEX_CA_CERTIFICATE"} {
+		if value, exists := os.LookupEnv(name); exists && value != "" {
 			environment = append(environment, name+"="+value)
 		}
 	}
@@ -656,6 +656,25 @@ func ResolveHarness(kind string, config json.RawMessage, credential string, mana
 	if !HarnessFileAvailable(setup.Executable) {
 		log.Printf("web_harness event=error harness=%s category=not_configured", kind)
 		return HarnessSetup{}, providers.ProviderError{Status: 503, Code: "HARNESS_NOT_CONFIGURED", Message: "Configure and install the pinned CLI executable on the Gateway Server, then restart it."}
+	}
+	if kind == "codex" {
+		base := strings.ToLower(filepath.Base(setup.Executable))
+		if base == "codex" || base == "codex.exe" {
+			suffix := ""
+			if strings.HasSuffix(base, ".exe") {
+				suffix = ".exe"
+			}
+			executable, err := filepath.EvalSymlinks(setup.Executable)
+			if err != nil {
+				return HarnessSetup{}, providers.ProviderError{Status: 503, Code: "HARNESS_PACKAGE_INCOMPLETE", Message: "Cannot resolve the installed Codex package."}
+			}
+			bin := filepath.Dir(executable)
+			if !HarnessFileAvailable(filepath.Join(bin, "codex-code-mode-host"+suffix)) ||
+				!HarnessFileAvailable(filepath.Join(filepath.Dir(bin), "codex-package.json")) {
+				return HarnessSetup{}, providers.ProviderError{Status: 503, Code: "HARNESS_PACKAGE_INCOMPLETE",
+					Message: "Install the complete pinned Codex package, including codex-code-mode-host and package resources."}
+			}
+		}
 	}
 	if configuration.AuthMode == "local_login" {
 		if setup.AuthFile == "" || (!managedClaude && !HarnessFileAvailable(setup.AuthFile)) {

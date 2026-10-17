@@ -442,6 +442,7 @@ func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, eve
 	var usage *providers.Usage
 	calls := []providers.ToolCall{}
 	failure := ""
+	fatalError := false
 	interrupt := map[string]string{"threadId": threadID, "turnId": turnID}
 	for {
 		var event rpcMessage
@@ -488,7 +489,11 @@ func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, eve
 				} `json:"error"`
 				WillRetry bool `json:"willRetry"`
 			}
-			if json.Unmarshal(event.Params, &reported) == nil && !reported.WillRetry {
+			if json.Unmarshal(event.Params, &reported) != nil {
+				return providers.GenerateResponse{}, ErrWebHarnessResponse
+			}
+			if !reported.WillRetry {
+				fatalError = true
 				failure = reported.Error.Message
 			}
 		case "turn/completed":
@@ -503,11 +508,15 @@ func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, eve
 			if json.Unmarshal(event.Params, &completed) != nil {
 				return providers.GenerateResponse{}, ErrWebHarnessResponse
 			}
-			if completed.Turn.Error != nil && completed.Turn.Error.Message != "" {
+			if completed.Turn.Error != nil {
+				fatalError = true
 				failure = completed.Turn.Error.Message
 			}
-			if len(calls) == 0 && completed.Turn.Status == "failed" {
+			if fatalError || completed.Turn.Status == "failed" {
 				return providers.GenerateResponse{}, harnessFailure(failure)
+			}
+			if completed.Turn.Status != "completed" && !(completed.Turn.Status == "interrupted" && len(calls) > 0) {
+				return providers.GenerateResponse{}, ErrWebHarnessResponse
 			}
 			return codexResponse(content, calls, usage, historyIDs)
 		}

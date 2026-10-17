@@ -60,6 +60,11 @@ def main(args):
         return
     if bool(args.idp_env) != bool(args.oidc_client_secret_file):
         raise ValueError("--idp-env and --oidc-client-secret-file must be given together")
+    codex_auth = None
+    if args.codex_auth_file:
+        codex_auth = args.codex_auth_file.expanduser().resolve()
+        if not codex_auth.is_file() or not isinstance(json.loads(codex_auth.read_text()), dict):
+            raise ValueError("--codex-auth-file must name a readable Codex auth.json")
     import cryptography  # Require the host dependency before any Docker mutation.
     runtime = args.runtime.expanduser().resolve()
     if runtime.exists() and any(runtime.iterdir()):
@@ -119,13 +124,23 @@ def main(args):
         run("docker", "image", "inspect", reference)
     run("docker", "stop", registry_name)
     env_file = prepare(runtime=runtime, idp=idp, client_secret_file=args.oidc_client_secret_file)
+    if codex_auth:
+        from prepare import install_private
+        target = runtime / "secrets/stock-ai-release_codex_auth.json"
+        install_private(target, codex_auth.read_bytes(), os.getgid())
+        with env_file.open("a") as output:
+            output.write("CODEX_AUTH_FILE=" + str(target) + "\n")
     from accept import sync_bundle
     deployment = runtime / "deployment"
     sync_bundle(deployment)
     shutil.copytree(source / "docs/deployment", deployment / "docs/deployment", dirs_exist_ok=True)
     overlay = "compose.release.yaml" if idp else "compose.local-release.yaml"
     files = [deployment / "deploy/compose" / name for name in ("compose.yaml", overlay)]
+    if codex_auth:
+        files.append(deployment / "deploy/compose/compose.codex.yaml")
     compose = ["docker", "compose", "--env-file", str(env_file), "-f", str(files[0]), "-f", str(files[1])]
+    if codex_auth:
+        compose.extend(["-f", str(files[2])])
     if idp:
         # Runs in the Gateway image with the deployment's trust store; prints the URIs to register in the IdP.
         if subprocess.run(compose + ["run", "--rm", "--no-deps", "oidc-gateway", "preflight"]).returncode:
@@ -148,6 +163,11 @@ def main(args):
         print(f"Installed: https://{idp['RELEASE_APP_HOST']} (external IdP {idp['OIDC_ISSUER']})")
         print(f"IdP client {idp['OIDC_CLIENT_ID']} must register redirect URI https://{idp['RELEASE_APP_HOST']}/oauth2/callback"
               f" and post-logout URI https://{idp['RELEASE_APP_HOST']}/")
+        pending = runtime / "evidence/install/authenticated-acceptance.json"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_text(json.dumps({"schema": "stock-ai.authenticated-acceptance.v1", "status": "pending",
+            "reason": "A real login, authenticated APIs, Agent account lookup and successful tool execution remain unverified."}, indent=2) + "\n")
+        print("Authenticated acceptance: pending; run source/scripts/release/verify_authenticated.py with a real login cookie jar")
         print("Finish with the login acceptance checklist in docs/deployment/remote-windows-release.md")
     else:
         print("Installed: https://app.localrelease:8443 (loopback-only local fixtures)")
@@ -160,6 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("--bundle", type=Path, default=Path(__file__).resolve().parent)
     parser.add_argument("--runtime", type=Path, default=Path.home() / "stock-ai-runtime")
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--codex-auth-file", type=Path, help="Optional local Codex auth.json to persist in this runtime")
     parser.add_argument("--idp-env", type=Path, help="External IdP settings (deploy/compose/release.env.example)")
     parser.add_argument("--oidc-client-secret-file", type=Path, help="File holding the IdP client secret")
     args = parser.parse_args()

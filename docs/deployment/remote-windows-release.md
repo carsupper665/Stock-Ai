@@ -119,3 +119,62 @@ docker compose --env-file "$HOME/stock-ai-runtime/compose.env" \
 4. 實際操作：開啟 Provider 頁、建立 Session、查看執行明細，皆無 401 或被登出。
 5. 登出後回到登入頁且沒有重新載入循環，再次登入成功。
 
+
+### 容器信任鏈與 Agent 認證
+
+`OIDC_CA_BUNDLE` 會以唯讀方式掛入 Backend、Console、Gateway、Agent 與 LLM 容器。
+若 Windows 的 Kaspersky 會檢查 HTTPS，將經管理者確認的 HTTPS 檢查根憑證匯出為 PEM，
+與 IdP 缺少的中繼憑證合併至此檔案。保留映像的公開根憑證；Codex 另外透過
+`CODEX_CA_CERTIFICATE` 讀取這份額外 CA，隔離程序也會保留此設定。
+安裝器只在額外 CA 非空時設定此變數；既有 runtime 若需額外 CA，請在其 `compose.env`
+加入 `CODEX_CA_CERTIFICATE=/etc/ssl/certs/oidc-ca.pem`。不需要額外 CA 時留空，使用公開信任庫。
+更換檔案後重新建立容器並重跑 preflight 與下列登入後驗收。
+
+Release 的 Agent 帳號查詢使用獨立的服務認證權限。Backend 的 `AGENT_SERVICE_TOKEN_FILE`
+與 Agent 既有的 `AGENT_SERVER_BACKEND_USER_TOKEN_FILE` 掛載同一份私有檔案；歷史檔名仍為
+`stock-ai-release_backend_user_token`。這只授權單筆帳號讀取，不啟用靜態 USER 登入。
+Backend 與 Compose 必須一併更新，`ALLOW_STATIC_USER_TOKEN` 保持 `false`。
+
+### Codex 完整套件與登入檔
+
+新 LLM 映像包含鎖定的 Codex 0.162.1 官方 Linux/amd64 完整套件，建置時核對 SHA-512，
+並檢查主程式及 `codex-code-mode-host` 可執行。不要只複製 `codex` 單一檔案。
+Provider 的 `auth_mode` 選擇 `local_login` 時，首次安裝可另外提供：
+
+```bash
+python3 bootstrap.py --runtime "$HOME/stock-ai-runtime" \
+  --idp-env "$HOME/stock-ai-idp.env" --oidc-client-secret-file "$HOME/stock-ai-oidc-client-secret" \
+  --codex-auth-file "$HOME/.codex/auth.json"
+```
+
+安裝會將指定登入檔私下複製至 runtime，並加上 `compose.codex.yaml` 唯讀掛載。
+既有部署請在私有 env 設定 `CODEX_AUTH_FILE` 的持久化路徑，所有 Compose 指令加上
+`-f .../compose.codex.yaml`。LLM 使用 `/opt/codex/bin/codex` 與
+`LLM_SERVER_CODEX_AUTH_FILE=/run/codex-auth/auth.json`；登入檔需可由容器的群組讀取。
+登入來源不是工作樹或映像的一部分。過期時在主機重新登入、更新 runtime 中的檔案並重建容器；
+目前每個隔離程序使用登入快照，不會將程序內的更新回寫主機檔案。
+
+官方登入檔與額外 CA 的設定依據：[OpenAI Authentication](https://learn.chatgpt.com/docs/auth)。
+
+### 登入後工具驗收
+
+外部 IdP 安裝成功只代表服務啟動，`evidence/install/authenticated-acceptance.json`
+會標為 `pending`。使用私下儲存的實際登入 Cookie jar（Netscape 格式）執行：
+
+```bash
+python3 source/scripts/release/verify_authenticated.py \
+  --base-url https://stock-ai.corp.internal:8443 \
+  --cookie-file "$HOME/stock-ai-login.cookies" \
+  --ca-bundle "$HOME/stock-ai-runtime/certs/fullchain.pem" \
+  --model-name <已啟用的模型名稱> \
+  --evidence "$HOME/stock-ai-runtime/evidence/install/authenticated-acceptance.json"
+```
+
+此流程會實際呼叫模型，先驗證登入後的 Backend、Provider、Agent API，再建立暫時的
+Account／Session，要求一次 `get_account`，核對持久化的成功工具結果，最後確認仍保持登入，
+並停止、刪除驗收資源。`completed`、模型自述或 App Server 初始化都不能替代工具結果；
+零工具呼叫、工具失敗、API 401 或服務認證失敗皆會讓驗收失敗。證據不包含 Cookie 或 Token。
+瀏覽器登出後不重載循環、再次登入成功，仍須按前述清單實際確認。
+
+這些修正需重新建置、驗證及核准映像後才會進入部署；既有 promotion manifest 與舊驗收紀錄
+不代表新映像已通過驗收。

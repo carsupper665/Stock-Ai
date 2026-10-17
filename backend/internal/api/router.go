@@ -73,12 +73,13 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 	v1.GET("/health", s.health)
 	v1.GET("/me", s.requireAny(), s.me)
 
+	v1.GET("/accounts/:id", s.requireAccountReader(), s.getAccount)
+
 	// 帳號管理：只有 USER Token
 	admin := v1.Group("/accounts", s.requireUser())
 	{
 		admin.POST("", s.createAccount)
 		admin.GET("", s.listAccounts)
-		admin.GET("/:id", s.getAccount)
 		admin.PATCH("/:id", s.updateAccount)
 		admin.DELETE("/:id", s.deleteAccount)
 		admin.POST("/:id/token/reset", s.resetAccountToken)

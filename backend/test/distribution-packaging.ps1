@@ -67,7 +67,7 @@ $output = Join-Path $args[$prefixIndex + 1] 'dist/index.html'
         Write-Text (Join-Path $dist $file) "old-$file"
     }
     Write-Text (Join-Path $dist 'public/index.html') 'old frontend'
-    Write-Text (Join-Path $dist 'tools/codex/codex.exe') 'old codex'
+    Write-Text (Join-Path $dist 'tools/codex/bin/codex.exe') 'old codex'
     Write-Text (Join-Path $dist 'tools/claude/claude.exe') 'old claude'
     [IO.File]::WriteAllBytes((Join-Path $dist 'data/backend.db'), [byte[]](0, 255, 13, 10, 7, 8, 9))
     [IO.File]::WriteAllBytes((Join-Path $dist 'data/agent-history/history.bin'), [byte[]](9, 8, 0, 1, 2))
@@ -91,7 +91,7 @@ function Get-PersistentHashes([string]$Root) {
 function Get-ReleaseHashes([string]$Root) {
     $dist = Join-Path $Root 'dist'
     $result = @{}
-    foreach ($relativePath in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'public/index.html', 'start.ps1', 'README.md', 'tools/codex/codex.exe', 'tools/claude/claude.exe')) {
+    foreach ($relativePath in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'public/index.html', 'start.ps1', 'README.md', 'tools/codex/bin/codex.exe', 'tools/claude/claude.exe')) {
         $path = Join-Path $dist $relativePath
         if (Test-Path -LiteralPath $path -PathType Leaf) { $result[$relativePath] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
     }
@@ -174,30 +174,38 @@ try {
 
     $successRoot = New-Fixture 'successful release'
     Write-Text (Join-Path $successRoot 'frontend/dist/index.html') 'new frontend'
-    Write-Text (Join-Path $successRoot 'cli/codex.exe') 'new codex'
-    Write-Text (Join-Path $successRoot 'cli/codex-helper.exe') 'new codex helper'
+    Write-Text (Join-Path $successRoot 'cli/bin/codex.exe') 'new codex'
+    Write-Text (Join-Path $successRoot 'cli/bin/codex-code-mode-host.exe') 'tool host'
+    Write-Text (Join-Path $successRoot 'cli/codex-package.json') '{"layoutVersion":1}'
+    Write-Text (Join-Path $successRoot 'cli/codex-resources/fixture.txt') 'package resource'
+    Write-Text (Join-Path $successRoot 'cli/bin/codex-helper.exe') 'new codex helper'
     Write-Text (Join-Path $successRoot 'cli/claude.exe') 'new claude'
     $oldRelease = Get-ReleaseHashes $successRoot
     $persistentBefore = Get-PersistentHashes $successRoot
     $success = Invoke-Packaging $successRoot @(
         '-SkipFrontendBuild', '-ConfigurationFile', 'synthetic-launch.json',
-        '-CodexExecutable', (Join-Path $successRoot 'cli/codex.exe'),
+        '-CodexExecutable', (Join-Path $successRoot 'cli/bin/codex.exe'),
         '-ClaudeExecutable', (Join-Path $successRoot 'cli/claude.exe')
     )
     Assert-True ($success.ExitCode -eq 0) "successful release failed: $($success.Output)"
     Assert-Hashes $persistentBefore (Get-PersistentHashes $successRoot) 'successful release persistent state'
     $newRelease = Get-ReleaseHashes $successRoot
-    foreach ($key in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'public/index.html', 'start.ps1', 'README.md', 'tools/codex/codex.exe', 'tools/claude/claude.exe')) {
+    foreach ($key in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'public/index.html', 'start.ps1', 'README.md', 'tools/codex/bin/codex.exe', 'tools/claude/claude.exe')) {
         Assert-True ($oldRelease[$key] -ne $newRelease[$key]) "successful release did not replace $key"
     }
     Assert-True (([IO.File]::ReadAllText((Join-Path $successRoot 'dist/public/index.html'))) -eq 'new frontend') 'successful release frontend content is wrong'
-    Assert-True (Test-Path -LiteralPath (Join-Path $successRoot 'dist/tools/codex/codex-helper.exe')) 'successful release omitted Codex companion executable'
+    Assert-True (Test-Path -LiteralPath (Join-Path $successRoot 'dist/tools/codex/bin/codex-helper.exe')) 'successful release omitted Codex companion executable'
+    Assert-True (Test-Path -LiteralPath (Join-Path $successRoot 'dist/tools/codex/bin/codex-code-mode-host.exe')) 'successful release omitted Codex tool host'
+    Assert-True (Test-Path -LiteralPath (Join-Path $successRoot 'dist/tools/codex/codex-resources/fixture.txt')) 'successful release omitted Codex package resources'
     $passed++
     Write-Host 'PASS successful release'
 
     $rollbackRoot = New-Fixture 'publication rollback'
     Write-Text (Join-Path $rollbackRoot 'frontend/dist/index.html') 'new frontend'
-    Write-Text (Join-Path $rollbackRoot 'cli/codex.exe') 'new codex'
+    Write-Text (Join-Path $rollbackRoot 'cli/bin/codex.exe') 'new codex'
+    Write-Text (Join-Path $rollbackRoot 'cli/bin/codex-code-mode-host.exe') 'tool host'
+    Write-Text (Join-Path $rollbackRoot 'cli/codex-package.json') '{"layoutVersion":1}'
+    Write-Text (Join-Path $rollbackRoot 'cli/codex-resources/fixture.txt') 'package resource'
     Remove-Item -LiteralPath (Join-Path $rollbackRoot 'dist/tools') -Recurse -Force
     Write-Text (Join-Path $rollbackRoot 'dist/tools') 'old blocking tools file'
     $rollbackRelease = Get-ReleaseHashes $rollbackRoot
@@ -205,7 +213,7 @@ try {
     $rollbackPersistent = Get-PersistentHashes $rollbackRoot
     $rollback = Invoke-Packaging $rollbackRoot @(
         '-SkipFrontendBuild', '-ConfigurationFile', 'synthetic-launch.json',
-        '-CodexExecutable', (Join-Path $rollbackRoot 'cli/codex.exe')
+        '-CodexExecutable', (Join-Path $rollbackRoot 'cli/bin/codex.exe')
     )
     Assert-True ($rollback.ExitCode -ne 0) 'publication rollback unexpectedly succeeded'
     Assert-True ($rollback.Output -match 'previous release was restored') "publication rollback did not report restoration: $($rollback.Output)"
@@ -222,8 +230,8 @@ try {
     Assert-True ($initial.ExitCode -eq 0) "initial environment release failed: $($initial.Output)"
     $initialEnv = [IO.File]::ReadAllLines((Join-Path $initialRoot 'dist/.env'))
     Assert-True ($initialEnv -contains 'USER_TOKEN=fixture-user') 'initial environment omitted synthetic USER_TOKEN'
-    Assert-True ($initialEnv -notcontains 'LLM_SERVER_CODEX_EXECUTABLE=tools/codex/codex.exe') 'initial environment claimed an unrequested Codex CLI'
-    Assert-True (([IO.File]::ReadAllText((Join-Path $initialRoot 'dist/tools/codex/codex.exe'))) -eq 'old codex') 'unrequested Codex tool was changed'
+    Assert-True ($initialEnv -notcontains 'LLM_SERVER_CODEX_EXECUTABLE=tools/codex/bin/codex.exe') 'initial environment claimed an unrequested Codex CLI'
+    Assert-True (([IO.File]::ReadAllText((Join-Path $initialRoot 'dist/tools/codex/bin/codex.exe'))) -eq 'old codex') 'unrequested Codex tool was changed'
     Assert-True (([IO.File]::ReadAllText((Join-Path $initialRoot 'dist/tools/claude/claude.exe'))) -eq 'old claude') 'unrequested Claude tool was changed'
     $passed++
     Write-Host 'PASS initial environment after successful release'
