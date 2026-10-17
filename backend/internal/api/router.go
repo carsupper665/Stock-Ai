@@ -83,6 +83,7 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 		admin.PATCH("/:id", s.updateAccount)
 		admin.DELETE("/:id", s.deleteAccount)
 		admin.POST("/:id/token/reset", s.resetAccountToken)
+		admin.POST("/:id/trading/resume", s.resumeAccountTrading)
 
 		admin.GET("/:id/positions", s.userListPositions)
 		admin.GET("/:id/orders", s.userListOrders)

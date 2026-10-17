@@ -28,9 +28,11 @@ const tradingUserToken = "ticket-trading-user"
 // GetPrice has to wait until resume, which gives tests a place to interleave a second
 // request while the first one is between its read and its transaction.
 type settablePriceSource struct {
-	mu    sync.Mutex
-	price float64
-	gate  *priceGate
+	mu      sync.Mutex
+	price   float64
+	bySym   map[string]float64 // 單一標的的覆寫價格（多標的測試）
+	missing map[string]bool    // 缺價標的：來源停送樣本
+	gate    *priceGate
 }
 
 type priceGate struct {
@@ -46,11 +48,48 @@ func (s *settablePriceSource) set(price float64) {
 	s.price = price
 }
 
-func (s *settablePriceSource) Stream(ctx context.Context, _ string, out chan<- float64) error {
+// setSymbol 覆寫單一標的價格；dropSymbol 讓單一標的缺價（停送樣本，GetPrice 會等到
+// timeout）；restoreSymbol 恢復送價。供多標的與缺價重試的 max_dd 驗收使用。
+func (s *settablePriceSource) setSymbol(symbol string, price float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.bySym == nil {
+		s.bySym = make(map[string]float64)
+	}
+	s.bySym[symbol] = price
+}
+
+func (s *settablePriceSource) dropSymbol(symbol string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.missing == nil {
+		s.missing = make(map[string]bool)
+	}
+	s.missing[symbol] = true
+}
+
+func (s *settablePriceSource) restoreSymbol(symbol string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.missing, symbol)
+}
+
+func (s *settablePriceSource) Stream(ctx context.Context, symbol string, out chan<- float64) error {
 	for {
 		s.mu.Lock()
-		price, gate := s.price, s.gate
+		missing, price, gate := s.missing[symbol], s.price, s.gate
+		if v, ok := s.bySym[symbol]; ok {
+			price = v
+		}
 		s.mu.Unlock()
+		if missing {
+			select {
+			case <-time.After(time.Millisecond):
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		if gate != nil {
 			select {
 			case gate.parked <- struct{}{}:
@@ -127,7 +166,44 @@ func newTradingAPI(t *testing.T, dbPath string) *tradingAPI {
 	return newTradingAPIWithStore(t, store, dbPath)
 }
 
+// newTradingAPIZeroFee 建立零手續費 fixture，供需要精確比對觸發門檻與最終
+// balance 的 max_dd 驗收使用。
+func newTradingAPIZeroFee(t *testing.T, dbPath string) *tradingAPI {
+	t.Helper()
+	if dbPath == "" {
+		dbPath = filepath.Join(t.TempDir(), "backend.db")
+	}
+	store, err := database.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return newTradingAPIWithFees(t, store, dbPath, 0, 0)
+}
+
+// newTradingAPIFee 建立指定費率的 fixture（自帶資料庫），供需要精確計算手續費
+// 的驗收使用（例如 C4 taker=0.001）。
+func newTradingAPIFee(t *testing.T, dbPath string, maker, taker float64) *tradingAPI {
+	t.Helper()
+	if dbPath == "" {
+		dbPath = filepath.Join(t.TempDir(), "backend.db")
+	}
+	store, err := database.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return newTradingAPIWithFees(t, store, dbPath, maker, taker)
+}
+
 func newTradingAPIWithStore(t *testing.T, store *database.Store, dbPath string) *tradingAPI {
+	t.Helper()
+	return newTradingAPIWithFees(t, store, dbPath, 0.0002, 0.0004)
+}
+
+// newTradingAPIWithFees 同 newTradingAPIWithStore，但 maker/taker 費率可指定，
+// 供需要精確計算門檻與結算金額的驗收使用。
+func newTradingAPIWithFees(t *testing.T, store *database.Store, dbPath string, maker, taker float64) *tradingAPI {
 	t.Helper()
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("migrate database: %v", err)
@@ -144,7 +220,7 @@ func newTradingAPIWithStore(t *testing.T, store *database.Store, dbPath string) 
 		FreshTTL: time.Millisecond, WaitTimeout: 2 * time.Second, Now: clock.now,
 	})
 	t.Cleanup(prices.Close)
-	cfg := &config.Config{UserToken: tradingUserToken, AllowStaticUserToken: true, UserName: "ticket", FeeRateMaker: 0.0002, FeeRateTaker: 0.0004}
+	cfg := &config.Config{UserToken: tradingUserToken, AllowStaticUserToken: true, UserName: "ticket", FeeRateMaker: maker, FeeRateTaker: taker}
 	trader := trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker)
 	return &tradingAPI{
 		handler: api.New(cfg, store, prices, trader, logger),
@@ -168,6 +244,54 @@ func (a *tradingAPI) setPrice(t *testing.T, price float64) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("price cache never observed %v", price)
+}
+
+// setSymbolPrice 設定單一標的價格並等快取觀察到（setPrice 只動 BTCUSDT 全域價）。
+func (a *tradingAPI) setSymbolPrice(t *testing.T, symbol string, price float64) {
+	t.Helper()
+	a.source.setSymbol(symbol, price)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := a.prices.GetPrice(context.Background(), market.Crypto, symbol)
+		if err == nil && got.Price == price {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("price cache never observed %s %v", symbol, price)
+}
+
+// dropSymbolPrice 讓單一標的缺價並等快取失效；之後該標的的 GetPrice 會等到 timeout。
+func (a *tradingAPI) dropSymbolPrice(t *testing.T, symbol string) {
+	t.Helper()
+	a.source.dropSymbol(symbol)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		probe, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		_, err := a.prices.GetPrice(probe, market.Crypto, symbol)
+		cancel()
+		if err != nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("price cache never went stale for %s", symbol)
+}
+
+// restoreSymbolPrice 恢復單一標的（以給定價格重新送價）並等快取觀察到。
+func (a *tradingAPI) restoreSymbolPrice(t *testing.T, symbol string, price float64) {
+	t.Helper()
+	a.source.restoreSymbol(symbol)
+	a.source.setSymbol(symbol, price)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := a.prices.GetPrice(context.Background(), market.Crypto, symbol)
+		if err == nil && got.Price == price {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("price cache never observed restored %s %v", symbol, price)
 }
 
 // stallPrices parks the price stream and returns once the cache is stale, so the next

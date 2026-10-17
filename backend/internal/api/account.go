@@ -7,6 +7,7 @@ import (
 
 	"backend/internal/account"
 	"backend/internal/database"
+	"backend/internal/trading"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,16 +22,32 @@ type accountView struct {
 	Status         string    `json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 	Token          string    `json:"token,omitempty"`
+
+	// max_dd 風控欄位：未啟用的帳號全部是 null，不能顯示成 0。
+	// 兩個 derived 欄位由 trading.DrawdownLimits 算出，handler 不自行定義公式。
+	MaxDD               *float64   `json:"max_dd"`
+	MaxDDBaselineEquity *float64   `json:"max_dd_baseline_equity"`
+	MaxDDStoppedAt      *time.Time `json:"max_dd_stopped_at"`
+	MaxDDLossLimit      *float64   `json:"max_dd_loss_limit"`
+	MaxDDEquityFloor    *float64   `json:"max_dd_equity_floor"`
 }
 
 func viewAccount(a *database.Account, includeToken bool) accountView {
 	v := accountView{
-		ID:             a.ID,
-		UserName:       a.UserName,
-		InitialBalance: a.InitialBalance,
-		Balance:        a.Balance,
-		Status:         a.Status,
-		CreatedAt:      a.CreatedAt.UTC(),
+		ID:                  a.ID,
+		UserName:            a.UserName,
+		InitialBalance:      a.InitialBalance,
+		Balance:             a.Balance,
+		Status:              a.Status,
+		CreatedAt:           a.CreatedAt.UTC(),
+		MaxDD:               a.MaxDD,
+		MaxDDBaselineEquity: a.MaxDDBaselineEquity,
+		MaxDDStoppedAt:      a.MaxDDStoppedAt,
+	}
+	if a.MaxDD != nil && a.MaxDDBaselineEquity != nil {
+		limits := trading.DrawdownLimits(a.InitialBalance, *a.MaxDDBaselineEquity, *a.MaxDD)
+		v.MaxDDLossLimit = &limits.LossLimit
+		v.MaxDDEquityFloor = &limits.EquityFloor
 	}
 	if includeToken {
 		v.Token = a.Token
@@ -39,8 +56,9 @@ func viewAccount(a *database.Account, includeToken bool) accountView {
 }
 
 type createAccountRequest struct {
-	UserName       string  `json:"user_name"`
-	InitialBalance float64 `json:"initial_balance"`
+	UserName       string   `json:"user_name"`
+	InitialBalance float64  `json:"initial_balance"`
+	MaxDD          *float64 `json:"max_dd"`
 }
 
 func (s *Server) createAccount(c *gin.Context) {
@@ -53,6 +71,7 @@ func (s *Server) createAccount(c *gin.Context) {
 	acc, err := s.accounts.Create(c.Request.Context(), account.CreateInput{
 		UserName:       req.UserName,
 		InitialBalance: req.InitialBalance,
+		MaxDD:          req.MaxDD,
 	})
 	if err != nil {
 		s.writeAccountError(c, err)
@@ -128,6 +147,17 @@ func (s *Server) resetAccountToken(c *gin.Context) {
 	c.JSON(http.StatusOK, viewAccount(acc, true))
 }
 
+// resumeAccountTrading 是 USER 解除 max_dd 風控停止（規格 §2）。
+// 不收任何欄位：balance、baseline、新百分比都不能由 payload 指定。
+func (s *Server) resumeAccountTrading(c *gin.Context) {
+	acc, err := s.accounts.ResumeTrading(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		s.writeAccountError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, viewAccount(acc, true))
+}
+
 // selfAccount 是 Account Token 的帳務總覽。
 // 不回傳 token：規格 §1 規定只有 USER 可以查看 Account Token。
 func (s *Server) selfAccount(c *gin.Context) {
@@ -170,11 +200,16 @@ func (s *Server) writeAccountError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, database.ErrNotFound):
 		fail(c, http.StatusNotFound, "not_found", "帳號不存在")
+	case errors.Is(err, account.ErrTradingNotStopped):
+		fail(c, http.StatusConflict, "trading_not_stopped", err.Error())
 	case errors.Is(err, account.ErrNameTaken):
 		fail(c, http.StatusConflict, "name_taken", err.Error())
+	case errors.Is(err, account.ErrLiquidationPending):
+		fail(c, http.StatusConflict, "liquidation_pending", err.Error())
 	case errors.Is(err, account.ErrInvalidName),
 		errors.Is(err, account.ErrInvalidBalance),
-		errors.Is(err, account.ErrInvalidStatus):
+		errors.Is(err, account.ErrInvalidStatus),
+		errors.Is(err, account.ErrInvalidMaxDD):
 		fail(c, http.StatusBadRequest, "invalid_request", err.Error())
 	default:
 		s.log.Errorf(c.Request.Context(), "帳號操作失敗: %v", err)

@@ -170,3 +170,41 @@ func TestDevelopmentTokenUniquenessAndPrefixRemainCompatibleWithoutKey(t *testin
 		t.Fatalf("duplicate development token create error = %v", err)
 	}
 }
+
+func TestMaxDDAccountWritesKeepEncryptedTokensUsable(t *testing.T) {
+	store, err := OpenSQLite(t.TempDir() + "/max-dd.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.tokenKey = []byte("0123456789abcdef0123456789ABCDEF")
+	if err := store.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	plaintext := "at_max_dd_token_survives_risk_writes"
+	maxDD, baseline := 10.0, 100.0
+	account := &Account{ID: "acc_max_dd", UserName: "max-dd", Token: plaintext, InitialBalance: 100, Balance: 100,
+		Status: AccountActive, MaxDD: &maxDD, MaxDDBaselineEquity: &baseline}
+	if err := store.CreateAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := store.ListMaxDDAccounts(ctx)
+	if err != nil || len(listed) != 1 || listed[0].Token != plaintext {
+		t.Fatalf("ListMaxDDAccounts = %#v, %v", listed, err)
+	}
+	if err := store.Tx(ctx, func(tx *Store) error {
+		loaded, err := tx.AccountByID(ctx, account.ID)
+		if err != nil {
+			return err
+		}
+		loaded.Balance = 89
+		return tx.SaveAccount(ctx, loaded)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := store.AccountByToken(ctx, plaintext)
+	if err != nil || resolved.Token != plaintext || resolved.Balance != 89 || resolved.MaxDD == nil || *resolved.MaxDD != maxDD {
+		t.Fatalf("token after max_dd write = %#v, %v", resolved, err)
+	}
+}

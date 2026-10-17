@@ -49,6 +49,15 @@ func (s *Service) SetStops(ctx context.Context, accountID, positionID string, in
 		return nil, ErrNoStopChange
 	}
 
+	// 已風控停止的帳號一律 409（規格 §4），即使部位已被系統強平而不再存在；
+	// 交易內的重新讀取仍會再檢查一次（權威檢查）。
+	account, err := s.store.AccountByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if account.MaxDDStoppedAt != nil {
+		return nil, ErrMaxDDStopped
+	}
 	pos, err := s.store.PositionByID(ctx, accountID, positionID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
@@ -75,6 +84,13 @@ func (s *Service) SetStops(ctx context.Context, accountID, positionID string, in
 	err = s.store.Tx(ctx, func(tx *database.Store) error {
 		if err := tx.LockAccount(ctx, accountID); err != nil {
 			return err
+		}
+		account, err := tx.AccountByID(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if account.MaxDDStoppedAt != nil {
+			return ErrMaxDDStopped
 		}
 		pos, err = tx.PositionByID(ctx, accountID, positionID)
 		if err != nil {

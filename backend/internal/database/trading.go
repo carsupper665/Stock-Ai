@@ -66,6 +66,16 @@ func (s *Store) OpenLimitOrders(ctx context.Context) ([]Order, error) {
 	return orders, translate(err)
 }
 
+// OpenOrdersForAccount 回傳單一帳號的全部未成交掛單（不分頁）。
+// 風控停止要撤掉該帳號每一張掛單，不能用 UI 分頁的 limit。
+func (s *Store) OpenOrdersForAccount(ctx context.Context, accountID string) ([]Order, error) {
+	var orders []Order
+	err := s.db.WithContext(ctx).
+		Where("account_id = ? AND status = ?", accountID, OrderOpen).
+		Order("created_at asc").Find(&orders).Error
+	return orders, translate(err)
+}
+
 // PositionsWithStops 回傳所有設定了停損或停利的部位。
 func (s *Store) PositionsWithStops(ctx context.Context) ([]Position, error) {
 	var positions []Position

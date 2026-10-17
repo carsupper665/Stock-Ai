@@ -16,7 +16,10 @@ func (s *Service) settle(ctx context.Context, tx *database.Store, order *databas
 	if err != nil {
 		return err
 	}
-	if !account.Active() {
+	// 只有 max_dd 系統全平這個內部 reduce-only 分支可以繞過行政 disabled 與
+	// 平倉費用餘額檢查：費用照實扣、允許最後 Balance 為負、不 clamp（規格 §5.6）。
+	systemMaxDD := order.ReduceOnly && order.Trigger == TriggerMaxDD
+	if !systemMaxDD && !account.Active() {
 		return ErrAccountDisabled
 	}
 
@@ -49,13 +52,15 @@ func (s *Service) settle(ctx context.Context, tx *database.Store, order *databas
 		newMargin = updated.Margin
 	}
 
-	locked, err := tx.LockedMargin(ctx, order.AccountID)
-	if err != nil {
-		return err
-	}
-	available := account.Balance - locked
-	if cost := (newMargin - oldMargin) + fee; cost > available+qtyEpsilon {
-		return fmt.Errorf("%w：需要 %.8f，可用 %.8f", ErrInsufficient, cost, available)
+	if !systemMaxDD {
+		locked, err := tx.LockedMargin(ctx, order.AccountID)
+		if err != nil {
+			return err
+		}
+		available := account.Balance - locked
+		if cost := (newMargin - oldMargin) + fee; cost > available+qtyEpsilon {
+			return fmt.Errorf("%w：需要 %.8f，可用 %.8f", ErrInsufficient, cost, available)
+		}
 	}
 
 	if err := s.persistPosition(ctx, tx, order, pos, updated); err != nil {

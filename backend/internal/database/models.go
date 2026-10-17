@@ -34,6 +34,10 @@ const (
 	LedgerOrderRejected = "order_rejected"
 	LedgerOrderCanceled = "order_canceled"
 	LedgerStopsUpdated  = "stops_updated"
+	// LedgerMaxDDTriggered 是 max_dd 風控停止事件：每輪最多一筆，與停止標記同 transaction 提交。
+	LedgerMaxDDTriggered = "max_dd_triggered"
+	// LedgerMaxDDResumed 是 USER 解除 max_dd 停止事件：與新 baseline、清除標記同 transaction 提交。
+	LedgerMaxDDResumed = "max_dd_resumed"
 )
 
 // Source 是造成帳戶變動的 Agent Session／Run。非 Agent 操作與舊資料為零值，
@@ -65,6 +69,15 @@ type Account struct {
 	Status         string  `gorm:"size:16;not null;index"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+
+	// max_dd 風控三欄皆為 nullable：null 代表未啟用，舊戶頭遷移後維持 null。
+	// MaxDD 是百分比（0 < value <= 100），不是金額；0 不是「停用」。
+	MaxDD *float64 `gorm:"max_dd"`
+	// MaxDDBaselineEquity 是本輪虧損的起算 equity。啟用時必有值：
+	// 首次建立等於 initial_balance，管理者解除後等於全平後的 equity。
+	MaxDDBaselineEquity *float64 `gorm:"max_dd_baseline_equity"`
+	// MaxDDStoppedAt 非 null 代表已觸發風控停止；非 null 時不能普通下單。
+	MaxDDStoppedAt *time.Time `gorm:"max_dd_stopped_at"`
 }
 
 func (a *Account) Active() bool {

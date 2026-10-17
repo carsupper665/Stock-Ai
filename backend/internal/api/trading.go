@@ -333,6 +333,12 @@ func (s *Server) writeTradingError(c *gin.Context, err error) {
 		fail(c, http.StatusUnprocessableEntity, "insufficient_balance", err.Error())
 	case errors.Is(err, trading.ErrAccountDisabled):
 		fail(c, http.StatusForbidden, "account_disabled", err.Error())
+	case errors.Is(err, trading.ErrMaxDDStopped):
+		fail(c, http.StatusConflict, "max_dd_stopped", err.Error())
+	case errors.Is(err, trading.ErrMaxDDInconsistent):
+		fail(c, http.StatusConflict, "max_dd_inconsistent", err.Error())
+	case errors.Is(err, trading.ErrRiskPriceUnavailable):
+		fail(c, http.StatusServiceUnavailable, "risk_price_unavailable", err.Error())
 	case errors.Is(err, trading.ErrOrderNotOpen):
 		fail(c, http.StatusConflict, "order_not_open", err.Error())
 	case errors.Is(err, market.ErrEmptySymbol), errors.Is(err, market.ErrUnknownMarket):

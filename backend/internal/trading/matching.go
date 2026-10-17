@@ -82,7 +82,53 @@ func (e *Engine) Tick(ctx context.Context) TickResult {
 		return result
 	}
 
-	prices := e.collectPrices(ctx, orders, positions)
+	// max_dd 風控候選（規格 §6）：設定過 max_dd 的帳號。它們的部位（含沒有
+	// 停損停利的）一併納入取價；風控評估先於限價／停損停利撮合，讓停止標記
+	// 先於本輪任何成交生效。未設定 max_dd 的帳號完全不走這條路徑。
+	candidates, err := e.svc.store.ListMaxDDAccounts(ctx)
+	if err != nil {
+		e.warn(ctx, "載入風控帳號失敗: %v", err)
+		result.Errors++
+		return result
+	}
+	pricePositions := positions
+	for i := range candidates {
+		candidatePositions, err := e.svc.store.ListPositions(ctx, candidates[i].ID, "")
+		if err != nil {
+			e.warn(ctx, "載入風控帳號 %s 的部位失敗: %v", candidates[i].ID, err)
+			result.Errors++
+			continue
+		}
+		pricePositions = append(pricePositions, candidatePositions...)
+	}
+
+	prices := e.collectPrices(ctx, orders, pricePositions)
+
+	for i := range candidates {
+		closed, err := e.svc.enforceMaxDD(ctx, candidates[i].ID, prices)
+		result.Closed += closed
+		if err != nil {
+			if errors.Is(err, ErrRiskPriceUnavailable) {
+				// 缺現價（E1）：跳過這輪、下輪重試，不擋其他帳號。
+				e.warn(ctx, "風控帳號 %s 缺少現價，本輪跳過風控評估", candidates[i].ID)
+				continue
+			}
+			e.warn(ctx, "風控帳號 %s 評估失敗: %v", candidates[i].ID, err)
+			result.Errors++
+		}
+	}
+
+	// 記錄 sweep 後的停止狀態（規格 §6.3 本輪末清理用）：sweep 已處理（含已
+	// 停止或已嘗試清倉）的帳號，限價成交階段之後不再重做，避免重複清倉
+	// 嘗試與重複計數錯誤。
+	stoppedAfterSweep := make(map[string]bool, len(candidates))
+	for i := range candidates {
+		acc, err := e.svc.store.AccountByID(ctx, candidates[i].ID)
+		if err != nil {
+			continue
+		}
+		stoppedAfterSweep[candidates[i].ID] = acc.MaxDDStoppedAt != nil
+	}
 
 	for i := range orders {
 		order := &orders[i]
@@ -90,13 +136,22 @@ func (e *Engine) Tick(ctx context.Context) TickResult {
 		if !ok || !limitTriggered(order, price) {
 			continue
 		}
-		filled, err := e.svc.fillOpenOrder(ctx, order.AccountID, order.ID, order.Price)
+		filled, err := e.svc.fillOpenOrder(ctx, order.AccountID, order.ID, order.Price, prices)
 		switch {
 		case err != nil:
+			if errors.Is(err, ErrRiskPriceUnavailable) {
+				// 持倉缺價（E1）：本輪無法完整評估風險，跳過成交、下輪重試；
+				// 與風控 sweep 同樣視為帳號自己的狀態，不是引擎故障。
+				e.warn(ctx, "限價單 %s 缺現價無法完成風險評估，本輪跳過", order.ID)
+				continue
+			}
 			e.warn(ctx, "限價單 %s 成交失敗: %v", order.ID, err)
 			result.Errors++
 		case filled == nil:
 			// 載入後已不是 open，這輪不處理。
+		case filled.Status == database.OrderCanceled:
+			// 停止標記在快照載入後寫入、precheck 已撤單：不得算成 Filled（規格 §6）。
+			e.info(ctx, "限價單 %s 被風控撤單，不算成交", order.ID)
 		case filled.Status == database.OrderRejected:
 			e.info(ctx, "限價單 %s 觸發但被拒絕: %s", order.ID, filled.RejectReason)
 			result.Rejected++
@@ -118,7 +173,7 @@ func (e *Engine) Tick(ctx context.Context) TickResult {
 		}
 		// 快照只決定要不要嘗試；數量與來源由 closeAt 在交易內以持久化部位為準。
 		if _, err := e.svc.closeAt(ctx, pos.AccountID, pos.ID, 0, price, database.Source{}, reason); err != nil {
-			if isBusinessRejection(err) || errors.Is(err, ErrStopInactive) {
+			if isBusinessRejection(err) || errors.Is(err, ErrStopInactive) || errors.Is(err, ErrMaxDDStopped) {
 				// 部位在這一輪之間被平掉、stop 被改掉，或帳號處於不可交易狀態：
 				// 都是帳號自己的狀態，不是引擎故障，下一輪重新評估。
 				continue
@@ -129,6 +184,30 @@ func (e *Engine) Tick(ctx context.Context) TickResult {
 		}
 		e.info(ctx, "部位 %s 觸發 %s，於 %v 平倉 %s %v", pos.ID, reason, price, pos.Symbol, pos.Quantity)
 		result.Closed++
+	}
+
+	// 本輪末風控清理（規格 §6.3）：限價成交的 postcheck 可能在 sweep 之後才
+	// 提交停止標記（成交費用造成越線）；只對「sweep 後仍未停止、現在已停止」
+	// 的帳號在本輪完成強制清倉。
+	for i := range candidates {
+		if stoppedAfterSweep[candidates[i].ID] {
+			continue
+		}
+		acc, err := e.svc.store.AccountByID(ctx, candidates[i].ID)
+		if err != nil {
+			e.warn(ctx, "風控帳號 %s 本輪末清理載入失敗: %v", candidates[i].ID, err)
+			result.Errors++
+			continue
+		}
+		if acc.MaxDDStoppedAt == nil {
+			continue // 本輪沒有新停止
+		}
+		closed, err := e.svc.liquidateMaxDD(ctx, candidates[i].ID, prices)
+		result.Closed += closed
+		if err != nil {
+			e.warn(ctx, "風控帳號 %s 本輪末清理失敗: %v", candidates[i].ID, err)
+			result.Errors++
+		}
 	}
 
 	return result

@@ -69,6 +69,21 @@ func (s *Store) SaveAccount(ctx context.Context, account *Account) error {
 	return translate(s.db.WithContext(ctx).Save(stored).Error)
 }
 
+// ListMaxDDAccounts 回傳設定過 max_dd 的帳號（含已停止的），供撮合引擎做風控掃描。
+// 未設定（null）的帳號不在其中，維持原有快速路徑。
+func (s *Store) ListMaxDDAccounts(ctx context.Context) ([]Account, error) {
+	var accounts []Account
+	if err := s.db.WithContext(ctx).Where("max_dd IS NOT NULL").Order("created_at asc").Find(&accounts).Error; err != nil {
+		return nil, translate(err)
+	}
+	for index := range accounts {
+		if err := s.decryptAccount(&accounts[index]); err != nil {
+			return nil, err
+		}
+	}
+	return accounts, nil
+}
+
 // UpdateAccountFields only writes fields owned by Account administration. Trading balance and
 // token rotation are separate mutations and must not be overwritten by a stale Account value.
 func (s *Store) UpdateAccountFields(ctx context.Context, id string, userName, status *string) error {
