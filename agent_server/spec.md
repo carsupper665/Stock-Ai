@@ -1056,51 +1056,24 @@ LLM 不填。
 只有：
 
 ```text
+status
+output
 summary
-candidate memories
 ```
 
-屬於 Agent 語意輸出。
+屬於 Agent 語意輸出。記憶由 Agent 在 Run 中用記憶櫃工具寫入（§32）。
 
 ---
 
-# 28. Memory Finalization Flow v1
+# 28. Run Finalization Flow
 
-每個正常完成（`finish_reason:"stop"`）的 Run 使用以下 finalization 流程：
-
-```text
-Agent Loop 完成
-↓
-Agent 強制產生很短 Run Summary
-↓
-Server 使用純程式碼過濾 Tool Use / Tool Return
-↓
-Agent 提出 Candidate Memories
-↓
-Server 補齊 Metadata
-↓
-Save
-↓
-Run End
-```
+每個正常完成（`finish_reason:"stop"`）的 Run 只產生 `status`、`output` 與短 `summary`。
+`summary` 是下一個 Run 的基礎資訊（`recent_run_summary`）。Memory 不在 finalization 寫入，
+而是在 Run 中任何時候用記憶櫃工具（§32）存取，所以 Run 失敗或被硬停時，已存的記憶仍保留。
 
 `failed`、`interrupted`、hard stop、dependency failure、budget exhaustion 與非正常
-finish reason 不執行 Summary 或 Memory finalization；其 `summary` 必須為 `null`，並保存
-明確的 terminal reason。取消後不得再發出 summary/model/tool request。Tickets 14–18
-只實作正常完成 Run 的短 Summary；Candidate Memory、filter 與 Save 留待後續票實作。
-
-第一版：
-
-> 不使用額外 Memory Compactor Model。
-
-未來 Memory 大量累積後才考慮：
-
-```text
-merge
-deduplicate
-compress
-archive
-```
+finish reason 不產生 summary；其 `summary` 必須為 `null`，並保存明確的 terminal reason。
+取消後不得再發出 summary/model/tool request。
 
 ---
 
@@ -1135,95 +1108,52 @@ Critical failure
 
 ---
 
-# 30. Persistent Memory
+# 30. Memory Cabinet
 
-Candidate Memory 由 Agent 提出。
+每個 Session 有一個只有自己的 Agent 看得到的記憶櫃，跨 Run 保留；其他 Account 看不到。
+User 可以在前端瀏覽與刪除，不可建立或修改。
 
-不是每個 Run 都一定有 Memory。
-
-Memory Metadata v1：
-
-```text
-id
-session_id
-run_id
-
-type
-summary
-content
-
-importance
-
-run_start_at
-run_end_at
-
-is_expired
-```
-
-其中：
-
-### summary
-
-非常重要。
-
-作為 LLM 的快速 Memory Index。
-
-LLM 先看 Summary 判斷：
-
-> 值不值得讀全文？
-
-### importance
-
-簡單等級即可，例如：
+一則記憶：
 
 ```text
-1
-2
-3
+id              系統自動，整數
+title           1–100 字
+msg             1–800 字
+bring_back      是否在每個 Run 開始時自動帶入全文
+created_at      系統自動
+updated_at      系統自動（不回給 LLM）
+created_run_id  系統自動（不回給 LLM）
+updated_run_id  系統自動（不回給 LLM）
 ```
 
-### is_expired
+限制：
 
-Soft Delete / Obsolete Flag。
-
-Agent 可以標記舊 Memory 不再有效。
-
-User 也可以刪除 Memory。
-
-實際行為：
-
-```text
-is_expired = true
-```
-
-不立即物理刪除。
+- 一個 Session 最多 60 則。滿了時 `memory_save` 回 `MEMORY_FULL`，提示改用 `memory_edit`；
+  Agent 沒有刪除工具。
+- 所有 `bring_back=true` 記憶的 `msg` 合計最多 3000 字；超過時寫入回 `BRING_BACK_LIMIT`。
+- 交易、下單、持倉、價格不是記憶：交易已在 Ledger，即時狀態來自工具。
 
 ---
 
 # 31. Memory Progressive Read
 
-Agent 不應每次把所有 Memory 全讀入 Context。
-
-流程：
+每個 Run 開始時，context 帶入：
 
 ```text
-Memory Metadata
-↓
-Memory Content
-↓
-Run History
+current_time         目前 UTC 時間
+recent_run_summary   上一個 completed Run 的 summary（server_recovery 除外）
+memory_index         最新 10 則記憶的標籤（id、title、created_at）
+bring_back_memories  所有 bring_back 記憶的 id、title、msg
 ```
 
-例如：
+Agent 先看標籤，再決定要不要打開：
 
 ```text
-memory_search("BTC breakout")
+memory_list(query="BTC 假突破")
 ↓
-Memory #12
-summary = "Weak-volume breakout failed."
-run_id = 18
+#12 "BTC 假突破教訓"
 ↓
-memory_read(12)
+memory_get(12)
 ↓
 需要更多細節
 ↓
@@ -1234,29 +1164,21 @@ get_run_history(run_id=18)
 
 # 32. Memory Tools
 
-Agent 可使用：
-
 ```text
-memory_list
-memory_search
-memory_read
-get_run_history
+memory_list      標籤列表（id、title、created_at），新到舊，最多 20 則
+memory_get       依 id 讀全文（id、title、msg、bring_back、created_at）
+memory_save      存一則（title、msg、bring_back 選填，預設 false）
+memory_edit      依 id 改 title、msg、bring_back（至少一項）
+get_run_history  讀一個已結束 Run 的歷史
 ```
 
-不提供：
+`memory_list` 篩選參數皆選填：`query`（標題關鍵字，不分大小寫）、`within_hours`、
+`from`／`to`（`YYYY-MM-DD` 代表整個 UTC 日，或 RFC3339）、`before_id`／`after_id`、
+`limit`（1–20，預設 20）。結果另附 `stored`（目前則數）與 `capacity`（60）。
 
-```text
-memory_write
-```
-
-Persistent Memory 由 Run Finalization 的 Candidate Memory 流程建立。
-
-User：
-
-```text
-可 Delete Memory
-不可 Create Memory
-```
+`memory_save` 與 `memory_edit` 是 mutation：在 Runtime mutex 下單一 transaction 執行，
+且只在該 Run 仍 running 時寫入，否則回 `RUN_NOT_RUNNING`；上下文壓縮會保留其結果。
+不存在或屬於其他 Session 的 id 一律回 `MEMORY_NOT_FOUND`。
 
 ---
 
@@ -1468,24 +1390,27 @@ history_file_index
 # 39. memories Table
 
 ```text
-id
+id INTEGER PRIMARY KEY AUTOINCREMENT
 session_id
-run_id
-
-type
-summary
-content
-
-importance
-
-run_start_at
-run_end_at
-
-is_expired
-
+title
+msg
+bring_back
 created_at
 updated_at
+created_run_id
+updated_run_id
 ```
+
+`created_at`／`updated_at` 使用固定寬度 UTC 格式 `2006-01-02T15:04:05.000Z`，讓時間範圍
+篩選可以直接比較字串。
+
+`run_memories(session_id, run_id, memory_id)` 獨立記錄每個 Run 建立過的記憶 id，
+`memory_save` 在同一個 transaction 寫入；刪除記憶不會移除這筆紀錄。History 的
+`memory_ids` 只從這張表讀取。
+
+舊版 candidate-memory 表（含 `candidate_index` 欄位）在啟動時改名為 `memories_legacy`
+保留稽核；它的每一列（含已失效）以原本的 `m_…` id 寫入 `run_memories`，未失效的列再複製進記憶櫃：`summary` 變 `title`、`content` 變 `msg`（各自截到
+上限），`bring_back=false`。
 
 ---
 
@@ -1716,18 +1641,15 @@ Frontend 下載後自行 Cache / Render。
 # 48. Memory APIs
 
 ```http
-GET /api/v1/sessions/{session_id}/memories?page={page}
+GET /api/v1/sessions/{session_id}/memories
 
 GET /api/v1/sessions/{session_id}/memories/{memory_id}
 
 DELETE /api/v1/sessions/{session_id}/memories/{memory_id}
 ```
 
-DELETE：
-
-```text
-is_expired = true
-```
+列表不分頁、不收 query 參數，回整個記憶櫃（新到舊）與 `capacity`，每則不含 `msg`。
+Detail 回全文與所有系統欄位。DELETE 是物理刪除，回被刪除的記錄。
 
 不提供 User：
 
@@ -3073,8 +2995,8 @@ above. This is focused verification; it is not the final full-suite or series-re
 
 # 66. Implemented Tickets 32–35 Run History and Memory Contract
 
-Tickets 32–35 add durable, downloadable Run History and Session-owned Memory without a
-second runtime, model, compactor, vector database or free-form write path. SQLite remains the
+Tickets 32–35 add durable, downloadable Run History and a Session-owned memory cabinet (§30)
+without a second runtime, model, compactor or vector database. SQLite remains the
 authority for Run and Memory state. History JSON is a derived durable projection whose index
 is stored in SQLite and whose files are repaired from terminal Runs at startup.
 
@@ -3082,43 +3004,26 @@ is stored in SQLite and whose files are repaired from terminal Runs at startup.
 
 A normal completion consumes only the existing counted Generate decision. It requires
 `finish_reason:"stop"`, no Tool calls, and `content` containing exactly one JSON object with
-all four fields and no unknown/trailing data:
+no unknown/trailing data:
 
 ```json
-{
-  "output": "human-readable final decision",
-  "summary": "short durable summary",
-  "candidate_memories": [
-    {"type":"risk_rule","summary":"Require confirmation.","content":"Do not chase without volume.","importance":3}
-  ],
-  "expire_memories": [
-    {"id":"m_0123456789abcdef0123456789abcdef","reason":"superseded by newer evidence"}
-  ]
-}
+{"status":"completed","output":"human-readable final decision","summary":"short summary for the next Run"}
 ```
 
 `output` and `summary` are trimmed nonempty strings; summary is at most 500 Unicode
-characters. Each array has at most 20 entries. Candidate fields are all required and are the
-only accepted fields: type is 1–64 Unicode characters, summary is 1–500, content is 1–65536
-UTF-8 bytes, and importance is integer 1, 2 or 3. Expiration IDs must have the Server-issued
-`m_` plus 32 lowercase hexadecimal shape, must be unique in the decision, and their trimmed
-reasons are 1–500 Unicode characters. The Server, never the model, creates Memory IDs and
-assigns Session/Run ownership and timestamps.
+characters. `status` is optional and is `completed` or `failed`. The retired
+`candidate_memories` and `expire_memories` fields are unknown fields.
 
-Plain final text, missing/null fields, unknown fields, malformed/trailing JSON, and invalid
-candidates trigger a tool-disabled repair request within the same six-attempt terminal
-allowance. Exhaustion fails the Run as `FINALIZATION_INVALID`. Malformed or
-foreign/nonexistent expiration references fail without retrying the completion transaction. A finalization storage
-failure follows the existing persistence-fault path and cannot expose a completed Run or a
-partial candidate/expiration set. The completed Run update, candidate inserts, requested
-expirations, History index update and staged History rewrite are one logical commit. The
-`UNIQUE(session_id,run_id,candidate_index)` key and `status='running'` completion predicate
-make retries non-duplicating.
+Plain final text, missing/null fields, unknown fields and malformed/trailing JSON trigger a
+tool-disabled repair request within the same six-attempt terminal allowance. Exhaustion fails
+the Run as `FINALIZATION_INVALID`. A finalization storage failure follows the existing
+persistence-fault path and cannot expose a completed Run. The completed Run update, History
+index update and staged History rewrite are one logical commit.
 
 Exhausted Gateway/model/dependency retries, explicit user stop, Runtime
 interruption and every other failed/interrupted path skip this finalization shape entirely.
-They retain already persisted progress and reason, keep `summary:null` and `output:null`, and
-publish or expire no Memory.
+They retain already persisted progress and reason and keep `summary:null` and `output:null`.
+Memories the Run already saved stay in the cabinet.
 
 ## 66.2 Fixed History shards, index and repair
 
@@ -3203,74 +3108,43 @@ late paths can leave an already-written creator shard stale. This is an explicit
 gate, not a read-time repair or background queue.
 Each Run lists the IDs of Memories created by that Run, including later-expired records.
 
-## 66.4 Memory records and progressive Run context
+## 66.4 Memory cabinet records and Run context
 
 A Memory detail contains:
 
 ```json
-{"id":"m_…","session_id":"s_…","run_id":1,"type":"risk_rule","summary":"Require confirmation.","content":"Do not chase without volume.","importance":3,"run_start_at":"…","run_end_at":"…","is_expired":false,"expired_at":null,"expired_source":null,"expired_run_id":null,"expiration_reason":null,"created_at":"…","updated_at":"…"}
+{"id":12,"session_id":"s_…","title":"BTC 假突破教訓","msg":"量能不足的突破不要追","bring_back":true,"created_at":"2026-10-18T01:02:03.000Z","updated_at":"2026-10-18T01:02:03.000Z","created_run_id":4,"updated_run_id":4}
 ```
 
-At the start of a Run, the model context adds only the latest earlier completed Run's
-`recent_run_summary:{run_id,summary}` and at most 20 unexpired `memory_index` entries ordered
-by importance descending, then Run ID descending, then ID. An index entry has only
-`id,run_id,type,summary,importance,is_expired`; it has no full content. A completed prior Run
-creates no restart context when stop cleared no Event facts; when clearance facts exist, that
-restart context contains only prior Run identity/status plus those facts. It never repeats the
-completed output or raw model progress, so candidate contents cannot leak around this
-progressive boundary. Interrupted factual restart progress remains unchanged.
+Each Run's initial context adds `current_time`, the latest earlier completed Run's
+`recent_run_summary:{run_id,summary}` (not for `server_recovery`), `memory_index` with the 10
+newest labels `{id,title,created_at}`, and `bring_back_memories` with `{id,title,msg}` of every
+pinned memory. The History shard's `memory_ids` lists the ids a Run created, read from
+`run_memories` (§39): decimal strings for cabinet memories and the original `m_…` ids for
+migrated legacy memories. Deleting a memory or rewriting/repairing a shard never changes a
+Run's list. The bring_back budget counts Unicode characters in Go, like the length validation,
+because SQLite `length()` stops at the first NUL character.
 
 ## 66.5 Agent Memory and History tools
 
-The four tools use the current Run cancellation context, consume the ordinary Tool budget,
-are traced through the existing loop, and never accept Session IDs or paths:
+The cabinet tools (§32) use the current Run cancellation context for reads, consume the
+ordinary Tool budget, are traced through the existing loop, and never accept Session IDs or
+paths. Arguments are exact JSON objects with no unknown fields; malformed arguments, an empty
+edit, a title over 100 or msg over 800 characters, and a list limit above 20 are
+`INVALID_TOOL_ARGUMENTS`. `get_run_history({"run_id":N})` resolves the current Session's
+indexed shard internally, validates it, then returns only that selected terminal Run object;
+an unknown/nonterminal prior Run is `RUN_NOT_FOUND`, and missing/corrupt History is
+`HISTORY_UNAVAILABLE` and latches the persistence fault. A user stop/Runtime close that
+cancels a local read yields `TOOL_INTERRUPTED` and is not a persistence fault.
 
-- `memory_list({"limit":N})`: `limit` defaults to 20 and is 1–100; returns
-  `{"ok":true,"result":{"memories":[metadata…]}}`.
-- `memory_search({"query":"text","limit":N})`: query is trimmed and nonempty; minimal SQL
-  substring matching searches only type and summary, never content, with the same order/cap.
-- `memory_read({"memory_id":"m_…"})`: returns one full unexpired Memory from the current
-  Session.
-- `get_run_history({"run_id":N})`: resolves the current Session's indexed shard internally,
-  validates it, then returns only that selected terminal Run object.
+## 66.6 User Memory HTTP
 
-Arguments are exact JSON objects with no unknown fields. Cross-Session, nonexistent and
-expired Memory reads are indistinguishable `MEMORY_NOT_FOUND`; blank search and malformed
-arguments are `INVALID_TOOL_ARGUMENTS`; an unknown/nonterminal prior Run is `RUN_NOT_FOUND`.
-Missing/corrupt History is `HISTORY_UNAVAILABLE` and latches the persistence fault. No Tool
-accepts a filesystem path or returns credentials. A user stop/Runtime close that cancels a
-local Memory/History read yields `TOOL_INTERRUPTED` if a result is observed and does not turn
-that expected cancellation into a persistence fault.
-
-## 66.6 User Memory HTTP and expiration
-
-```http
-GET /api/v1/sessions/{session_id}/memories?page=1&include_expired=false
-GET /api/v1/sessions/{session_id}/memories/{memory_id}
-DELETE /api/v1/sessions/{session_id}/memories/{memory_id}
-```
-
-List pages are fixed at 100 and ordered by importance descending, Run ID descending, then ID.
-They return lifecycle/source metadata but omit `content`; `page` is a positive integer and
-`include_expired` is exactly `true` or `false` (default false). Detail returns content and is
-an audit read, so a directly addressed expired Memory remains visible. Unknown/cross-Session
-IDs return `404 MEMORY_NOT_FOUND`. User POST/PATCH is not provided. Memory audit endpoints
-remain available for soft-deleted Sessions; DELETE only changes an unexpired record.
-
-DELETE is an idempotent soft expiration. Its first successful transition sets
-`is_expired:true`, `expired_at`, `expired_source:"user"`, `expired_run_id:null`, reason
-`"deleted by user"`, and `updated_at`; repeated DELETE returns the existing record without
-rewriting provenance or time. A normal Agent finalization can atomically expire current-
-Session IDs with `expired_source:"agent"`, its Run ID and the supplied reason. Already-expired
-IDs are successful no-ops, so first expiration provenance wins in Agent/User races and no
-operation revives a record. Agent list/search/read and default HTTP lists always exclude
-expired data; `include_expired=true` and detail preserve original content and Run references.
-If any requested expiration is malformed, nonexistent or foreign, the entire finalization—
-including otherwise valid expirations and new candidates—rolls back.
-The DELETE path rechecks Runtime `closed` and latched persistence state after acquiring the
-authoritative Runtime mutex and before beginning SQLite work. A Close/fault race therefore has
-only two outcomes: a fully committed soft expiration, or `503 PERSISTENCE_UNAVAILABLE` with no
-Memory change. Caller-context cancellation remains local `408 REQUEST_CANCELED`.
+See §48. Unknown, non-integer and cross-Session IDs return `404 MEMORY_NOT_FOUND`; any query
+parameter on the list is `400 INVALID_REQUEST`. Memory endpoints remain available for
+soft-deleted Sessions. The DELETE path rechecks Runtime `closed` and latched persistence state
+after acquiring the authoritative Runtime mutex and before beginning SQLite work, so a
+Close/fault race has only two outcomes: a committed delete, or `503 PERSISTENCE_UNAVAILABLE`
+with no change. Caller-context cancellation remains local `408 REQUEST_CANCELED`.
 
 ## 66.7 Reproducible focused verification
 
@@ -3733,24 +3607,20 @@ errors are nonretryable. Usage may remain `null`/unknown.
 ## 67.1 Terminal finalization and Memory validation
 
 Terminal finalization has six total model attempts. Its attempt numbers are monotonic across
-malformed envelopes, transient Generate failures, disabled Tool calls and Memory-reference
-repairs. Transient failures from the preceding decision request do not consume this allowance.
+malformed envelopes, transient Generate failures and disabled Tool calls. Transient failures from the preceding decision request do not consume this allowance.
 A natural malformed final response becomes terminal attempt 1; the sixth valid response may
 complete, while a sixth invalid response fails with `FINALIZATION_INVALID`. Hard stop still
 prevents later progress or completion writes.
 
-Candidate Memory shape errors and nonexistent/cross-Session expiration references are repairable.
-All expiration references are checked in the completion transaction before candidate insertion;
-on a reference error the transaction rolls back, a tool-disabled repair instruction is audited,
-and no Memory is published. SQLite, History filesystem, commit and other persistence failures are
-not model-repairable. Successful Run completion, candidate publication, expirations and History
-staging remain one atomic completion path. No Tool or mutation is automatically replayed.
+SQLite, History filesystem, commit and other persistence failures are not model-repairable.
+Successful Run completion and History staging remain one atomic completion path. No Tool or
+mutation is automatically replayed.
 
 
 ### 明確回報任務失敗
 
 Finalization 可加上 `status`，值只允許 `completed` 或 `failed`；省略時延續既有完成語意。
 模型因必要工具或依賴不可用而無法執行時，必須回報 `status: "failed"`，並在 `output` 說明原因。
-此時 Run 立即標記 `failed`，錯誤為 `TASK_FAILED`，不發佈完成摘要或候選 Memory。
+此時 Run 立即標記 `failed`，錯誤為 `TASK_FAILED`，不發佈完成摘要；Run 中已存的記憶保留。
 正常的無交易決策可以零工具呼叫完成；部署工具驗收另行要求成功的實際工具紀錄。
 Codex 非重試錯誤、失敗回合或沒有工具呼叫的中斷不得正規化成成功回應。

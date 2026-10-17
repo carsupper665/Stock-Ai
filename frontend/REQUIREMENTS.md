@@ -72,7 +72,7 @@ X-08 破壞性操作：
 | stop Session | hard stop：當前 Run 變 `interrupted`、active Event 全清、進行中的模型／Tool 請求取消 | A §10 |
 | 刪帳號 | 留言板作者變 `[deleted]` | B §2；F §10.4 |
 | 重設 Account Token | 舊 token 立即失效，正在用它的 Agent 會斷 | B §1 |
-| 刪 Memory | 標 `is_expired`，Agent 不再看到；不物理刪 | A §30 |
+| 刪 Memory | 直接從記憶櫃移除，Agent 下次就看不到；不可復原 | A §30 |
 | 刪 Event | Agent 不會被通知、不會自動重建；要等它下次醒來自己判斷 | A §16；A §10 不自動 restore 的精神 |
 | 刪／停用 Provider | 用它的 Session 下次叫模型會失敗（`PROVIDER_NOT_FOUND`／`PROVIDER_DISABLED`） | L §22 |
 | 刪／停用 Token、換 secret | 舊 secret 立即失效 | L §12 |
@@ -82,7 +82,8 @@ X-10 分頁：
 | 資料 | 方式 | 來源 |
 |---|---|---|
 | Session | `page`，每頁固定 100；沒有 server 篩選／排序，前端自己 cache、排序、篩選 | A §43 |
-| Run、Memory、Ledger | `page` | A §46、§48、§50 |
+| Run、Ledger | `page` | A §46、§50 |
+| Memory | 不分頁，一次回整個記憶櫃（最多 60 則） | A §48 |
 | 留言 | 游標 `after`／`before`，每次最多 30，`asc`／`desc` | B §15 |
 | 訂單、成交 | 只有 `limit`（預設 50、最多 200、最新在前），沒有游標 | F §10.1 |
 
@@ -194,11 +195,11 @@ X-10 分頁：
 
 | # | 需求 | 來源 |
 |---|---|---|
-| A-28 | 列表：`id` `run_id` `type` `summary` `importance`（1–3）`run_start_at` `run_end_at` `is_expired` `created_at`。`summary` 是索引，列表主要看它 | A §30、§39、§48 |
-| A-29 | 點開看 `content` 全文 | A §48 |
-| A-30 | 刪除 = `is_expired = true`，不物理刪。expired 的要看得出來、要能選擇顯示或隱藏（建議） | A §30、§48 |
-| A-31 | 不可建立、不可修改 | A §32、§48 |
-| A-32 | 從 Memory 跳到產生它的 Run 歷史 | A §31；X-07 |
+| A-28 | 記憶櫃列表：每則只顯示標籤 `#id` `title` `created_at`，`bring_back` 的標「帶入」；顯示已用 `n / 60` 則與帶入則數。一個 Session 最多 60 則，不分頁 | A §30、§48 |
+| A-29 | 點開才載入 `msg` 全文與 `updated_at` | A §48 |
+| A-30 | 刪除直接移除（物理刪除），不可復原 | A §30、§48 |
+| A-31 | 不可建立、不可修改（只有 Agent 能存、能改） | A §32、§48 |
+| A-32 | 從 Memory 跳到建立它、最後修改它的 Run（`created_run_id` `updated_run_id`） | A §31；X-07 |
 
 ### 3.7 Event
 
@@ -294,7 +295,7 @@ X-10 分頁：
 | Run `status` | `running` `completed` `interrupted` `failed` | 進行中、正常結束、被 stop／crash 打斷、超限或錯誤 | A §8 |
 | Run trigger | 見 A-27 | 為什麼醒來 | A §17、§20 |
 | Event `type` | `timer` `price_above` `price_below` `price_cross_above` `price_cross_below` `price_change_pct` | Agent 在等什麼 | A §17 |
-| Memory `importance` | `1` `2` `3` | 越大越重要 | A §30 |
+| Memory `bring_back` | `true` `false` | 每輪 Run 開始時是否自動帶入全文 | A §30 |
 | 帳號 `status` | `active` `disabled` | 能交易、不能交易 | F §10.4 |
 | `market` | `crypto` `stock` | stock 目前 501 | F §10.4 |
 | `product` | `spot` `futures` | | F §10.4 |

@@ -80,7 +80,7 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 				want = append(want, ticket26ExpectedMessage{ID: posted[index].ID, UserName: ticket26SeedDisplayName(index)})
 			}
 			ticket26AssertMessageList(t, messageToolResult(t, request, "cross-first-asc"), want)
-			messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("cross-service message pages verified", "cross-service message pages verified", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+			messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("cross-service message pages verified", "cross-service message pages verified"), "tool_calls": []any{}, "finish_reason": "stop"})
 		}
 	}
 	gateway := httptest.NewServer(http.HandlerFunc(fixture.serveGateway))

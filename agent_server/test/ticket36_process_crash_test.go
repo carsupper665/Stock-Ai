@@ -98,7 +98,7 @@ func TestTicket36ProcessCrashAfterBackendCommitDoesNotReplayOrder(t *testing.T) 
 				"tool_calls": []any{map[string]any{"id": "audit-ledger", "name": "get_ledger", "arguments": map[string]any{"run_id": 1}}},
 			})
 		default:
-			writeFixtureJSON(w, http.StatusOK, finalResponse("recovered after ledger audit", "recovered", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse("recovered after ledger audit", "recovered"))
 		}
 	}))
 	defer gateway.Close()

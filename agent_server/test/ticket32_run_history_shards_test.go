@@ -36,7 +36,7 @@ func TestTicket32HistoryRequestCancellationAfterRunLookupIsLocal(t *testing.T) {
 	release := make(chan struct{})
 	fixture.generate = func(w http.ResponseWriter, request *http.Request) {
 		if generation.Add(1) == 1 {
-			writeFixtureJSON(w, http.StatusOK, finalResponse("history owner", "history owner", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse("history owner", "history owner"))
 			return
 		}
 		close(unrelatedEntered)
@@ -728,7 +728,7 @@ func TestTicket32OHLCVHistoryIsFilteredButModelSeesFullResultAndUsage(t *testing
 		content, _ := last["content"].(string)
 		modelSawMiddle.Store(strings.Contains(content, `1789293660000`))
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content":    finalizationContent("candles retained selectively", "candles retained selectively", nil, nil),
+			"content":    finalizationContent("candles retained selectively", "candles retained selectively"),
 			"tool_calls": []any{}, "finish_reason": "stop",
 			"usage": map[string]any{"input_tokens": 12, "output_tokens": 3, "cached_tokens": nil, "total_tokens": 15},
 		})
@@ -766,7 +766,7 @@ func TestTicket32HistoryIncludesExistingEventLogFacts(t *testing.T) {
 		},
 		func(w http.ResponseWriter, _ *http.Request, _ map[string]any) {
 			writeFixtureJSON(w, http.StatusOK, map[string]any{
-				"content":    finalizationContent("event lifecycle recorded", "event lifecycle recorded", nil, nil),
+				"content":    finalizationContent("event lifecycle recorded", "event lifecycle recorded"),
 				"tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 			})
 		},

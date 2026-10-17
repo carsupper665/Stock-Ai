@@ -26,7 +26,7 @@ func TestTicket15ConcurrentStartCreatesOnePersistentFirstRunThroughGatewayHTTP(t
 		startedOnce.Do(func() { close(generateStarted) })
 		<-releaseGenerate
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("first run complete", "first run complete", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("first run complete", "first run complete"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")
@@ -87,7 +87,7 @@ func TestTicket15ConcurrentStartCreatesOnePersistentFirstRunThroughGatewayHTTP(t
 	systemMessage, _ := messages[0].(map[string]any)
 	systemContent, _ := systemMessage["content"].(string)
 	if systemMessage["role"] != "system" || !strings.HasPrefix(systemContent, "trade carefully\n\n") ||
-		!strings.Contains(systemContent, `{"output":"human-readable final decision","summary":"short summary (max 500 Unicode characters)","candidate_memories":[],"expire_memories":[]}`) {
+		!strings.Contains(systemContent, `{"status":"completed","output":"human-readable final decision","summary":"short summary for the next Run (max 500 Unicode characters)"}`) {
 		t.Fatalf("Gateway context = %v", gatewayRequest["messages"])
 	}
 	if status, _ := runtimeRequest(t, runtime.Handler(), http.MethodPost,
@@ -155,7 +155,7 @@ func TestTicket15DifferentSessionsRunIndependently(t *testing.T) {
 		}
 		<-release
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("independent", "independent", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("independent", "independent"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")

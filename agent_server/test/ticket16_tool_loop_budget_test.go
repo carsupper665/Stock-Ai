@@ -67,7 +67,7 @@ func TestTicket16ToolLoopRefreshesAccountTokenAndCorrelatesMarketResult(t *testi
 			t.Errorf("correlated Tool result = %+v", last)
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("market checked", "market checked", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("market checked", "market checked"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")
@@ -130,7 +130,7 @@ func TestTicket16UnknownInvalidAndTimedOutAttemptsConsumeBudgetAndReturnErrorsTo
 			writeToolCall(w, "call-3", "get_market_snapshot", map[string]any{"symbol": "BTCUSDT"})
 		default:
 			writeFixtureJSON(w, http.StatusOK, map[string]any{
-				"content": finalizationContent("handled errors", "handled errors", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+				"content": finalizationContent("handled errors", "handled errors"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 			})
 		}
 	}
@@ -180,7 +180,7 @@ func TestTicket16NullAndWrongTypedArgumentsAreCorrelatedWithoutBackendIO(t *test
 			return
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("invalid arguments handled", "invalid arguments handled", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("invalid arguments handled", "invalid arguments handled"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")
@@ -230,7 +230,7 @@ func TestTicket16BatchAndLoopBudgetsFailWithoutExecutingOrSummarizingBeyondLimit
 					if !strings.Contains(body.Messages[len(body.Messages)-1]["content"].(string), test.wantReason) {
 						t.Errorf("terminal instruction = %+v", body.Messages[len(body.Messages)-1])
 					}
-					writeFixtureJSON(w, http.StatusOK, finalResponse("budget reached", "budget reached", nil, nil))
+					writeFixtureJSON(w, http.StatusOK, finalResponse("budget reached", "budget reached"))
 					return
 				}
 				writeFixtureJSON(w, http.StatusOK, map[string]any{

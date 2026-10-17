@@ -72,7 +72,7 @@ func TestTicket14To18CanceledStopAndDeleteDoNotFaultOrCancelOtherWork(t *testing
 					return
 				case <-release:
 					writeFixtureJSON(w, http.StatusOK, map[string]any{
-						"content": finalizationContent("unrelated completed", "unrelated completed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+						"content": finalizationContent("unrelated completed", "unrelated completed"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 					})
 				}
 			}

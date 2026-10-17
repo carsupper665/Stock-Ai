@@ -48,7 +48,7 @@ func TestLegacyRestartContextIsCompactedOnlyAtPromptInjection(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(request.Body).Decode(&body)
 		prompt <- contextText(body)
-		writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done", nil, nil))
+		writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done"))
 	}
 	runtime, _, _ := fixture.open(t, databasePath)
 	startSessionForTest(t, runtime, session.ID)

@@ -4,16 +4,16 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"stock-ai/agent-server/internal/memory"
 )
 
 // ValidBody reports that body is a well-formed shard document for the
@@ -95,7 +95,7 @@ func validRun(raw json.RawMessage, start, end int64) (Run, bool) {
 	}
 	for _, rawID := range memoryIDs {
 		var id string
-		if json.Unmarshal(rawID, &id) != nil || !memory.ValidMemoryID(id) {
+		if json.Unmarshal(rawID, &id) != nil || !validMemoryID(id) {
 			return Run{}, false
 		}
 	}
@@ -222,4 +222,17 @@ func ReadRun(ctx context.Context, db *sql.DB, mu sync.Locker, directory, session
 		return Run{}, errors.New("History index is invalid")
 	}
 	return ParseRun(body, runID)
+}
+
+// validMemoryID accepts cabinet ids and the m_<32 hex> ids kept in shards written before the
+// memory cabinet replaced finalization candidates.
+func validMemoryID(id string) bool {
+	if number, err := strconv.ParseInt(id, 10, 64); err == nil {
+		return number > 0 && strconv.FormatInt(number, 10) == id
+	}
+	if len(id) != 34 || !strings.HasPrefix(id, "m_") || id != strings.ToLower(id) {
+		return false
+	}
+	_, err := hex.DecodeString(id[2:])
+	return err == nil
 }

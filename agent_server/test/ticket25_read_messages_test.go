@@ -44,7 +44,7 @@ func TestTicket25GetMessagesSchemaMapsFiltersAndReturnsOnlyPublicFields(t *testi
 				t.Errorf("Tool Result leaked %q: %s", private, text)
 			}
 		}
-		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("messages reviewed", "messages reviewed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("messages reviewed", "messages reviewed"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	fixture.message = func(w http.ResponseWriter, request *http.Request, _ int) {
 		if request.Method != http.MethodGet {
@@ -119,7 +119,7 @@ func TestTicket25GetMessagesDefaultsCapAndArgumentErrorsUseOneAttemptEach(t *tes
 						t.Errorf("Tool Error = %#v", result)
 					}
 				}
-				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("case observed", "case observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("case observed", "case observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			fixture.message = func(w http.ResponseWriter, request *http.Request, _ int) {
 				if request.URL.RawQuery != test.wantQuery {
@@ -161,7 +161,7 @@ func TestTicket25InvalidRefreshedAccountTokenIsNotRetriedAsAnonymous(t *testing.
 		if result["ok"] != false || errorBody["code"] != "unauthorized" || errorBody["outcome"] != "not_executed" {
 			t.Errorf("invalid-token Tool Error = %#v", result)
 		}
-		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("auth failure observed", "auth failure observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("auth failure observed", "auth failure observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	fixture.message = func(w http.ResponseWriter, request *http.Request, _ int) {
 		if request.Header.Get("Authorization") != "Bearer reset-token" {
@@ -200,7 +200,7 @@ func TestTicket25GetMessagesRejectsNullFieldAndMalformedSuccessWithoutRetry(t *t
 				if errorBody["code"] != "BACKEND_RESPONSE_INVALID" || errorBody["outcome"] != "unknown" {
 					t.Errorf("invalid success Tool Error = %#v", result)
 				}
-				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			fixture.message = func(w http.ResponseWriter, _ *http.Request, _ int) {
 				w.Header().Set("Content-Type", "application/json")
@@ -235,7 +235,7 @@ func TestTicket25GetMessagesPartialSuccessBodyTimeoutIsUnknownAndNotRetried(t *t
 		if errorBody["code"] != "TOOL_TIMEOUT" || errorBody["outcome"] != "unknown" {
 			t.Errorf("partial success timeout = %#v", result)
 		}
-		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	fixture.message = func(w http.ResponseWriter, request *http.Request, _ int) {
 		w.Header().Set("Content-Type", "application/json")

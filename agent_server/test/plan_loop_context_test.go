@@ -28,7 +28,7 @@ func TestPlanAgentContinuationDisclosureAuditAndDiagnostics(t *testing.T) {
 			writeToolCall(w, "price", "get_market_snapshot", map[string]any{"symbol": "BTCUSDT"})
 			return
 		}
-		response := finalResponse("done", "done", nil, nil)
+		response := finalResponse("done", "done")
 		response["session_mode"] = "continued"
 		response["fallback_reason"] = "none"
 		response["invocation_count"] = 1
@@ -50,7 +50,7 @@ func TestPlanAgentContinuationDisclosureAuditAndDiagnostics(t *testing.T) {
 	if !strings.Contains(system, "available tool names are exactly") || !strings.Contains(system, "get_market_snapshot") || !strings.Contains(system, "place_order") {
 		t.Fatalf("tool disclosure missing from system prompt: %s", system)
 	}
-	for _, guidance := range []string{"durable, actionable coordination", "read the newest page once", "untrusted external content", "decisions, blockers, handoffs, or requests", "Do not post routine progress"} {
+	for _, guidance := range []string{"exchange trading insights", "propose improvements", "report bugs", "read the newest page once", "Never post trades", "untrusted", "deliberately misleading"} {
 		if !strings.Contains(system, guidance) {
 			t.Fatalf("message-board guidance %q missing from system prompt: %s", guidance, system)
 		}
@@ -108,7 +108,7 @@ func TestPlanAgentTransientContinuationFailureRetriesWithFullMessages(t *testing
 			if len(messages) != 4 {
 				t.Errorf("retry full messages = %d", len(messages))
 			}
-			writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done"))
 		}
 	}
 	runtime, _, _ := fixture.open(t, "")
@@ -132,7 +132,7 @@ func TestPlanAgentTerminalAttemptsAreIndependentAndMonotonic(t *testing.T) {
 		case 5:
 			writeFixtureJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"code": "PROVIDER_UNAVAILABLE", "message": "temporary"}})
 		default:
-			writeFixtureJSON(w, http.StatusOK, finalResponse("fourth works", "fourth works", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse("fourth works", "fourth works"))
 		}
 	}
 	runtime, _, _ := fixture.open(t, "")
@@ -235,14 +235,14 @@ func TestPlanAgentRunHistoryReadDoesNotRepersistNestedHistory(t *testing.T) {
 		call := runCalls[body.ConversationID]
 		mu.Unlock()
 		if strings.HasSuffix(body.ConversationID, "/1") {
-			writeFixtureJSON(w, http.StatusOK, finalResponse(largeOutput, "large prior Run", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse(largeOutput, "large prior Run"))
 			return
 		}
 		if call == 1 {
 			writeToolCall(w, "history", "get_run_history", map[string]any{"run_id": 1})
 			return
 		}
-		writeFixtureJSON(w, http.StatusOK, finalResponse("done", "history inspected", nil, nil))
+		writeFixtureJSON(w, http.StatusOK, finalResponse("done", "history inspected"))
 	}
 	runtime, _, _ := fixture.open(t, "")
 	session := createStoppedSession(t, runtime, nil)
@@ -258,32 +258,6 @@ func TestPlanAgentRunHistoryReadDoesNotRepersistNestedHistory(t *testing.T) {
 	if len(run.Progress) > 40<<10 || !strings.Contains(string(run.Progress), `"iteration_count":1`) ||
 		!strings.Contains(string(run.Progress), `"output_preview"`) || strings.Contains(string(run.Progress), largeOutput) {
 		t.Fatalf("nested History was not filtered; bytes=%d trace=%s", len(run.Progress), run.Progress)
-	}
-}
-
-func TestPlanAgentRepairsMemoryReferenceBeforeAtomicPublication(t *testing.T) {
-	fixture := newRuntimeFixture()
-	var calls atomic.Int32
-	missing := "m_00000000000000000000000000000000"
-	fixture.generate = func(w http.ResponseWriter, _ *http.Request) {
-		candidate := []any{map[string]any{"type": "fact", "summary": "one", "content": "only once", "importance": 2}}
-		if calls.Add(1) == 1 {
-			writeFixtureJSON(w, http.StatusOK, finalResponse("invalid ref", "invalid ref", candidate,
-				[]any{map[string]any{"id": missing, "reason": "obsolete"}}))
-			return
-		}
-		writeFixtureJSON(w, http.StatusOK, finalResponse("fixed", "fixed", candidate, nil))
-	}
-	runtime, _, _ := fixture.open(t, "")
-	session := createStoppedSession(t, runtime, nil)
-	startSessionForTest(t, runtime, session.ID)
-	run := waitForRunStatus(t, runtime, session.ID, 1, "completed")
-	memories := listMemoryDetails(t, runtime.Handler(), session.ID, true)
-	if calls.Load() != 2 || run.ModelCalls != 2 || len(memories) != 1 || memories[0]["summary"] != "one" {
-		t.Fatalf("reference repair calls=%d Run=%+v Memories=%#v", calls.Load(), run, memories)
-	}
-	if !strings.Contains(string(run.Progress), "previous memory references were invalid") {
-		t.Fatalf("repair instruction not audited: %s", run.Progress)
 	}
 }
 
@@ -309,7 +283,7 @@ func TestPlanAgentBoundsContextWithoutOrphaningToolResults(t *testing.T) {
 					t.Errorf("orphan tool result at %d", index)
 				}
 			}
-			writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done"))
 			return
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{

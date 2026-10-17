@@ -21,7 +21,7 @@ assert.ok(existsSync(join(dist, 'index.html')), 'run npm run build before browse
 
 const session = {
   id: 'session_1', name: 'Geometry', status: 'stopped', current_run_id: 100, total_runs: 100,
-  max_loop: 200, max_tool_call: 300, memory_summary: { active_count: 0 }, active_event_count: 0,
+  max_loop: 200, max_tool_call: 300, memory_summary: { count: 0 }, active_event_count: 0,
   pending_trigger_count: 0, trading: { account: {} },
 }
 const long = 'long content '.repeat(80)

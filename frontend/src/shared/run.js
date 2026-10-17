@@ -63,10 +63,9 @@ function finalEnvelope(content) {
     const value = JSON.parse(content)
     if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.output !== 'string' || typeof value.summary !== 'string') return null
     return fields({
+      status: value.status ?? 'completed',
       output: value.output,
       summary: value.summary,
-      candidate_memories: value.candidate_memories ?? [],
-      expire_memories: value.expire_memories ?? [],
     })
   } catch {
     return null

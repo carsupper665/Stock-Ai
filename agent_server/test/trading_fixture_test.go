@@ -173,7 +173,7 @@ func (g *scriptedGateway) generate(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeFixtureJSON(w, http.StatusOK, map[string]any{
-		"content": finalizationContent("script finished", "script finished", nil, nil), "tool_calls": []any{}, "finish_reason": "stop",
+		"content": finalizationContent("script finished", "script finished"), "tool_calls": []any{}, "finish_reason": "stop",
 	})
 }
 

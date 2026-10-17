@@ -76,7 +76,7 @@ func TestTicket37CurrentRunReportsBudgetActivityElapsedAndUnknownUsage(t *testin
 		select {
 		case <-release:
 			writeFixtureJSON(w, http.StatusOK, map[string]any{
-				"content": finalizationContent("done", "done", nil, nil), "tool_calls": []any{}, "finish_reason": "stop",
+				"content": finalizationContent("done", "done"), "tool_calls": []any{}, "finish_reason": "stop",
 				"usage": map[string]any{"input_tokens": 8, "output_tokens": 2, "cached_tokens": 3, "total_tokens": 10},
 			})
 		case <-request.Context().Done():

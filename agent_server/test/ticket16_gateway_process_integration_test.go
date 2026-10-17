@@ -57,7 +57,7 @@ func TestTicket16ToolLoopThroughRealGatewayProcess(t *testing.T) {
 			t.Errorf("compatible Provider Tool correlation = %v", last)
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{"choices": []any{map[string]any{
-			"message": map[string]any{"content": finalizationContent("real Gateway completed", "real Gateway completed", nil, nil)}, "finish_reason": "stop",
+			"message": map[string]any{"content": finalizationContent("real Gateway completed", "real Gateway completed")}, "finish_reason": "stop",
 		}}})
 	}))
 	defer provider.Close()

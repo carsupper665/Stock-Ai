@@ -98,7 +98,7 @@ func TestTicket38RuntimeCountsValidationTimeoutUnknownAndSuccessAttemptsOnce(t *
 			writeToolCall(w, "timeout", "get_market_snapshot", map[string]any{"symbol": "ETHUSDT"})
 		case 5:
 			assertLastToolError(t, request, "TOOL_TIMEOUT")
-			writeFixtureJSON(w, http.StatusOK, finalResponse("stats done", "stats done", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse("stats done", "stats done"))
 		default:
 			t.Fatal("unexpected Generate request")
 		}

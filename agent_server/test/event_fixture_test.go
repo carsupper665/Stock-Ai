@@ -269,7 +269,7 @@ func (s *llmScript) expectNoRequest(t *testing.T, name string) {
 func respondStop(content string) llmStep {
 	return func(w http.ResponseWriter, _ *http.Request, _ map[string]any) {
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent(content, content, nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent(content, content), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 }

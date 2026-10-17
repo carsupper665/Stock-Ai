@@ -103,7 +103,7 @@ func TestTicket19OHLCVToolSchemaBackendMappingAndCorrelatedResult(t *testing.T) 
 			!strings.Contains(*last.Content, `"current_time":"2026-09-13T11:30:00Z"`) {
 			t.Errorf("correlated OHLCV result = %+v", last)
 		}
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("candles checked", "candles checked", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("candles checked", "candles checked"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	marketCalls := atomic.Int32{}
 	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -165,7 +165,7 @@ func TestTicket19OHLCVOmittedTimeRangeRequestsLatestCandlesWithCurrentTime(t *te
 			!strings.Contains(*last.Content, `"rows":[[`) || strings.Contains(*last.Content, `"candles"`) {
 			t.Errorf("correlated OHLCV result = %+v", last)
 		}
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("latest candles checked", "latest candles checked", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("latest candles checked", "latest candles checked"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	var marketCalls atomic.Int32
 	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -236,7 +236,7 @@ func TestTicket19OHLCVInvalidArgumentsBackendErrorsAndTimeoutUseCommonToolFlow(t
 				if last["tool_call_id"] != "ohlcv-error" || !strings.Contains(last["content"].(string), test.wantCode) {
 					t.Errorf("Tool Error = %v", last)
 				}
-				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("error handled", "error handled", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("error handled", "error handled"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			var marketCalls atomic.Int32
 			runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -272,7 +272,7 @@ func TestTicket19OHLCVPreservesFractionalOffsetRangeInBackendQuery(t *testing.T)
 			})
 			return
 		}
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("range checked", "range checked", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("range checked", "range checked"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	var marketCalls atomic.Int32
 	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -308,7 +308,7 @@ func TestTicket19OHLCVBodyReadTimeoutAfterHeadersIsCorrelatedUnknownAndNotRetrie
 					return
 				}
 				assertCorrelatedToolError(t, request, "ohlcv-partial-body", "TOOL_TIMEOUT", "unknown")
-				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			var marketCalls atomic.Int32
 			runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -344,7 +344,7 @@ func TestTicket19OHLCVFullyDeliveredMalformedJSONRemainsInvalid(t *testing.T) {
 			return
 		}
 		assertCorrelatedToolError(t, request, "ohlcv-malformed", "BACKEND_RESPONSE_INVALID", "unknown")
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	var marketCalls atomic.Int32
 	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, _ *http.Request) {
@@ -379,7 +379,7 @@ func TestTicket19HardStopDuringMarketBodyReadDoesNotDispatchOrOverwrite(t *testi
 			return
 		}
 		nextModelStarted <- struct{}{}
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("too late", "too late", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("too late", "too late"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	var marketCalls atomic.Int32
 	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, _ *http.Request) {

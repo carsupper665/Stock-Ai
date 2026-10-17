@@ -190,7 +190,7 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 		return nil, fmt.Errorf("open agent database: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	for _, statement := range append(append(append([]string{
+	for _, statement := range append(append([]string{
 		`CREATE TABLE IF NOT EXISTS sessions (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, account_id TEXT NOT NULL UNIQUE,
 			model_name TEXT NOT NULL, model_level TEXT, prompt TEXT NOT NULL,
@@ -207,11 +207,15 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 			retry_of_run_id INTEGER, retry_attempt INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (session_id, run_id)
 		)`,
-	}, events.Schema...), history.Schema...), memory.Schema...) {
+	}, events.Schema...), history.Schema...) {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("initialize agent database: %w", err)
 		}
+	}
+	if err := memory.EnsureSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate agent memory cabinet: %w", err)
 	}
 	if err := ensureRunTriggersColumn(db); err != nil {
 		_ = db.Close()

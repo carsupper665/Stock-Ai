@@ -143,7 +143,7 @@ func TestTicket17LateCanceledResponseCannotOverwriteInterruptedTerminalState(t *
 		close(started)
 		<-releaseLateResponse
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("too late", "too late", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("too late", "too late"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")

@@ -16,7 +16,7 @@ func TestRuntimeInitialContextIncludesCompactAccountAndLimits(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
 			t.Errorf("decode Generate request: %v", err)
 		}
-		response := finalResponse("done", "done", nil, nil)
+		response := finalResponse("done", "done")
 		response["reasoning"] = "provider supplied reasoning"
 		writeFixtureJSON(w, http.StatusOK, response)
 	}
@@ -71,7 +71,7 @@ func TestManualRetryCreatesBoundedNewRunWithoutReplayingTools(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&retryRequest); err != nil {
 			t.Errorf("decode retry Generate request: %v", err)
 		}
-		writeFixtureJSON(w, http.StatusOK, finalResponse("retry complete", "retry complete", nil, nil))
+		writeFixtureJSON(w, http.StatusOK, finalResponse("retry complete", "retry complete"))
 	}
 	runtime, _, _ := fixture.open(t, "")
 	session := createStoppedSession(t, runtime, map[string]any{"max_loop": 4, "max_tool_call": 3})
@@ -153,7 +153,7 @@ func TestRuntimeRetriesTransientGenerateInPlaceAndCountsEveryAttempt(t *testing.
 			}})
 			return
 		}
-		writeFixtureJSON(w, http.StatusOK, finalResponse("recovered", "recovered", nil, nil))
+		writeFixtureJSON(w, http.StatusOK, finalResponse("recovered", "recovered"))
 	}
 	runtime, _, _ := fixture.open(t, "")
 	session := createStoppedSession(t, runtime, map[string]any{"max_loop": 1})
@@ -190,7 +190,7 @@ func TestRuntimeKeepsConversationAcrossRetriesAndPublishesClaudeDiagnostics(t *t
 			writeFixtureJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"code": "PROVIDER_UNAVAILABLE", "message": "temporary"}})
 			return
 		}
-		response := finalResponse("done", "done", nil, nil)
+		response := finalResponse("done", "done")
 		response["num_turns"] = 3
 		response["total_cost_usd"] = 0.25
 		writeFixtureJSON(w, http.StatusOK, response)
@@ -260,7 +260,7 @@ func TestRuntimeRepairsMalformedFinalEnvelopeWithToolsDisabled(t *testing.T) {
 			body.Messages[3]["role"] != "user" || !strings.Contains(body.Messages[3]["content"].(string), "do not call tools") {
 			t.Errorf("repair request was not protocol-valid and tool-disabled: %+v", body)
 		}
-		writeFixtureJSON(w, http.StatusOK, finalResponse("fixed", "fixed", nil, nil))
+		writeFixtureJSON(w, http.StatusOK, finalResponse("fixed", "fixed"))
 	}
 	runtime, _, _ := fixture.open(t, "")
 	session := createStoppedSession(t, runtime, map[string]any{"max_loop": 1})
@@ -290,7 +290,7 @@ func TestRuntimeBudgetExhaustionForcesToolDisabledFinalization(t *testing.T) {
 		if len(body.Tools) != 0 || !strings.Contains(body.Messages[len(body.Messages)-1]["content"].(string), "max_loop reached") {
 			t.Errorf("budget finalization request = %+v", body)
 		}
-		writeFixtureJSON(w, http.StatusOK, finalResponse("budget summary", "budget summary", nil, nil))
+		writeFixtureJSON(w, http.StatusOK, finalResponse("budget summary", "budget summary"))
 	}
 	runtime, _, _ := fixture.open(t, "")
 	session := createStoppedSession(t, runtime, map[string]any{"max_loop": 1, "max_tool_call": 3})

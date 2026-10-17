@@ -39,7 +39,7 @@ func (r *AgentRuntime) executeTool(ctx context.Context, session Session, runID i
 		if result, handled := r.executeMessageTool(ctx, session, call); handled {
 			return result
 		}
-		if result, handled := r.executeMemoryTool(ctx, session.ID, call); handled {
+		if result, handled := r.executeMemoryTool(ctx, session.ID, runID, call); handled {
 			return result
 		}
 		return tools.ErrorResult("UNKNOWN_TOOL", "tool is not registered", "not_executed")

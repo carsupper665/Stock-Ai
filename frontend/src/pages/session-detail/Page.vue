@@ -161,7 +161,7 @@ const cloning = ref(false)
       <div class="tabs">
         <button :aria-selected="tab === 'overview'" @click="go({ tab: 'overview' })">概覽</button>
         <button :aria-selected="tab === 'runs'" @click="go({ tab: 'runs' })">Run<small>{{ s.total_runs }}</small></button>
-        <button :aria-selected="tab === 'memory'" @click="go({ tab: 'memory' })">Memory<small>{{ s.memory_summary?.active_count ?? '—' }}</small></button>
+        <button :aria-selected="tab === 'memory'" @click="go({ tab: 'memory' })">Memory<small>{{ s.memory_summary?.count ?? '—' }}</small></button>
         <button :aria-selected="tab === 'monitor'" @click="go({ tab: 'monitor' })">監控</button>
       </div>
 

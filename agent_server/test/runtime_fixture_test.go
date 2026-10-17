@@ -3,6 +3,7 @@ package test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -155,7 +156,7 @@ func (f *runtimeFixture) serveGateway(w http.ResponseWriter, request *http.Reque
 			return
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content":    finalizationContent("completed fixture run", "completed fixture run", nil, nil),
+			"content":    finalizationContent("completed fixture run", "completed fixture run"),
 			"tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 		return
@@ -163,40 +164,21 @@ func (f *runtimeFixture) serveGateway(w http.ResponseWriter, request *http.Reque
 	writeFixtureJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": "REQUEST_INVALID"}})
 }
 
-func finalizationContent(output, summary string, memories, expirations any) string {
-	if memories == nil {
-		memories = []any{}
-	}
-	if expirations == nil {
-		expirations = []any{}
-	}
-	encoded, _ := json.Marshal(map[string]any{
-		"output": output, "summary": summary,
-		"candidate_memories": memories, "expire_memories": expirations,
-	})
+func finalizationContent(output, summary string) string {
+	encoded, _ := json.Marshal(map[string]any{"output": output, "summary": summary})
 	return string(encoded)
 }
 
-func finalResponse(output, summary string, candidates, expirations []any) map[string]any {
-	if candidates == nil {
-		candidates = []any{}
-	}
-	if expirations == nil {
-		expirations = []any{}
-	}
+func finalResponse(output, summary string) map[string]any {
 	return map[string]any{
-		"content":    finalizationContent(output, summary, candidates, expirations),
+		"content":    finalizationContent(output, summary),
 		"tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 	}
 }
 
-func listMemoryDetails(t *testing.T, handler http.Handler, sessionID string, includeExpired bool) []map[string]any {
+func listMemoryDetails(t *testing.T, handler http.Handler, sessionID string) []map[string]any {
 	t.Helper()
-	path := "/api/v1/sessions/" + sessionID + "/memories?page=1"
-	if includeExpired {
-		path += "&include_expired=true"
-	}
-	status, raw := runtimeRequest(t, handler, http.MethodGet, path, agentAdminToken, nil)
+	status, raw := runtimeRequest(t, handler, http.MethodGet, "/api/v1/sessions/"+sessionID+"/memories", agentAdminToken, nil)
 	var response struct {
 		Memories []map[string]any `json:"memories"`
 	}
@@ -206,9 +188,9 @@ func listMemoryDetails(t *testing.T, handler http.Handler, sessionID string, inc
 	return response.Memories
 }
 
-func getMemoryDetail(t *testing.T, handler http.Handler, sessionID, memoryID string) map[string]any {
+func getMemoryDetail(t *testing.T, handler http.Handler, sessionID string, memoryID any) map[string]any {
 	t.Helper()
-	status, raw := runtimeRequest(t, handler, http.MethodGet, "/api/v1/sessions/"+sessionID+"/memories/"+memoryID, agentAdminToken, nil)
+	status, raw := runtimeRequest(t, handler, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/memories/%v", sessionID, memoryID), agentAdminToken, nil)
 	if status != http.StatusOK {
 		t.Fatalf("get Memory = %d %s", status, raw)
 	}

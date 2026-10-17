@@ -98,7 +98,7 @@ func TestTicket39SessionDetailAggregatesLocalMonitoringAndActualBackendState(t *
 		t.Fatalf("active Events = %#v", events)
 	}
 	memory := detail["memory_summary"].(map[string]any)
-	if memory["active_count"] != float64(1) || memory["expired_count"] != float64(1) {
+	if memory["count"] != float64(2) || memory["bring_back_count"] != float64(1) || memory["capacity"] != float64(60) {
 		t.Fatalf("Memory summary = %#v", memory)
 	}
 	usage := detail["usage"].(map[string]any)
@@ -241,7 +241,7 @@ func openTicket39Runtime(t *testing.T) (*agent.AgentRuntime, *ticket39Backend, s
 			}}})
 			return
 		}
-		writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done", nil, nil))
+		writeFixtureJSON(w, http.StatusOK, finalResponse("done", "done"))
 	}))
 	t.Cleanup(backend.Close)
 	t.Cleanup(gateway.Close)
@@ -283,11 +283,9 @@ func seedTicket39Monitoring(t *testing.T, databasePath, sessionID string) {
 	if _, err := db.Exec(`INSERT INTO pending_triggers (session_id,payload_json,created_at) VALUES (?, '{}', '2026-09-15T01:00:00.000000000Z')`, sessionID); err != nil {
 		t.Fatalf("seed aggregate pending Trigger: %v", err)
 	}
-	for index, expired := range []int{0, 1} {
-		id := "m_" + strings.Repeat(string(rune('a'+index)), 32)
-		if _, err := db.Exec(`INSERT INTO memories
-			(id,session_id,run_id,candidate_index,type,summary,content,importance,run_start_at,run_end_at,is_expired,created_at,updated_at)
-			VALUES (?,?,1,?,'fact','summary','content',1,'2026-09-15T01:00:00Z','2026-09-15T01:01:00Z',?,'2026-09-15T01:01:00Z','2026-09-15T01:01:00Z')`, id, sessionID, index, expired); err != nil {
+	for _, bringBack := range []int{0, 1} {
+		if _, err := db.Exec(`INSERT INTO memories (session_id,title,msg,bring_back,created_at,updated_at,created_run_id,updated_run_id)
+			VALUES (?,'title','msg',?,'2026-09-15T01:01:00.000Z','2026-09-15T01:01:00.000Z',1,1)`, sessionID, bringBack); err != nil {
 			t.Fatalf("seed aggregate Memory: %v", err)
 		}
 	}

@@ -36,7 +36,7 @@ func TestTicket15EachDecisionRefreshesCurrentModelMapping(t *testing.T) {
 			return
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("mapped twice", "mapped twice", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("mapped twice", "mapped twice"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")
@@ -156,7 +156,7 @@ func TestTicket15InFlightGenerateKeepsItsResolvedMapping(t *testing.T) {
 		close(generateStarted)
 		<-releaseGenerate
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("done", "done", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("done", "done"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")

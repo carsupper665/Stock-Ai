@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"stock-ai/agent-server/internal/events"
+	"stock-ai/agent-server/internal/memory"
 	"stock-ai/agent-server/internal/server"
 )
 
@@ -66,12 +67,11 @@ func (r *AgentRuntime) sessionAggregate(ctx context.Context, session Session) (s
 	if err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pending_triggers WHERE session_id=?`, session.ID).Scan(&result.PendingTriggerCount); err != nil {
 		return result, err
 	}
-	var active, expired int
-	err = r.db.QueryRowContext(ctx, `SELECT COUNT(CASE WHEN is_expired=0 THEN 1 END), COUNT(CASE WHEN is_expired=1 THEN 1 END) FROM memories WHERE session_id=?`, session.ID).Scan(&active, &expired)
+	stored, bringBack, err := memory.Count(ctx, r.db, session.ID)
 	if err != nil {
 		return result, err
 	}
-	result.MemorySummary["active_count"], result.MemorySummary["expired_count"] = active, expired
+	result.MemorySummary["count"], result.MemorySummary["bring_back_count"], result.MemorySummary["capacity"] = stored, bringBack, memory.Capacity
 	if r.persistenceUnavailable() {
 		result.RuntimeHealth["status"] = "unavailable"
 	}

@@ -102,14 +102,15 @@ it('renders tool results and model text as independently collapsed sections', ()
 })
 
 it('renders a finalization envelope as readable fields instead of raw JSON', () => {
-  const content = JSON.stringify({ output: 'finished', summary: 'short summary', candidate_memories: [], expire_memories: [] })
+  const content = JSON.stringify({ status: 'failed', output: 'finished', summary: 'short summary' })
   const [attempt] = steps({ progress: [{ type: 'model_call', attempt_type: 'terminal', attempt: 2, iteration: 3, content, finish_reason: 'stop', tool_calls: [] }] })
   expect(attempt.content).toBe('')
   expect(attempt.step).toBe('terminal')
   expect(attempt.meta).toContain('終結 attempt 2 / 4')
   expect(attempt.envelope).toContainEqual({ label: 'output', value: 'finished' })
   expect(attempt.envelope).toContainEqual({ label: 'summary', value: 'short summary' })
-  expect(JSON.stringify(attempt)).not.toContain('candidate_memories":[]')
+  expect(attempt.envelope).toContainEqual({ label: 'status', value: 'failed' })
+  expect(JSON.stringify(attempt)).not.toContain('{"status"')
 })
 
 it('keeps terminal attempts separate from decisions and only renders supplied model diagnostics', () => {

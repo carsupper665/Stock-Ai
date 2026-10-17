@@ -64,7 +64,7 @@ func TestTicket36RecoversRunningSessionWithoutReplayingWorkOrClearingQueues(t *t
 		recoveryContext <- contextText(body)
 		select {
 		case <-release:
-			writeFixtureJSON(w, http.StatusOK, finalResponse("recovered", "recovered", nil, nil))
+			writeFixtureJSON(w, http.StatusOK, finalResponse("recovered", "recovered"))
 		case <-request.Context().Done():
 		}
 	}

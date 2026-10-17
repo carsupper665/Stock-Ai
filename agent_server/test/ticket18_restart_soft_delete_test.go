@@ -28,7 +28,7 @@ func TestTicket18RestartCreatesNewRunWithInterruptedFactsAndDoesNotReplayWork(t 
 			t.Errorf("decode restart Gateway request: %v", err)
 		}
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("restart complete", "restart complete", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("restart complete", "restart complete"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")
@@ -127,7 +127,7 @@ func TestTicket18DeletingRunningSessionHardStopsRunAndCannotBeUndoneByLateRespon
 		once.Do(func() { close(started) })
 		<-release
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content": finalizationContent("late completion", "late completion", nil, nil), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
+			"content": finalizationContent("late completion", "late completion"), "tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}
 	runtime, _, _ := fixture.open(t, "")

@@ -131,7 +131,7 @@ func TestTicket19CrossServiceOHLCVUsesActualBackendAndPropagatesCancellation(t *
 				t.Errorf("decode second Gateway turn: %v", err)
 			}
 			secondTurn <- body
-			writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("OHLCV accepted", "OHLCV accepted", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+			writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("OHLCV accepted", "OHLCV accepted"), "tool_calls": []any{}, "finish_reason": "stop"})
 		}
 		runtime := openCrossServiceRuntime(t, backendURL, crossBackendUserToken, fixture, 2*time.Second)
 		session := createStoppedSession(t, runtime, map[string]any{"account_id": account.ID})
@@ -191,7 +191,7 @@ func TestTicket19CrossServiceOHLCVUsesActualBackendAndPropagatesCancellation(t *
 				t.Errorf("decode timeout Gateway turn: %v", err)
 			}
 			secondTurn <- body
-			writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout accepted", "timeout accepted", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+			writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout accepted", "timeout accepted"), "tool_calls": []any{}, "finish_reason": "stop"})
 		}
 		runtime := openCrossServiceRuntime(t, backendURL, crossBackendUserToken, fixture, 500*time.Millisecond)
 		session := createStoppedSession(t, runtime, map[string]any{"account_id": account.ID})
@@ -265,7 +265,7 @@ func TestTicket20CrossServiceMarketInfoPreservesFactsAndRejectsBadBackendAuth(t 
 			t.Errorf("decode Market Info Gateway turn: %v", err)
 		}
 		secondTurn <- body
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("market info accepted", "market info accepted", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("market info accepted", "market info accepted"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	runtime := openCrossServiceRuntime(t, backendURL, crossBackendUserToken, fixture, 2*time.Second)
 	session := createStoppedSession(t, runtime, map[string]any{"account_id": account.ID})

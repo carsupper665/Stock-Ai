@@ -79,15 +79,21 @@ it('編輯既有模型時把 context_window 顯示成 K／M', async () => {
   expect(document.querySelectorAll('input')[2].value).toBe('2M')
 })
 
-it('Memory 列表不載入全文，選取後才呼叫 detail', async () => {
-  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => respond(url.includes('?') ? { memories: [{ id: 'm_1', summary: '可讀摘要', type: 'fact', importance: 2, run_id: 1 }] } : { id: 'm_1', summary: '可讀摘要', content: '完整記憶正文', run_id: 1 }))
+it('記憶櫃列表只顯示標籤，打開後才載入全文並可刪除', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, request) => {
+    if (url.endsWith('/memories')) return respond({ memories: [{ id: 7, title: '可讀標題', bring_back: true, created_at: '2026-10-18T01:02:03.000Z' }], capacity: 60 })
+    return respond({ id: 7, title: '可讀標題', msg: '完整記憶正文', bring_back: true, created_at: '2026-10-18T01:02:03.000Z', updated_at: '2026-10-18T01:02:03.000Z', created_run_id: 3, updated_run_id: 3 })
+  })
   mount(Memories, { session: { id: 's_1', status: 'stopped' } })
-  await vi.waitFor(() => expect(document.body.textContent).toContain('可讀摘要'))
+  await vi.waitFor(() => expect(document.body.textContent).toContain('可讀標題'))
+  expect(document.body.textContent).toContain('1 / 60 則 · 1 則每輪帶入')
+  expect(document.body.textContent).not.toContain('完整記憶正文')
   expect(fetch).toHaveBeenCalledTimes(1)
-  const row = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('可讀摘要'))
-  row.click()
+  expect(fetch.mock.calls[0][0]).toBe('/agent/api/v1/sessions/s_1/memories')
+  ;[...document.querySelectorAll('button')].find((b) => b.textContent.includes('可讀標題')).click()
   await vi.waitFor(() => expect(document.body.textContent).toContain('完整記憶正文'))
-  expect(fetch.mock.calls[1][0]).toBe('/agent/api/v1/sessions/s_1/memories/m_1')
+  expect(fetch.mock.calls[1][0]).toBe('/agent/api/v1/sessions/s_1/memories/7')
+  expect(document.body.textContent).toContain('Run #3')
 })
 
 it('History 與監控使用 Agent HTTP，不在瀏覽器取得 Account Token', async () => {

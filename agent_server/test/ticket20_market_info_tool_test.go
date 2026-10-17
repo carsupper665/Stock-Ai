@@ -42,7 +42,7 @@ func TestTicket20MarketInfoToolSchemaBackendMappingAndCorrelatedResult(t *testin
 			!strings.Contains(content, `"source_rules_enforced":false`) || !strings.Contains(content, `"min_notional":null`) {
 			t.Errorf("Market Info Tool result=%v", last)
 		}
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("market rules checked", "market rules checked", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("market rules checked", "market rules checked"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	var marketCalls atomic.Int32
 	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -101,7 +101,7 @@ func TestTicket20MarketInfoInvalidBackendErrorAndTimeoutUseCommonToolFlow(t *tes
 				if last["tool_call_id"] != "info-error" || !strings.Contains(last["content"].(string), test.wantCode) {
 					t.Errorf("Tool Error=%v", last)
 				}
-				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("error handled", "error handled", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("error handled", "error handled"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			var marketCalls atomic.Int32
 			runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -137,7 +137,7 @@ func TestTicket20MarketInfoBodyReadTimeoutAfterHeadersIsCorrelatedUnknownAndNotR
 					return
 				}
 				assertCorrelatedToolError(t, request, "info-partial-body", "TOOL_TIMEOUT", "unknown")
-				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			var marketCalls atomic.Int32
 			runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, request *http.Request) {
@@ -170,7 +170,7 @@ func TestTicket20MarketInfoFullyDeliveredMalformedJSONRemainsInvalid(t *testing.
 			return
 		}
 		assertCorrelatedToolError(t, request, "info-malformed", "BACKEND_RESPONSE_INVALID", "unknown")
-		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		writeFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	var marketCalls atomic.Int32
 	runtime := openMarketReadRuntime(t, fixture, func(w http.ResponseWriter, _ *http.Request) {

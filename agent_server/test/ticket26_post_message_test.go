@@ -38,7 +38,7 @@ func TestTicket26PostMessageUsesBoundIdentityThenReadsItBack(t *testing.T) {
 			if !strings.Contains(string(encoded), `"id":"msg_posted"`) || !strings.Contains(string(encoded), `"content":"多位元留言"`) {
 				t.Errorf("read-back Tool Result = %s", encoded)
 			}
-			messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("message published and verified", "message published and verified", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+			messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("message published and verified", "message published and verified"), "tool_calls": []any{}, "finish_reason": "stop"})
 		}
 	}
 	fixture.message = func(w http.ResponseWriter, request *http.Request, call int) {
@@ -137,7 +137,7 @@ func TestTicket26PostMessageValidationMatchesBackendBoundaries(t *testing.T) {
 						t.Errorf("validation Tool Error = %#v", result)
 					}
 				}
-				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("validation observed", "validation observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("validation observed", "validation observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			fixture.message = func(w http.ResponseWriter, request *http.Request, _ int) {
 				var body struct {
@@ -196,7 +196,7 @@ func TestTicket26PostMessageRejectsDisabledOrBackendRejectedRefreshedIdentityWit
 				if result["ok"] != false || errorBody["code"] != test.wantCode || errorBody["outcome"] != "not_executed" {
 					t.Errorf("identity Tool Error = %#v", result)
 				}
-				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("identity failure observed", "identity failure observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("identity failure observed", "identity failure observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			fixture.message = func(w http.ResponseWriter, _ *http.Request, _ int) {
 				messageFixtureJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized", "message": "invalid account token"})
@@ -234,7 +234,7 @@ func TestTicket26PostMessageRejectsNullFieldAndMalformedSuccessWithoutRetry(t *t
 				if errorBody["code"] != "BACKEND_RESPONSE_INVALID" || errorBody["outcome"] != "unknown" {
 					t.Errorf("invalid success Tool Error = %#v", result)
 				}
-				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+				messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("invalid response observed", "invalid response observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 			}
 			fixture.message = func(w http.ResponseWriter, _ *http.Request, _ int) {
 				w.Header().Set("Content-Type", "application/json")
@@ -269,7 +269,7 @@ func TestTicket26PostMessagePartialErrorBodyTimeoutIsUnknownAndNotRetried(t *tes
 		if errorBody["code"] != "TOOL_TIMEOUT" || errorBody["outcome"] != "unknown" {
 			t.Errorf("partial error timeout = %#v", result)
 		}
-		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("timeout observed", "timeout observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	fixture.message = func(w http.ResponseWriter, request *http.Request, _ int) {
 		w.Header().Set("Content-Type", "application/json")
@@ -312,7 +312,7 @@ func TestTicket26PostMessagePreservesExactBackendErrorAndMarksFiveHundredUnknown
 		if errorBody["code"] != "storage_exact" || errorBody["message"] != "Backend exact failure text" || errorBody["outcome"] != "unknown" {
 			t.Errorf("Backend error Tool Result = %#v", result)
 		}
-		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("Backend error observed", "Backend error observed", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("Backend error observed", "Backend error observed"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	fixture.message = func(w http.ResponseWriter, _ *http.Request, _ int) {
 		messageFixtureJSON(w, http.StatusInternalServerError, map[string]any{"error": "storage_exact", "message": "Backend exact failure text"})
@@ -347,7 +347,7 @@ func TestTicket26PostTimeoutAfterWriteIsUnknownAndNeverAutomaticallyRetried(t *t
 			if result["ok"] != true || stored.Load() != 2 {
 				t.Errorf("second result=%#v stored=%d", result, stored.Load())
 			}
-			messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("uncertain write handled", "uncertain write handled", nil, nil), "tool_calls": []any{}, "finish_reason": "stop"})
+			messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("uncertain write handled", "uncertain write handled"), "tool_calls": []any{}, "finish_reason": "stop"})
 		}
 	}
 	fixture.message = func(w http.ResponseWriter, request *http.Request, call int) {

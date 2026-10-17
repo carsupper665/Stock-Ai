@@ -182,13 +182,13 @@ func RunsInTx(tx *sql.Tx, sessionID string, start, end int64) ([]Run, error) {
 
 func runMemoryIDsTx(tx *sql.Tx, sessionID string, runID int64) ([]string, error) {
 	var exists int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memories'`).Scan(&exists); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'run_memories'`).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if exists == 0 {
 		return []string{}, nil
 	}
-	rows, err := tx.Query(`SELECT id FROM memories WHERE session_id = ? AND run_id = ? ORDER BY candidate_index`, sessionID, runID)
+	rows, err := tx.Query(`SELECT memory_id FROM run_memories WHERE session_id = ? AND run_id = ? ORDER BY rowid`, sessionID, runID)
 	if err != nil {
 		return nil, err
 	}

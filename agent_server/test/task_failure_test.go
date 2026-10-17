@@ -10,7 +10,7 @@ func TestModelReportedFailureDoesNotCompleteRun(t *testing.T) {
 	fixture := newRuntimeFixture()
 	fixture.generate = func(w http.ResponseWriter, _ *http.Request) {
 		writeFixtureJSON(w, http.StatusOK, map[string]any{
-			"content":    `{"status":"failed","output":"Tool host unavailable; unable to execute.","summary":"Unable to execute.","candidate_memories":[],"expire_memories":[]}`,
+			"content":    `{"status":"failed","output":"Tool host unavailable; unable to execute.","summary":"Unable to execute."}`,
 			"tool_calls": []any{}, "finish_reason": "stop", "usage": nil,
 		})
 	}

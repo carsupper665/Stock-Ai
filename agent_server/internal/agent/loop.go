@@ -73,23 +73,20 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		}
 		contextBody["retry_context"] = retryContext
 	}
-	var recentSummary *memory.RecentRun
-	var memoryIndex []memory.Metadata
-	var err error
-	if trigger == "server_recovery" {
-		memoryIndex, err = memory.List(ctx, r.db, session.ID, "", tools.MemoryDefaultLimit)
-	} else {
-		recentSummary, memoryIndex, err = memory.ProgressiveContext(ctx, r.db, session.ID, runID)
-	}
+	recentSummary, memoryIndex, recalled, err := memory.ProgressiveContext(ctx, r.db, session.ID, runID)
 	if err != nil {
 		r.handleRunPersistenceError(session.ID, runID, err)
 		return
 	}
-	if recentSummary != nil {
+	contextBody["current_time"] = time.Now().UTC().Format(memory.TimeLayout)
+	if recentSummary != nil && trigger != "server_recovery" {
 		contextBody["recent_run_summary"] = recentSummary
 	}
 	if len(memoryIndex) != 0 {
 		contextBody["memory_index"] = memoryIndex
+	}
+	if len(recalled) != 0 {
+		contextBody["bring_back_memories"] = recalled
 	}
 	contextBody["available_tools"] = runtimeToolNames()
 	encodedContext, _ := json.Marshal(contextBody)
@@ -213,32 +210,8 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				r.persistRunFailure(session.ID, runID, "TASK_FAILED: "+final.Output)
 				return
 			}
-			completed, err := r.completeFinalizedRun(session.ID, runID, final)
-			if err != nil {
-				var referenceError *memory.ReferenceError
-				if errors.As(err, &referenceError) {
-					if !finalizing {
-						finalizing = true
-						finalizationAttempts = 1
-						markLastModelCallTerminal(progress, iteration)
-					}
-					if finalizationAttempts >= maxFinalizationRetries+1 {
-						r.persistRunFailure(session.ID, runID, "FINALIZATION_INVALID: "+err.Error())
-						return
-					}
-					messages = append(messages, gatewayMessage{Role: "assistant", Content: response.Content})
-					instruction := terminalFinalizationPrompt("the previous memory references were invalid: " + referenceError.Error())
-					messages = append(messages, gatewayMessage{Role: "user", Content: &instruction})
-					if !persistInstruction(instruction, finalizationAttempts+1) {
-						return
-					}
-					continue
-				}
+			if _, err := r.completeFinalizedRun(session.ID, runID, final); err != nil {
 				r.handleRunPersistenceError(session.ID, runID, err)
-				return
-			}
-			if !completed {
-				return
 			}
 			return
 		}
