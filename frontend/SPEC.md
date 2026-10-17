@@ -373,12 +373,13 @@ LLM_SERVER_RUNTIME_TOKEN=
 
 | 端點 | 用途 | 參數 | 回應 | 前端 |
 |---|---|---|---|---|
-| `POST /v1/accounts` | 建立虛擬帳號 | body `user_name`、`initial_balance` | 201 account（含 `token`） | accounts |
+| `POST /v1/accounts` | 建立虛擬帳號 | body `user_name`、`initial_balance`、`max_dd?`（百分比，`0 < max_dd <= 100`；省略表示未啟用） | 201 account（含 `token`） | accounts |
 | `GET /v1/accounts` | 全部帳號 | — | `{accounts: [account]}`（含 `token`） | accounts；login 驗證 token |
 | `GET /v1/accounts/:id` | 單一帳號 | — | account（含 `token`） | account-detail |
 | `PATCH /v1/accounts/:id` | 改名、停用、啟用 | body `user_name?`、`status?`，至少一個 | account | accounts |
 | `DELETE /v1/accounts/:id` | 刪除帳號 | — | 204 | accounts |
 | `POST /v1/accounts/:id/token/reset` | 重設 Account Token | — | account（新 `token`） | account-detail |
+| `POST /v1/accounts/:id/trading/resume` | 解除 max_dd 風控停止；需已無部位與未成交掛單 | 無 body；沿用 `max_dd`，以全平後 equity 重設 baseline | account | account-detail |
 | `GET /v1/accounts/:id/positions` | 該帳號部位 | `product?` | `{positions: [position]}` | account-detail |
 | `GET /v1/accounts/:id/orders` | 該帳號訂單 | `status?`、`limit?` | `{orders: [order]}` | account-detail |
 | `GET /v1/accounts/:id/trades` | 該帳號成交 | `limit?` | `{trades: [trade]}` | account-detail |
@@ -419,7 +420,7 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 
 | 名稱 | 欄位 | 定義 |
 |---|---|---|
-| account | `id` `user_name` `initial_balance` `balance` `status` `created_at` `token?` | `account.go` `accountView` |
+| account | `id` `user_name` `initial_balance` `balance` `status` `created_at` `token?` `max_dd` `max_dd_baseline_equity` `max_dd_stopped_at` `max_dd_loss_limit` `max_dd_equity_floor`；未啟用時五個 max_dd 欄位皆為 `null` | `account.go` `accountView` |
 | account（自查） | 上列去掉 `token`，加 `locked_margin` `available` `unrealized_pnl` `equity` | `account.go` `selfAccountView` |
 | order | `id` `market` `symbol` `product` `side` `type` `quantity` `price?` `leverage` `stop_loss?` `take_profit?` `reduce_only?` `status` `reject_reason?` `filled_quantity` `avg_fill_price?` `fee` `realized_pnl` `trigger?` `source` `created_at` | `views.go` `orderView` |
 | position | `id` `market` `symbol` `product` `side` `quantity` `entry_price` `mark_price` `leverage` `margin` `unrealized_pnl` `stop_loss?` `take_profit?` `stop_loss_source` `take_profit_source` `opened_at` | `views.go` `positionView` |

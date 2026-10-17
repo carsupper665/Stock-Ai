@@ -5,9 +5,9 @@ import { useLoad } from '../../core/load.js'
 import { confirm } from '../../shared/confirm.js'
 import { fmtTime, money, num, pnlTone, tone } from '../../shared/format.js'
 import { copy, say } from '../../shared/toast.js'
-import { deleteAccount, listLedger, listOrders, listPositions, listTrades, resetToken, selfAccount, updateAccount } from './api.js'
+import { deleteAccount, listLedger, listOrders, listPositions, listTrades, resetToken, resumeTrading, selfAccount, updateAccount } from './api.js'
 
-const props = defineProps({ account: Object, session: Object })
+const props = defineProps({ account: Object, session: Object, refresh: Function })
 const emit = defineEmits(['changed', 'deleted'])
 
 const masked = computed(() => `${props.account.token.slice(0, 6)}…${props.account.token.slice(-4)}`)
@@ -74,6 +74,29 @@ async function remove() {
     say(e.message, 'neg')
   }
 }
+// resuming 擋住 pending 中的重送；失敗不清停止標記，等 server 回應或重讀帳號後再更新。
+const resuming = ref(false)
+async function resume() {
+  const ok = await confirm({
+    title: `解除「${props.account.user_name}」的風控停止？`,
+    tone: 'acc',
+    ok: '確認解除',
+    lines: ['沿用 max_dd 和原始額度，從本次全平後權益重新起算', '新 baseline = 全平後權益，loss_limit 仍以原始額度計算', '需已無部位與未成交掛單，否則會被拒絕'],
+  })
+  if (!ok || resuming.value) return
+  resuming.value = true
+  try {
+    await resumeTrading(props.account.id)
+    say('已解除風控停止')
+    emit('changed')
+  } catch (e) {
+    say(e.message, 'neg')
+    // 連線中斷或 5xx 無法判斷 POST 是否已提交；以 server 重讀結果為準，不自動重送。
+    if (!e.status || e.status >= 500) await props.refresh()
+  } finally {
+    resuming.value = false
+  }
+}
 </script>
 
 <template>
@@ -93,6 +116,17 @@ async function remove() {
         <button @click="copy(account.token, '已複製 Account Token')">複製</button>
         <button data-tone="neg" @click="reset">重設</button>
       </div>
+      <div v-if="account.max_dd != null" class="inset col risk">
+        <div class="row"><span class="eyebrow">最大虧損 max_dd</span><span class="grow"></span><span class="tag" data-tone="warn">{{ account.max_dd }}%</span></div>
+        <div class="row mono small" data-tone="dim">
+          <span>baseline {{ num(account.max_dd_baseline_equity, 2) }}</span>
+          <span>loss_limit {{ num(account.max_dd_loss_limit, 2) }}</span>
+          <span>floor {{ num(account.max_dd_equity_floor, 2) }}</span>
+        </div>
+        <p v-if="account.max_dd_stopped_at" data-tone="neg">風控停止：{{ fmtTime(account.max_dd_stopped_at) }}；Account Token 與讀取不受影響</p>
+        <button v-if="account.max_dd_stopped_at" class="wide" data-tone="acc" :disabled="resuming" @click="resume">{{ resuming ? '解除中…' : '解除風控停止' }}</button>
+      </div>
+      <p v-else class="note">最大虧損 max_dd：未設定</p>
       <p v-if="summary.error.value" class="empty">代查失敗：{{ summary.error.value.message }}</p>
       <div v-else-if="summary.data.value" class="stats">
         <div v-for="k in ['equity', 'available', 'locked_margin', 'unrealized_pnl']" :key="k" class="stat big">
@@ -205,6 +239,13 @@ async function remove() {
 }
 .token {
   gap: 8px;
+}
+.risk {
+  gap: 6px;
+}
+.risk p {
+  margin: 0;
+  font-size: 12px;
 }
 .wide {
   width: 100%;
