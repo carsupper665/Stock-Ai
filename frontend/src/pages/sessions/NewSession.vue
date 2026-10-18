@@ -60,7 +60,7 @@ async function submit() {
   <Modal @close="$emit('close')">
     <form @submit.prevent="submit">
       <h2>建立 Session</h2>
-      <p class="note">建好是 stopped，不會自動啟動；建立後設定不可改，要改就建新的（A-10、A-11）。</p>
+      <p class="note">建好是 stopped，不會自動啟動；建立後設定不可改，要改就建新的。</p>
       <label>name <input v-model="form.name" required /></label>
       <label>
         account_id（交易帳號，一個帳號只能綁一個 Session）
@@ -80,7 +80,7 @@ async function submit() {
           <option value="" disabled>選擇模型</option>
           <option v-for="m in models" :key="m.model_name" :value="m.model_name" :disabled="!m.available">{{ m.model_name }} → {{ m.provider_id }} / {{ m.model }}{{ m.available ? '' : '（不可用）' }}</option>
         </select>
-        <input v-else v-model="form.model_name" class="mono" placeholder="手填；Server 會對 /v1/models 驗證" required />
+        <input v-else v-model="form.model_name" class="mono" placeholder="模型名稱" required />
         <span v-if="modelsError" class="note" data-tone="warn">模型目錄拿不到（{{ modelsError }}），改為手填</span>
       </label>
       <label>
@@ -88,12 +88,11 @@ async function submit() {
         <select v-if="levels.length" v-model="form.model_level"><option value="">不指定</option><option v-for="l in levels" :key="l" :value="l">{{ l }}</option></select>
         <input v-else v-model="form.model_level" class="mono" placeholder="留空＝不指定；例 low / high" />
       </label>
-      <label>prompt（留空＝Server Default，前端查不到內容 · 待定 4）<textarea v-model="form.prompt" rows="3"></textarea></label>
+      <label>prompt（留空使用預設）<textarea v-model="form.prompt" rows="3"></textarea></label>
       <div class="row">
         <label class="grow">max_loop（留空＝Server Default）<input v-model="form.max_loop" type="number" min="1" /></label>
         <label class="grow">max_tool_call（留空＝Server Default）<input v-model="form.max_tool_call" type="number" min="1" /></label>
       </div>
-      <p class="note">超過 max_loop／max_tool_call 的 Run 直接 failed（A-09）。</p>
       <p v-if="error" data-tone="neg">{{ error }}</p>
       <menu>
         <button type="button" @click="$emit('close')">取消</button>

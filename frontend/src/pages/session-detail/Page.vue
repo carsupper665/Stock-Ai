@@ -111,7 +111,7 @@ const cloning = ref(false)
 
       <section v-if="s.status === 'running'" class="card row band" data-tone="acc">
         <div class="col grow">
-          <div class="eyebrow">當前 Run · 每 3 秒輪詢</div>
+          <div class="eyebrow">當前 Run</div>
           <template v-if="current">
             <div class="row">
               <span class="mono run-id" data-tone="acc">#{{ current.run_id }}</span>
@@ -135,11 +135,9 @@ const cloning = ref(false)
             <div class="row between mono small" data-tone="mute"><span>tool_call / max_tool_call</span><span>{{ current ? current.tool_call_count : '—' }} / {{ s.max_tool_call }}</span></div>
             <div class="bar"><i data-tone="warn" :style="{ width: current ? pct(current.tool_call_count, s.max_tool_call) : 0 }"></i></div>
           </div>
-          <div class="mono small" data-tone="mute">超限 → 該 Run 直接 failed（A-09）</div>
         </div>
         <div class="stats tokens">
           <div v-for="k in ['input', 'output', 'cached', 'total']" :key="k" class="stat"><small>{{ k }}</small><b>{{ num(current?.[`${k}_tokens`]) }}</b></div>
-          <span class="note wide">未知用量顯示 —；cached 已包含於 input。</span>
         </div>
       </section>
       <section v-else class="card row band" :data-tone="s.status === 'deleted' ? 'mute' : 'warn'">

@@ -92,7 +92,7 @@ async function create() {
 
         <section class="card col">
           <div class="row"><span class="eyebrow grow">模型目錄</span><button data-tone="acc" :disabled="!data.length" @click="editingModel = null">+ 新增模型</button></div>
-          <p v-if="models.error.value" class="note" data-tone="warn">拿不到：{{ models.error.value.message }}（請檢查 Console 的 LLM runtime credential）</p>
+          <p v-if="models.error.value" class="note" data-tone="warn">拿不到：{{ models.error.value.message }}</p>
           <div v-else-if="models.data.value" class="rows">
             <div v-for="m in models.data.value" :key="m.model_name" class="row">
               <span class="mono">{{ m.model_name }}</span>
@@ -120,7 +120,7 @@ async function create() {
         <label v-if="!isCLI">base_url（http／https，例 https://api.openai.com/v1）<input v-model="form.base_url" class="mono" type="url" required /></label>
         <template v-else>
           <label>認證方式<select v-model="authMode"><option value="api_key">Provider API Token</option><option value="local_login">Server 本機 CLI 登入</option></select></label>
-          <p class="note" :data-tone="cliStatus?.executable_configured ? 'dim' : 'neg'">{{ cliStatus?.executable_configured ? 'Gateway 會啟動已設定的 CLI，使用獨立工作目錄，只有 Web 工具；Domain Tool 交回 Agent 執行。' : 'Gateway 尚未設定 CLI 執行檔；請先完成 dist/.env 的 Harness 設定。' }}</p>
+          <p v-if="!cliStatus?.executable_configured" class="note" data-tone="neg">Server 尚未設定 CLI 執行檔，請先完成部署設定。</p>
           <p v-if="authMode === 'local_login' && !cliStatus?.local_login_configured" data-tone="warn">尚未設定本機登入檔，建立後需先在 Server 登入才能測試。</p>
         </template>
         <label>default_model（選填）<input v-model="form.default_model" class="mono" /></label>

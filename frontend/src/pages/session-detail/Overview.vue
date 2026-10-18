@@ -34,13 +34,13 @@ async function removeEvent(e) {
   emit('changed')
 }
 
-// 待定 6：equity 等四個數字只有 Account Token 自查拿得到，用該帳號的 token 代查
+// equity 等四個數字只有 Account Token 自查拿得到，用該帳號的 token 代查
 const summary = computed(() => props.session.trading?.account)
 
 const config = computed(() => [
   ['name', props.session.name],
   ['account_id', props.session.account_id],
-  ['model_name', `${props.session.model_name}（待定 3：合法值來自 LLM Server /v1/models）`],
+  ['model_name', props.session.model_name],
   ['model_level', props.session.model_level ?? '—'],
   ['max_loop', String(props.session.max_loop)],
   ['max_tool_call', String(props.session.max_tool_call)],
@@ -53,7 +53,7 @@ const rc = computed(() => props.session.restart_context)
 <template>
   <div class="cols">
     <section class="card config">
-      <div class="eyebrow">設定（建立後不可改 · A-11）</div>
+      <div class="eyebrow">設定（建立後不可改）</div>
       <dl class="kv">
         <template v-for="[k, v] in config" :key="k"><dt>{{ k }}</dt><dd>{{ v }}</dd></template>
       </dl>
@@ -61,7 +61,7 @@ const rc = computed(() => props.session.restart_context)
 
     <div class="col middle">
       <section class="card">
-          <div class="row"><span class="eyebrow">帳戶摘要 · account-wide</span></div>
+          <div class="row"><span class="eyebrow">帳戶摘要</span></div>
         <div v-if="account?.error" class="empty">帳號 {{ session.account_id }} 讀不到：{{ account.error.message }}</div>
         <template v-else-if="summary">
           <div class="stats">
@@ -70,13 +70,13 @@ const rc = computed(() => props.session.restart_context)
               <b :data-tone="k === 'unrealized_pnl' ? pnlTone(summary[k]) : k === 'locked_margin' ? 'dim' : null">{{ k === 'unrealized_pnl' ? money(summary[k]) : num(summary[k], 2) }}</b>
             </div>
           </div>
-          <p class="note sep">帳號 <RouterLink :to="{ name: 'accounts', query: { id: session.account_id } }">{{ summary.user_name }}</RouterLink> · 由 Agent Server 取得即時 Backend 資料，憑證不回傳。</p>
+          <p class="note sep">帳號 <RouterLink :to="{ name: 'accounts', query: { id: session.account_id } }">{{ summary.user_name }}</RouterLink></p>
         </template>
         <div v-else class="empty">{{ session.trading?.errors?.account?.message ?? '帳戶資料暫不可用' }}</div>
       </section>
 
       <section class="card">
-        <div class="row"><span class="eyebrow">重啟脈絡</span><span class="tag pending">待定 7</span></div>
+        <div class="row"><span class="eyebrow">重啟脈絡</span></div>
         <p v-if="rc" class="body" data-tone="dim">
           上次 stop 時 <a href="#" @click.prevent="$emit('goRun', rc.previous_run_id)">Run #{{ rc.previous_run_id }}</a> 的狀態是 <span :data-tone="tone(rc.status)">{{ rc.status }}</span>{{ rc.reason ? `（${rc.reason}）` : '' }}。
           <template v-if="rc.summary">上次摘要：{{ rc.summary }}。</template>
@@ -103,12 +103,11 @@ const rc = computed(() => props.session.restart_context)
         <div v-for="e in events" :key="e.id" class="row event">
           <span class="mono" data-tone="acc">{{ e.type }}</span>
           <span class="mono grow ellipsis" data-tone="dim" :title="JSON.stringify(e.params)">{{ describe(e) }}</span>
-          <a href="#" class="mono small" :title="`expires_at ${fmtTime(e.expires_at)}`" @click.prevent="$emit('goRun', e.created_run_id)">#{{ e.created_run_id }}</a>
+          <a href="#" class="mono small" :title="`到期 ${fmtTime(e.expires_at)}`" @click.prevent="$emit('goRun', e.created_run_id)">#{{ e.created_run_id }}</a>
           <button class="text" data-tone="neg" @click="removeEvent(e)">刪除</button>
         </div>
       </div>
-      <p v-else class="note">沒有 active Event；Agent 在 Run 裡用 create_event 建立後會出現在這裡。</p>
-      <p class="note">USER 不能建立 Event（A-35）；唯一的手動觸發是 stop 再 start。已觸發／過期的只在 Run 歷史（triggers）看得到。</p>
+      <p v-else class="note">目前沒有進行中的 Event。</p>
     </section>
   </div>
 </template>

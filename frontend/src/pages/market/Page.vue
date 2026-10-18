@@ -56,11 +56,10 @@ function ask() {
           </template>
           <span v-else class="note">輸入 symbol 後查價</span>
         </div>
-        <p class="hint">查價會讓後端啟動該 symbol 的訂閱；<code>stock</code> 目前回 <code>not_implemented</code>（501）；<code>market_unavailable</code>／<code>market_timeout</code> 可重試。</p>
       </section>
 
       <section class="card col subs">
-        <div class="row"><span class="eyebrow">訂閱狀態</span><span class="note">營運資訊，不是交易資訊 · 60 秒無人要求即 inactive · 每 5 秒更新</span></div>
+        <div class="row"><span class="eyebrow">訂閱狀態</span><span class="note">每 5 秒更新</span></div>
         <p v-if="subs.error.value" data-tone="neg">{{ subs.error.value.message }}</p>
         <div v-else-if="subs.data.value" class="rows">
           <div v-for="(state, key) in subs.data.value" :key="key" class="row sub">

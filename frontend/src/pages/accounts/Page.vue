@@ -86,7 +86,6 @@ async function create() {
             <tr v-if="!data.accounts.length"><td colspan="7" class="note">還沒有帳號。建一個，拿到 Account Token 後 Agent 才能交易。</td></tr>
           </tbody>
         </table>
-        <div class="row foot"><span class="tag pending">待定 2</span><span class="note">「被哪個 Session 用」由前端拿 Agent Server 的 Session 列表反查 account_id；交易後端無此欄位。</span></div>
       </div>
 
       <Detail v-if="selected" :key="selected.id" :account="selected" :session="sessionOf(selected.id)" :refresh="reload" @changed="reload" @deleted="router.replace({ query: {} }).then(reload)" />
@@ -99,7 +98,7 @@ async function create() {
         <label>initial_balance（> 0）<input v-model="form.initial_balance" type="number" min="0.00000001" step="any" required /></label>
         <label>最大虧損 max_dd（%，選填）<input v-model="form.max_dd" type="number" step="any" /></label>
         <p class="note">每輪可虧損金額以原始額度計算，含浮動損益；達門檻自動全平並停止交易。留空代表未設定。</p>
-        <p class="note">建立後會拿到 Account Token；名字重複回 name_taken。</p>
+        <p class="note">建立後會拿到 Account Token；名稱不能重複。</p>
         <p v-if="createError" data-tone="neg">{{ createError }}</p>
         <menu>
           <button type="button" @click="creating = false">取消</button>
@@ -120,8 +119,5 @@ async function create() {
 .name {
   font-size: 12.5px;
   font-weight: 500;
-}
-.foot {
-  padding: 8px 12px;
 }
 </style>

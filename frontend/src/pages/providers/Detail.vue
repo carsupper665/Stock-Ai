@@ -126,7 +126,7 @@ async function removeToken(t) {
         <dt>enabled</dt><dd class="mono" :data-tone="provider.enabled ? 'pos' : 'mute'">{{ provider.enabled }}</dd>
         <dt>updated_at</dt><dd class="mono">{{ fmtTime(provider.updated_at) }}</dd>
       </dl>
-      <p class="note">id 與 type 建立後不可改；其餘欄位用「編輯」（PATCH）。</p>
+      <p class="note">id 與 type 建立後不可改；其餘欄位用「編輯」修改。</p>
     </section>
 
     <section class="card col">
@@ -156,7 +156,7 @@ async function removeToken(t) {
         <p v-if="!provider.tokens.length" class="note">{{ isCLI && provider.config?.auth_mode === 'local_login' ? '使用 Server 本機 CLI 登入，不需要另外新增 API Token。' : '還沒有 token；需要憑證的 Provider 請先新增。' }}</p>
       </div>
       <p v-else class="note" data-tone="neg">token 列表讀不到</p>
-      <p class="note">API Token 依建立時間、ID 穩定選取第一把啟用者；Server 不自動輪替或重試。</p>
+      <p class="note">使用最早建立且啟用中的 Token，不會自動輪替。</p>
     </section>
 
     <Modal v-if="editing" @close="editing = false">
@@ -179,7 +179,7 @@ async function removeToken(t) {
         <h2>新增 API Token</h2>
         <label>name <input v-model="form.name" required /></label>
         <label>明文 token（送出後永遠看不到，只回 masked）<input v-model="form.token" class="mono" type="password" autocomplete="off" required /></label>
-        <p class="note">不能含空白或控制字元；前端不保存、不快取，送出即清空。</p>
+        <p class="note">不能含空白或控制字元。</p>
         <p v-if="addError" data-tone="neg">{{ addError }}</p>
         <menu>
           <button type="button" @click="adding = false; form.token = ''">取消</button>

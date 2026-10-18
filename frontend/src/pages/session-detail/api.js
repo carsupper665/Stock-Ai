@@ -20,7 +20,7 @@ export const getToolStats = (id) => agent('GET', `/sessions/${id}/tools/stats`)
 export const getPositions = (id) => agent('GET', `/sessions/${id}/positions`)
 export const getLedger = (id, before) => agent('GET', `/sessions/${id}/ledger${before ? `?before_seq=${before}` : ''}`)
 
-// 交易後端：帳號本體（含 token）用 USER；equity 等四個數字只有 Account Token 自查拿得到（待定 6）
+// 交易後端：帳號本體（含 token）用 USER；equity 等四個數字只有 Account Token 自查拿得到
 export const getAccount = (id) => api('GET', `/v1/accounts/${id}`)
 export const selfAccount = (token) => api('GET', '/v1/account', undefined, token)
 export const listPositions = (accountId) => api('GET', `/v1/accounts/${accountId}/positions`)
