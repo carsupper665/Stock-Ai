@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
 
-import { steps } from '../src/shared/run.js'
+import { conversation } from '../src/shared/run.js'
 import Runs from '../src/pages/session-detail/Runs.vue'
 import { session } from '../src/core/session.js'
 
@@ -28,124 +28,117 @@ function mountRuns(run, sessionValue = { id: 'session_1' }, runs = [run]) {
   return root
 }
 
-it('run viewer omits call arguments and only exposes actual model content or reasoning', () => {
-  const history = steps({ progress: [
-    {
-      type: 'model_call', iteration: 1, model_name: 'analysis-model', provider_id: 'provider', model: 'actual-model',
-      content: 'Visible answer', finish_reason: 'tool_call',
-      tool_calls: [{ name: 'get_price', arguments: { token: 'must-not-render', symbol: 'BTCUSDT' } }],
-    },
-    { type: 'model_call', iteration: 2, reasoning: 'Provider supplied reasoning', content: null, tool_calls: [] },
+it('groups each tool call under the decision that requested it, keeping arguments and results for the details', () => {
+  const items = conversation({ status: 'completed', progress: [
+    { type: 'model_call', iteration: 1, model_name: 'analysis-model', content: 'Visible answer', finish_reason: 'tool_call', ended_at: 'x',
+      tool_calls: [{ id: 'c1', name: 'get_ohlcv', arguments: { symbol: 'BTCUSDT', interval: '1h' } }] },
+    { type: 'tool_call', iteration: 1, tool_call_id: 'c1', tool_name: 'get_ohlcv', arguments: { symbol: 'BTCUSDT', interval: '1h' },
+      result: { ok: true, result: { candle_count: 2 } }, duration_ms: 42, ended_at: 'x' },
+    { type: 'model_call', iteration: 2, reasoning: 'Provider supplied reasoning', content: null, tool_calls: [], ended_at: 'x' },
   ] })
 
-  expect(history[0]).toMatchObject({ kind: 'model', content: 'Visible answer', reasoning: '', tools: ['get_price'] })
-  expect(history[1].reasoning).toBe('Provider supplied reasoning')
-	 expect(history[0].status).toBe('completed')
-  expect(JSON.stringify(history)).not.toContain('must-not-render')
-  expect(JSON.stringify(history)).not.toContain('BTCUSDT')
+  expect(items).toHaveLength(2)
+  expect(items[0]).toMatchObject({ kind: 'model', title: '決策 1', content: 'Visible answer', thinking: false })
+  expect(items[0].tools).toHaveLength(1)
+  expect(items[0].tools[0]).toMatchObject({ name: 'get_ohlcv', label: '查 K 線', status: 'ok', duration: 42, action: false })
+  expect(items[0].tools[0].args).toContainEqual({ label: 'symbol', value: 'BTCUSDT' })
+  expect(items[0].tools[0].result).toEqual([{ label: 'candle_count', value: '2' }])
+  expect(items[1].reasoning).toBe('Provider supplied reasoning')
 })
 
-it('shows a sanitized failed model-attempt status without leaking error details or arguments', () => {
-  const [attempt] = steps({ progress: [{
-    type: 'model_call', iteration: 1, model_name: 'analysis-model',
-    error: 'PROVIDER_UNAVAILABLE: upstream included secret-token',
-    tool_calls: [{ name: 'get_price', arguments: { token: 'hidden-argument' } }],
+it('shows a failed model attempt by code only without leaking provider error details', () => {
+  const [attempt] = conversation({ progress: [{
+    type: 'model_call', iteration: 1, model_name: 'analysis-model', error: 'PROVIDER_UNAVAILABLE: upstream included secret-token', tool_calls: [],
   }] })
 
-  expect(attempt).toMatchObject({ kind: 'model', status: 'failed', tone: 'neg', error: { code: 'PROVIDER_UNAVAILABLE' } })
+  expect(attempt).toMatchObject({ kind: 'model', error: { code: 'PROVIDER_UNAVAILABLE' }, thinking: false })
   expect(JSON.stringify(attempt)).not.toContain('secret-token')
-  expect(JSON.stringify(attempt)).not.toContain('hidden-argument')
 })
 
-it('run viewer projects tool results into human-readable fields without raw JSON or arguments', () => {
-  const [tool] = steps({ progress: [{
-    type: 'tool_call', iteration: 3, tool_name: 'get_positions', arguments: { account_id: 'secret-account' },
-    result: { ok: true, result: { positions: [{ symbol: 'BTCUSDT', quantity: 2 }], has_more: false } },
-  }] })
-
-  expect(tool).toMatchObject({ kind: 'tool', title: 'tool · get_positions', meta: 'ok', filtered: true })
-  expect(tool.fields).toEqual([
-    { label: 'positions [1] · symbol', value: 'BTCUSDT' },
-    { label: 'positions [1] · quantity', value: '2' },
-    { label: 'has_more', value: 'false' },
-  ])
-  expect(JSON.stringify(tool)).not.toContain('secret-account')
-})
-
-it('renders tool results and model text as independently collapsed sections', () => {
+it('renders tool calls collapsed showing only what was called while model text stays readable', () => {
   const run = {
     run_id: 1, status: 'completed', trigger: 'session_start', start_time: '2026-09-16T00:00:00Z', end_time: '2026-09-16T00:00:01Z',
-    tool_call_count: 1, model_call_count: 1,
+    tool_call_count: 2, model_call_count: 1,
     progress: [
-      { type: 'model_call', iteration: 1, content: 'Visible model content', tool_calls: [{ name: 'get_price', arguments: { secret: 'hidden-call-argument' } }] },
-      { type: 'tool_call', iteration: 1, tool_name: 'get_price', arguments: { secret: 'hidden-tool-argument' }, result: { ok: true, result: { symbol: 'BTCUSDT', price: 60000 } } },
-      { type: 'tool_call', iteration: 1, tool_name: 'get_account_state', arguments: { secret: 'other-hidden-argument' }, result: { ok: true, result: { balance: 97500 } } },
+      { type: 'model_call', iteration: 1, reasoning: 'first thought\nsecond thought', content: 'Visible model content', ended_at: 'x',
+        tool_calls: [{ id: 'a', name: 'get_market_snapshot' }, { id: 'b', name: 'place_order' }] },
+      { type: 'tool_call', iteration: 1, tool_call_id: 'a', tool_name: 'get_market_snapshot', arguments: { symbol: 'BTCUSDT' }, result: { ok: true, result: { price: 60000 } }, ended_at: 'x' },
+      { type: 'tool_call', iteration: 1, tool_call_id: 'b', tool_name: 'place_order', arguments: { side: 'buy' }, result: { ok: false, error: { code: 'MAX_DD_STOPPED', message: 'stopped', outcome: 'not_executed' } }, ended_at: 'x' },
     ],
   }
   mountRuns(run)
 
-  const results = document.querySelectorAll('details.tool-result')
-  expect(results).toHaveLength(2)
-  expect(results[0].open).toBe(false)
-  expect(results[1].open).toBe(false)
-  const modelText = document.querySelectorAll('details.model-text')
-  expect(modelText).toHaveLength(1)
-  expect(modelText[0].open).toBe(false)
-  results[0].querySelector('summary').click()
-  expect(results[0].open).toBe(true)
-  expect(results[1].open).toBe(false)
-  expect(document.body.textContent).toContain('Visible model content')
-  expect(document.body.textContent).toContain('BTCUSDT')
-  expect(document.body.textContent).not.toContain('hidden-call-argument')
-  expect(document.body.textContent).not.toContain('hidden-tool-argument')
-  expect(document.body.textContent).not.toContain('other-hidden-argument')
+  const tools = document.querySelectorAll('details.tool')
+  expect(tools).toHaveLength(2)
+  expect([...tools].every((tool) => !tool.open)).toBe(true)
+  expect(tools[0].querySelector('summary').textContent).toContain('查即時價')
+  expect(tools[0].querySelector('summary').textContent).toContain('get_market_snapshot')
+  expect(tools[0].querySelector('summary').textContent).not.toContain('BTCUSDT')
+  expect(tools[1].hasAttribute('data-action')).toBe(true)
+  expect(tools[1].dataset.status).toBe('error')
+  tools[1].querySelector('summary').click()
+  expect(tools[1].open).toBe(true)
+  expect(tools[1].textContent).toContain('MAX_DD_STOPPED')
+  expect(document.querySelector('.message > .text').textContent).toBe('Visible model content')
+  const reasoning = document.querySelector('details.reasoning')
+  expect(reasoning.open).toBe(false)
+  expect(reasoning.querySelector('.preview').textContent).toBe('first thought')
 })
 
-it('renders a finalization envelope as readable fields instead of raw JSON', () => {
+it('renders the finalization envelope as a final decision card', () => {
   const content = JSON.stringify({ status: 'failed', output: 'finished', summary: 'short summary' })
-  const [attempt] = steps({ progress: [{ type: 'model_call', attempt_type: 'terminal', attempt: 2, iteration: 3, content, finish_reason: 'stop', tool_calls: [] }] })
-  expect(attempt.content).toBe('')
-  expect(attempt.step).toBe('terminal')
-  expect(attempt.meta).toContain('終結 attempt 2 / 4')
+  const [attempt] = conversation({ progress: [{ type: 'model_call', attempt_type: 'terminal', attempt: 2, iteration: 3, content, finish_reason: 'stop', tool_calls: [] }] })
+  expect(attempt).toMatchObject({ title: '收尾', content: '' })
+  expect(attempt.meta).toContain('第 2 次嘗試')
+  expect(attempt.envelope).toContainEqual({ label: 'status', value: 'failed' })
   expect(attempt.envelope).toContainEqual({ label: 'output', value: 'finished' })
   expect(attempt.envelope).toContainEqual({ label: 'summary', value: 'short summary' })
-  expect(attempt.envelope).toContainEqual({ label: 'status', value: 'failed' })
-  expect(JSON.stringify(attempt)).not.toContain('{"status"')
 })
 
-it('keeps terminal attempts separate from decisions and only renders supplied model diagnostics', () => {
-  const history = steps({ progress: [
-    { type: 'model_call', iteration: 3, attempt: 2, content: '', tool_calls: [], finish_reason: 'tool_call' },
-    { type: 'model_call', iteration: 3, attempt_type: 'terminal', attempt: 1, error: 'INVALID_RESPONSE: repair', session_mode: 'resume', invocation_count: 2 },
-    { type: 'model_call', iteration: 3, attempt_type: 'terminal', attempt: 2, content: 'done', tool_calls: [], finish_reason: 'stop', fallback_reason: 'resume_not_found' },
+it('animates the model that is thinking and the tool that is running only while the Run runs', () => {
+  const progress = [
+    { type: 'model_call', iteration: 1, content: 'checking', ended_at: 'x', tool_calls: [{ id: 'a', name: 'get_ohlcv' }] },
+    { type: 'tool_call', iteration: 1, tool_call_id: 'a', tool_name: 'get_ohlcv', result: { ok: false, error: { code: 'TOOL_INTERRUPTED' } } },
+    { type: 'model_call', iteration: 2, started_at: 'x' },
+  ]
+  const run = { run_id: 7, status: 'running', trigger: 'event', start_time: '2026-09-16T00:00:00Z', progress }
+  mountRuns(run)
+  expect(document.querySelectorAll('.thinking[role=status]')).toHaveLength(1)
+  expect(document.querySelector('details.tool .spinner')).not.toBeNull()
+  app.unmount(); document.body.innerHTML = ''
+  mountRuns({ ...run, status: 'interrupted', end_time: '2026-09-16T00:00:05Z' })
+  expect(document.querySelector('.thinking')).toBeNull()
+  expect(document.querySelector('.spinner')).toBeNull()
+  expect(document.querySelector('details.tool').dataset.status).toBe('error')
+})
+
+it('shows repairs and context compaction as short notices between messages', () => {
+  const items = conversation({ progress: [
+    { type: 'context_compaction', tool_name: 'context_compaction', result: { ok: true, result: { stage: 'llm' } } },
+    { type: 'instruction', attempt_type: 'terminal', content: 'Terminal instruction' },
+    { type: 'model_resolution', error: 'MODEL_UNAVAILABLE: model_name is currently unavailable' },
   ] })
-
-  expect(history.map((entry) => entry.step)).toEqual(['decision 3', 'terminal', 'terminal'])
-  expect(history[1].meta).toContain('終結 attempt 1 / 4')
-  expect(history[2].meta).toContain('終結 attempt 2 / 4')
-  expect(history[1].diagnostics).toEqual([
-    { label: 'session mode', value: 'resume' },
-    { label: 'invocations', value: '2' },
-  ])
-  expect(history[2].diagnostics).toEqual([{ label: 'fallback reason', value: 'resume_not_found' }])
-  expect(JSON.stringify(history[0].diagnostics)).not.toContain('session mode')
+  expect(items.map((item) => item.kind)).toEqual(['notice', 'notice', 'notice'])
+  expect(items[0].text).toContain('模型摘要')
+  expect(items[1].text).toContain('最終結果')
+  expect(items[2]).toMatchObject({ tone: 'neg' })
+  expect(items[2].text).toContain('MODEL_UNAVAILABLE')
 })
 
-it('bounds long Run lists and timelines while keeping every large payload collapsed', () => {
+it('bounds long Run lists and conversations while keeping every tool and reasoning collapsed', () => {
   const text = 'long trace '.repeat(4000)
   const progress = Array.from({ length: 120 }, (_, index) => index % 2
-    ? { type: 'tool_call', iteration: index, tool_name: 'get_price', result: { ok: true, result: { value: text } } }
-    : { type: 'model_call', iteration: index, reasoning: text, content: text, tool_calls: [] })
+    ? { type: 'tool_call', iteration: index, tool_call_id: `c${index - 1}`, tool_name: 'get_market_snapshot', result: { ok: true, result: { value: text } }, ended_at: 'x' }
+    : { type: 'model_call', iteration: index, reasoning: text, content: text, ended_at: 'x', tool_calls: [{ id: `c${index}`, name: 'get_market_snapshot' }] })
   const run = { run_id: 120, status: 'completed', trigger: 'event', start_time: '2026-09-16T00:00:00Z', end_time: '2026-09-16T00:00:01Z', progress, output: text }
   const runs = Array.from({ length: 100 }, (_, index) => ({ ...run, run_id: index + 21, progress: index === 99 ? progress : [] }))
   mountRuns(runs.at(-1), { id: 'session_1' }, runs)
 
   expect(document.querySelector('.list-scroll')).not.toBeNull()
-  expect(document.querySelector('.timeline')).not.toBeNull()
-  expect(document.querySelectorAll('details.tool-result')).toHaveLength(60)
-  expect(document.querySelectorAll('details.model-text')).toHaveLength(120)
+  expect(document.querySelector('.chat')).not.toBeNull()
+  expect(document.querySelectorAll('details.tool')).toHaveLength(60)
+  expect(document.querySelectorAll('details.reasoning')).toHaveLength(60)
   expect([...document.querySelectorAll('details')].every((item) => !item.open)).toBe(true)
-  expect(document.querySelector('.final-output').open).toBe(false)
 })
 
 it('downloads the authenticated whole History shard with a safe filename and revokes its URL', async () => {

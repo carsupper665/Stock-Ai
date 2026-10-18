@@ -1,9 +1,9 @@
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { downloadHistory, getRun, retryRun } from './api.js'
 
 import { duration, fmtClock, tone } from '../../shared/format.js'
-import { explainError, steps } from '../../shared/run.js'
+import { conversation, explainError } from '../../shared/run.js'
 import { say } from '../../shared/toast.js'
 
 const props = defineProps({ session: Object, runs: Array, page: Number, initial: String })
@@ -25,7 +25,21 @@ watch([selected, () => props.runs], async () => {
   catch (e) { if (request === selectionRequest) runError.value = e.message }
 }, { immediate: true })
 const err = computed(() => explainError(run.value?.error))
-const history = computed(() => steps(run.value))
+const history = computed(() => conversation(run.value))
+// 停在底部時跟著新內容捲動；往上翻閱時不打斷
+const chat = ref(null)
+let stick = true
+function onScroll() {
+  const el = chat.value
+  if (el) stick = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+watch(selected, () => { stick = true })
+watch(history, async () => {
+  await nextTick()
+  if (stick && chat.value) chat.value.scrollTop = chat.value.scrollHeight
+}, { immediate: true })
+const firstLine = (text) => text.split('\n').find((line) => line.trim())?.trim() ?? ''
+const icons = { ok: '✓', error: '✗', denied: '⊘' }
 const retrying = ref(false)
 const retryReason = computed(() => {
   if (!run.value) return '尚未選擇 Run'
@@ -90,7 +104,7 @@ async function saveHistory() {
 // event Run 帶 triggers[]（最多 10 個）；其他 Run 只有一個 trigger 字串
 const triggersOf = (r) => (Array.isArray(r.triggers) && r.triggers.length ? r.triggers : null)
 const triggerLabel = (r) => triggersOf(r)?.map((t) => t.type).join(' · ') ?? r.trigger
-const meanings = { session_start: '第一次 start', session_restart: 'stop 後再 start（帶 restart_context）', server_recovery: 'Server 重啟後恢復', manual_retry: '使用者對 failed Run 建立的新 Run', event: 'Event 觸發' }
+const meanings = { session_start: '第一次啟動', session_restart: '停止後重新啟動', server_recovery: 'Server 重啟後恢復', manual_retry: '使用者對失敗的 Run 重試', event: 'Event 觸發' }
 function matchedText(t) {
   const m = t.matched ?? {}
   if (t.type === 'timer') return `at ${fmtClock(m.at)}`
@@ -123,7 +137,7 @@ function matchedText(t) {
         </table>
       </div>
       <div class="row pager mono" data-tone="mute">
-        <span>page {{ page }} · 每頁 100 · run_id 遞增即時間順序</span>
+        <span>第 {{ page }} 頁</span>
         <span class="grow"></span>
         <button :disabled="page <= 1" @click="$emit('page', page - 1)">‹ 上一頁</button>
         <button :disabled="runs.length < 100" @click="$emit('page', page + 1)">下一頁 ›</button>
@@ -134,71 +148,68 @@ function matchedText(t) {
       <div class="row run-actions">
         <span class="mono title" data-tone="acc">#{{ run.run_id }}</span>
         <span class="tag" :data-tone="tone(run.status)">{{ run.status }}</span>
-        <span class="mono" data-tone="mute">{{ fmtClock(run.start_time) }} → {{ run.end_time ? fmtClock(run.end_time) : '進行中' }}</span>
+        <span class="mono" data-tone="mute">{{ fmtClock(run.start_time) }} → {{ run.end_time ? fmtClock(run.end_time) : '進行中' }} · {{ run.model_call_count ?? 0 }} 次模型呼叫 · {{ run.tool_call_count ?? 0 }} 次工具</span>
         <span v-if="run.retry_attempt" class="tag outline" data-tone="warn">Retry {{ run.retry_attempt }} / 3 · source #{{ run.retry_of_run_id }}</span>
         <span class="grow"></span>
         <button :disabled="historyLoading || !!historyReason" :title="historyReason" @click="saveHistory">{{ historyLoading ? '下載中…' : '下載 History 分片' }}</button>
         <button data-tone="warn" :disabled="retrying || !!retryReason" :title="retryReason" @click="retry">{{ retrying ? 'Retrying…' : 'Retry' }}</button>
       </div>
-      <p v-if="historyReason" class="note">{{ historyReason }}</p>
       <p v-if="historyError" role="alert" data-tone="neg">History 下載失敗：{{ historyError }}</p>
-      <p class="note">{{ retryReason || 'Retry 會建立新 Run；不重送舊 Tool call，交易前必須重新查核帳戶與 Ledger。' }}</p>
-
+      <p v-if="run.status === 'failed'" class="note">Retry 會建立新的 Run，不會重送舊的工具呼叫。</p>
       <div v-if="err" class="callout" data-tone="neg">
         <div class="mono" data-tone="neg">{{ err.code }}</div>
         <div>{{ err.message }}</div>
         <div v-if="err.hint" class="note">{{ err.hint }}</div>
       </div>
 
-      <div>
-        <div class="eyebrow">Triggers（一個 Run 最多 10 個）</div>
-        <div v-if="triggersOf(run)" class="rows">
-          <div v-for="(t, i) in triggersOf(run)" :key="i" class="row trigger">
-            <span class="mono type" data-tone="acc">{{ t.type }}</span>
-            <span class="mono grow" data-tone="dim">{{ matchedText(t) }} · 由 Run #{{ t.created_run_id }} 建立 · {{ fmtClock(t.fired_at) }}</span>
+      <div ref="chat" class="chat" @scroll="onScroll">
+        <div class="wake">
+          <span class="eyebrow">喚醒原因</span>
+          <template v-if="triggersOf(run)">
+            <div v-for="(t, i) in triggersOf(run)" :key="i" class="row trigger">
+              <span class="mono type" data-tone="acc">{{ t.type }}</span>
+              <span class="mono grow" data-tone="dim">{{ matchedText(t) }} · 由 Run #{{ t.created_run_id }} 建立 · {{ fmtClock(t.fired_at) }}</span>
+            </div>
+          </template>
+          <div v-else class="row trigger">
+            <span class="mono type" data-tone="acc">{{ run.trigger }}</span>
+            <span data-tone="dim">{{ meanings[run.trigger] ?? '' }}</span>
           </div>
         </div>
-        <div v-else class="row trigger">
-          <span class="mono type" data-tone="acc">{{ run.trigger }}</span>
-          <span class="mono" data-tone="dim">{{ meanings[run.trigger] ?? '' }}</span>
-        </div>
-      </div>
 
-      <div class="col">
-        <div class="eyebrow">執行進度與歷史</div>
-        <ol v-if="history.length" class="timeline">
-          <li v-for="h in history" :key="h.key">
-            <details v-if="h.kind === 'tool'" class="tool-result">
-              <summary>
-                <span class="mono" data-tone="mute">{{ h.step }}</span>
-                <span class="step-title" :data-tone="h.tone">{{ h.title }}</span>
-                <span class="mono small" data-tone="mute">{{ h.meta }}</span>
-              </summary>
-              <dl class="kv result-fields">
-                <template v-for="(field, index) in h.fields" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template>
-              </dl>
-              <span v-if="h.filtered" class="tag outline" data-tone="warn">工具結果已過濾 — 缺的欄位不是 bug</span>
+        <template v-for="item in history" :key="item.key">
+          <p v-if="item.kind === 'notice'" class="notice" :data-tone="item.tone">{{ item.text }}</p>
+          <article v-else class="message">
+            <div class="who"><span class="avatar" aria-hidden="true">AI</span><b>{{ item.title }}</b><span data-tone="mute">{{ item.meta }}</span></div>
+            <div v-if="item.error" class="callout" data-tone="neg"><span class="mono">{{ item.error.code }}</span> · {{ item.error.message }}</div>
+            <details v-if="item.reasoning" class="reasoning">
+              <summary><span class="label">思考過程</span><span class="preview">{{ firstLine(item.reasoning) }}</span></summary>
+              <div class="text">{{ item.reasoning }}</div>
             </details>
-            <template v-else>
-              <div class="row">
-                <span class="mono" data-tone="mute">{{ h.step }}</span>
-                <span class="step-title">{{ h.title }}</span>
-                <span class="mono small" data-tone="mute">{{ h.meta }}</span>
-                <span class="tag outline" :data-tone="h.tone">{{ h.status }}</span>
+            <div v-if="item.content" class="text">{{ item.content }}</div>
+            <div v-if="item.envelope" class="final">
+              <span class="eyebrow">最終決策</span>
+              <dl class="kv"><template v-for="(field, index) in item.envelope" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl>
+            </div>
+            <details v-for="tool in item.tools" :key="tool.key" class="tool" :data-status="tool.status" :data-action="tool.action ? '' : null">
+              <summary>
+                <span v-if="tool.status === 'running'" class="spinner" aria-label="執行中"></span>
+                <span v-else class="icon" aria-hidden="true">{{ icons[tool.status] }}</span>
+                <b>{{ tool.label }}</b>
+                <span class="mono" data-tone="mute">{{ tool.name }}</span>
+                <span class="grow"></span>
+                <span v-if="tool.duration != null" class="mono small" data-tone="mute">{{ tool.duration }} ms</span>
+              </summary>
+              <div class="tool-body">
+                <div v-if="tool.args.length"><span class="eyebrow">參數</span><dl class="kv"><template v-for="(field, index) in tool.args" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl></div>
+                <div v-if="tool.result.length"><span class="eyebrow">結果</span><dl class="kv"><template v-for="(field, index) in tool.result" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl></div>
               </div>
-              <div v-if="h.error" class="callout" data-tone="neg"><span class="mono">{{ h.error.code }}</span> · {{ h.error.message }}</div>
-              <details v-if="h.reasoning" class="inset trace-text model-text"><summary>模型 reasoning · {{ h.reasoning.length }} 字元</summary><pre>{{ h.reasoning }}</pre></details>
-              <details v-if="h.content" class="inset trace-text model-text"><summary>模型內容 · {{ h.content.length }} 字元</summary><pre>{{ h.content }}</pre></details>
-              <dl v-if="h.envelope" class="kv result-fields"><template v-for="(field, index) in h.envelope" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl>
-              <dl v-if="h.diagnostics.length" class="kv result-fields"><template v-for="field in h.diagnostics" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl>
-              <p v-if="h.tools.length" class="note">要求呼叫：{{ h.tools.join('、') }}（呼叫參數不在 UI 顯示）</p>
-              <p v-if="!h.reasoning && !h.content && !h.envelope && !h.tools.length" class="note">這次模型回應沒有可顯示的內容。</p>
-            </template>
-          </li>
-        </ol>
-        <p v-else class="note">還沒有任何模型／工具呼叫。</p>
-        <details v-if="run.output" class="inset final-output"><summary>最終輸出 · {{ run.output.length }} 字元</summary><pre class="body">{{ run.output }}</pre></details>
-        <p class="note">只顯示 Provider 實際回傳並由 Server 保存的模型內容；不推測或補造 hidden chain-of-thought。Tool 呼叫參數不在 UI 顯示。</p>
+            </details>
+            <div v-if="item.thinking" class="thinking" role="status"><span>思考中</span><i></i><i></i><i></i></div>
+            <p v-if="!item.thinking && !item.error && !item.reasoning && !item.content && !item.envelope && !item.tools.length" class="note">這次模型回應沒有可顯示的內容。</p>
+          </article>
+        </template>
+        <p v-if="!history.length" class="note">還沒有任何模型呼叫。</p>
       </div>
     </section>
     <div v-else class="card detail note" :role="runError ? 'alert' : null">{{ runError || (selected ? '載入選定 Run…' : '左邊選一個 Run 看明細') }}</div>
@@ -208,7 +219,7 @@ function matchedText(t) {
 <style scoped>
 .run-layout {
   display: grid;
-  grid-template-columns: minmax(420px, 0.9fr) minmax(500px, 1.3fr);
+  grid-template-columns: minmax(360px, 0.7fr) minmax(520px, 1.6fr);
   gap: 12px;
   align-items: start;
 }
@@ -247,51 +258,193 @@ function matchedText(t) {
   font-size: 15px;
   font-weight: 500;
 }
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: min(74vh, 860px);
+  overflow: auto;
+  padding: 4px 8px 12px 2px;
+}
+.wake {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line2);
+  border-radius: 8px;
+}
 .trigger {
-  padding: 4px 0;
+  padding: 2px 0;
 }
 .type {
   width: 132px;
   flex: none;
 }
-.step-title {
-  font-size: 12.5px;
-  font-weight: 500;
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 780px;
 }
-.body {
-  font-size: 12px;
-  margin-top: 2px;
-}
-.tool-result summary {
+.who {
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
+  font-size: 12.5px;
 }
-.timeline {
-  max-height: min(64vh, 680px);
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accw);
+  color: var(--acc);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.text {
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
   overflow: auto;
-  padding-right: 6px;
 }
-.result-fields {
-  margin-top: 8px;
-  max-height: 46vh;
-  overflow: auto;
+.reasoning {
+  border-left: 2px solid var(--line2);
+  padding-left: 12px;
 }
-.trace-text {
-  margin-top: 6px;
-}
-.trace-text summary,
-.final-output summary {
+.reasoning summary {
+  display: flex;
+  gap: 8px;
   cursor: pointer;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: 13px;
 }
-.trace-text pre,
-.final-output pre {
+.reasoning .label {
+  flex: none;
+}
+.reasoning .preview {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--mute);
+}
+.reasoning[open] .preview {
+  display: none;
+}
+.reasoning .text {
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: 14px;
+}
+.final {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--pos);
+  border-radius: 8px;
+  font-size: 14px;
+}
+.tool {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surf2);
+}
+.tool[data-action] {
+  border-color: var(--acc);
+  background: var(--accw);
+}
+.tool[data-status='error'],
+.tool[data-status='denied'] {
+  border-color: var(--neg);
+}
+.tool summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tool .icon {
+  width: 14px;
+  text-align: center;
+}
+.tool[data-status='ok'] .icon {
+  color: var(--pos);
+}
+.tool[data-status='error'] .icon,
+.tool[data-status='denied'] .icon {
+  color: var(--neg);
+}
+.tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 12px 10px;
   max-height: 46vh;
   overflow: auto;
-  margin-top: 8px;
+}
+.notice {
+  align-self: center;
+  max-width: 640px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--surf2);
+  color: var(--dim);
+  font-size: 12px;
+  text-align: center;
+}
+.notice[data-tone='neg'] {
+  color: var(--neg);
+}
+.notice[data-tone='warn'] {
+  color: var(--warn);
+}
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--dim);
+  font-size: 14px;
+}
+.thinking i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--acc);
+  animation: thinking 1.2s infinite ease-in-out;
+}
+.thinking i:nth-of-type(2) {
+  animation-delay: 0.15s;
+}
+.thinking i:nth-of-type(3) {
+  animation-delay: 0.3s;
+}
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line2);
+  border-top-color: var(--acc);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes thinking {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking i,
+  .spinner {
+    animation: none;
+  }
 }
 @media (max-width: 1100px) {
   .run-layout {
