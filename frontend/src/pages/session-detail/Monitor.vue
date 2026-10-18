@@ -1,7 +1,9 @@
 <script setup>
 import { ref } from 'vue'
 import { useLoad } from '../../core/load.js'
-import { fmtClock, money, num, pnlTone } from '../../shared/format.js'
+import { fmtClock, num } from '../../shared/format.js'
+import ActivityList from '../../shared/ActivityList.vue'
+import PositionCard from '../../shared/PositionCard.vue'
 import { getLedger, getPositions, getToolStats, getUsage } from './api.js'
 
 const props = defineProps({ session: Object })
@@ -43,11 +45,8 @@ const unknownLabels = { input_tokens: 'Input', output_tokens: 'Output', cached_t
         <p v-if="positions.error.value" class="callout" data-tone="neg">部位載入失敗：{{ positions.error.value.message }}</p>
         <p v-if="positions.loading.value && !positions.data.value" class="note">載入部位中…</p>
         <template v-if="positions.data.value">
-          <div v-if="positions.data.value.positions.length" class="table-scroll positions-scroll">
-            <table>
-              <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>SL / TP</th><th>Unrealized</th></tr></thead>
-              <tbody><tr v-for="p in positions.data.value.positions" :key="p.id"><td>{{ p.symbol }}</td><td>{{ p.side }}</td><td>{{ num(p.quantity) }}</td><td>{{ num(p.entry_price) }}</td><td>{{ num(p.mark_price) }}</td><td>{{ num(p.stop_loss) }} / {{ num(p.take_profit) }}</td><td :data-tone="pnlTone(p.unrealized_pnl)">{{ money(p.unrealized_pnl) }}</td></tr></tbody>
-            </table>
+          <div v-if="positions.data.value.positions.length" class="positions-scroll position-cards">
+            <PositionCard v-for="p in positions.data.value.positions" :key="p.id" :position="p" />
           </div>
           <p v-else class="empty">目前沒有未平倉部位。</p>
         </template>
@@ -62,11 +61,8 @@ const unknownLabels = { input_tokens: 'Input', output_tokens: 'Output', cached_t
         <p v-if="ledger.error.value" class="callout" data-tone="neg">Ledger 載入失敗：{{ ledger.error.value.message }}</p>
         <p v-if="ledger.loading.value && !ledger.data.value" class="note">載入 Ledger 中…</p>
         <template v-if="ledger.data.value">
-          <div v-if="ledger.data.value.entries.length" class="table-scroll ledger-scroll">
-            <table>
-              <thead><tr><th>Seq / time</th><th>Event</th><th class="num">Balance Δ</th><th>Source</th></tr></thead>
-              <tbody><tr v-for="e in ledger.data.value.entries" :key="e.seq"><td class="mono">#{{ e.seq }}<div class="small" data-tone="mute">{{ fmtClock(e.created_at) }}</div></td><td>{{ e.event }} {{ e.trigger ?? '' }}</td><td class="num" :data-tone="pnlTone(e.balance_delta)">{{ money(e.balance_delta) }}</td><td><RouterLink v-if="e.source" :to="{ name: 'session-detail', params: { id: e.source.session_id }, query: { tab: 'runs', run: e.source.run_id } }">{{ e.source.session_id === session.id ? '' : `${e.source.session_id} / ` }}Run #{{ e.source.run_id }}</RouterLink><span v-else class="note">非 Agent／未歸屬</span></td></tr></tbody>
-            </table>
+          <div v-if="ledger.data.value.entries.length" class="ledger-scroll">
+            <ActivityList kind="ledger" :items="ledger.data.value.entries" :session-id="session.id" />
           </div>
           <p v-else class="empty">沒有帳戶事件。</p>
           <div class="row"><button :disabled="!previous.length || ledger.loading.value" @click="newer">較新</button><button :disabled="ledger.data.value.entries.length < 100 || ledger.loading.value" @click="older">較舊</button></div>
@@ -94,7 +90,7 @@ const unknownLabels = { input_tokens: 'Input', output_tokens: 'Output', cached_t
           <div class="stats unknown-usage">
             <div v-for="(label, key) in unknownLabels" :key="key" class="stat"><small>{{ label }} 未回報次數</small><b>{{ num(usage.data.value.unknown_attempts?.[key]) }}</b></div>
           </div>
-          <p class="note">用量為已回報值合計，— 表示未知；cached 已包含於 input。</p>
+          <p class="note">— 表示 Provider 未回報。</p>
         </template>
       </section>
 
@@ -125,8 +121,9 @@ const unknownLabels = { input_tokens: 'Input', output_tokens: 'Output', cached_t
 .monitor-stack { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .card { min-width: 0; padding: 9px 10px; gap: 7px; }
 .table-scroll { overflow: auto; }
-.positions-scroll { max-height: 300px; }
-.ledger-scroll { max-height: 430px; }
+.positions-scroll { max-height: 520px; overflow: auto; }
+.position-cards { display: grid; gap: 10px; }
+.ledger-scroll { max-height: 430px; overflow: auto; }
 .usage-scroll { max-height: 320px; }
 .tools-scroll { max-height: 430px; }
 .unknown-usage { grid-template-columns: repeat(4, minmax(90px, 1fr)); }

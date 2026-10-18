@@ -4,6 +4,8 @@ import { computed, ref, watch } from 'vue'
 import { useLoad } from '../../core/load.js'
 import { confirm } from '../../shared/confirm.js'
 import { fmtTime, money, num, pnlTone, tone } from '../../shared/format.js'
+import ActivityList from '../../shared/ActivityList.vue'
+import PositionCard from '../../shared/PositionCard.vue'
 import { copy, say } from '../../shared/toast.js'
 import { deleteAccount, listLedger, listOrders, listPositions, listTrades, resetToken, resumeTrading, selfAccount, updateAccount } from './api.js'
 
@@ -11,14 +13,13 @@ const props = defineProps({ account: Object, session: Object, refresh: Function 
 const emit = defineEmits(['changed', 'deleted'])
 
 const masked = computed(() => `${props.account.token.slice(0, 6)}…${props.account.token.slice(-4)}`)
-// 待定 6：四個數字只有 Account Token 自查拿得到；帳號 token 的 401 只影響這一塊，不會登出 USER
+// 四個數字只有 Account Token 自查拿得到；帳號 token 的 401 只影響這一塊，不會登出 USER
 const summary = useLoad(() => selfAccount(props.account.token))
 
 const tab = ref('positions')
 const product = ref('')
 const status = ref('')
 const limit = ref(50)
-const hints = { positions: 'product 可篩 spot / futures', orders: 'limit 預設 50、最多 200、最新在前（無游標）', trades: 'limit 預設 50、最多 200、最新在前（無游標）', ledger: 'limit 預設 50、最多 200、seq 由新到舊；只有 fill 會動餘額' }
 const rows = useLoad(load)
 function load() {
   const id = props.account.id
@@ -27,8 +28,6 @@ function load() {
   if (tab.value === 'ledger') return listLedger(id, limit.value).then((r) => r.entries)
   return listTrades(id, limit.value).then((r) => r.trades)
 }
-// 追溯（X-07）：任何 run_id 都能點到該 Session 的 Run；沒綁 Session 時只顯示文字
-const runLink = (source) => (source?.session_id ? { name: 'session-detail', params: { id: source.session_id }, query: { tab: 'runs', run: source.run_id } } : null)
 watch([tab, product, status, limit], () => { rows.data.value = null; rows.reload() }, { flush: 'sync' })
 
 async function run(fn, done) {
@@ -127,7 +126,7 @@ async function resume() {
         <button v-if="account.max_dd_stopped_at" class="wide" data-tone="acc" :disabled="resuming" @click="resume">{{ resuming ? '解除中…' : '解除風控停止' }}</button>
       </div>
       <p v-else class="note">最大虧損 max_dd：未設定</p>
-      <p v-if="summary.error.value" class="empty">代查失敗：{{ summary.error.value.message }}</p>
+      <p v-if="summary.error.value" class="empty">讀取失敗：{{ summary.error.value.message }}</p>
       <div v-else-if="summary.data.value" class="stats">
         <div v-for="k in ['equity', 'available', 'locked_margin', 'unrealized_pnl']" :key="k" class="stat big">
           <small>{{ k }}</small>
@@ -135,7 +134,6 @@ async function resume() {
         </div>
       </div>
       <p v-else class="note">載入中…</p>
-      <div class="row sep"><span class="tag pending">待定 6</span><span class="note">這四個數字目前只有 Account Token 自查得到（GET /v1/account），畫面以該帳號的 token 代查。</span></div>
     </section>
 
     <section class="card flush col">
@@ -147,90 +145,30 @@ async function resume() {
         <select v-if="tab === 'positions'" v-model="product"><option value="">全部 product</option><option value="spot">spot</option><option value="futures">futures</option></select>
         <select v-if="tab === 'orders'" v-model="status"><option value="">全部 status</option><option v-for="s in ['open', 'filled', 'canceled', 'rejected']" :key="s" :value="s">{{ s }}</option></select>
         <select v-if="tab !== 'positions'" v-model="limit"><option v-for="n in [20, 50, 100, 200]" :key="n" :value="n">limit {{ n }}</option></select>
-        <span class="mono small" data-tone="mute">{{ hints[tab] }}</span>
       </div>
       <p v-if="rows.error.value" class="callout pad" data-tone="neg">{{ rows.error.value.message }}</p>
       <div v-else-if="rows.data.value" class="scroll">
-        <table v-if="tab === 'positions'">
-          <thead><tr><th>Symbol</th><th>Product</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Mark</th><th class="num">Lev</th><th class="num">Margin</th><th class="num">SL / TP</th><th class="num">Unrealized</th><th>Opened</th></tr></thead>
-          <tbody>
-            <tr v-for="p in rows.data.value" :key="p.id">
-              <td class="mono">{{ p.symbol }}</td><td class="mono small" data-tone="dim">{{ p.product }}</td>
-              <td><span class="tag" :data-tone="tone(p.side)">{{ p.side }}</span></td>
-              <td class="num">{{ num(p.quantity) }}</td><td class="num">{{ num(p.entry_price) }}</td><td class="num">{{ num(p.mark_price) }}</td>
-              <td class="num" data-tone="dim">{{ p.leverage }}x</td><td class="num" data-tone="dim">{{ num(p.margin, 2) }}</td>
-              <td class="num" data-tone="dim">
-                {{ p.stop_loss ? num(p.stop_loss) : '—' }}<template v-if="p.stop_loss_source"> <RouterLink v-if="runLink(p.stop_loss_source)" :to="runLink(p.stop_loss_source)">#{{ p.stop_loss_source.run_id }}</RouterLink><span v-else>#{{ p.stop_loss_source.run_id }}</span></template>
-                / {{ p.take_profit ? num(p.take_profit) : '—' }}<template v-if="p.take_profit_source"> <RouterLink v-if="runLink(p.take_profit_source)" :to="runLink(p.take_profit_source)">#{{ p.take_profit_source.run_id }}</RouterLink><span v-else>#{{ p.take_profit_source.run_id }}</span></template>
-              </td>
-              <td class="num" :data-tone="pnlTone(p.unrealized_pnl)">{{ money(p.unrealized_pnl) }}</td>
-              <td class="mono" data-tone="mute">{{ fmtTime(p.opened_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <table v-else-if="tab === 'orders'">
-          <thead><tr><th>Order</th><th>Symbol</th><th>Side / Type</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Filled</th><th class="num">Avg</th><th class="num">Lev</th><th class="num">SL / TP</th><th class="num">Fee</th><th class="num">Realized</th><th>Status</th><th>Run</th><th>Created</th></tr></thead>
-          <tbody>
-            <tr v-for="o in rows.data.value" :key="o.id">
-              <td class="mono small" data-tone="mute">{{ o.id }}</td>
-              <td class="mono">{{ o.symbol }} <span class="small" data-tone="dim">{{ o.product }}</span></td>
-              <td class="mono" :data-tone="tone(o.side)">{{ o.side }} · {{ o.type }}{{ o.reduce_only ? ' · reduce' : '' }}</td>
-              <td class="num">{{ num(o.quantity) }}</td><td class="num">{{ o.price ? num(o.price) : 'mkt' }}</td>
-              <td class="num">{{ num(o.filled_quantity) }}</td><td class="num">{{ o.avg_fill_price ? num(o.avg_fill_price) : '—' }}</td>
-              <td class="num" data-tone="dim">{{ o.leverage }}x</td>
-              <td class="num" data-tone="dim">{{ o.stop_loss ? num(o.stop_loss) : '—' }} / {{ o.take_profit ? num(o.take_profit) : '—' }}</td>
-              <td class="num" data-tone="dim">{{ num(o.fee, 4) }}</td>
-              <td class="num" :data-tone="pnlTone(o.realized_pnl)">{{ money(o.realized_pnl) }}</td>
-              <td><span class="tag" :data-tone="tone(o.status)">{{ o.status }}</span><div v-if="o.reject_reason" class="note" data-tone="neg">{{ o.reject_reason }}</div></td>
-              <td class="mono">
-                <RouterLink v-if="runLink(o.source)" :to="runLink(o.source)">#{{ o.source.run_id }}</RouterLink>
-                <span v-else :data-tone="o.source ? null : 'mute'">{{ o.source ? `#${o.source.run_id}` : '—' }}</span>
-                <span v-if="o.trigger" class="small" data-tone="warn"> {{ o.trigger }}</span>
-              </td>
-              <td class="mono" data-tone="mute">{{ fmtTime(o.created_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <table v-else-if="tab === 'ledger'">
-          <thead><tr><th class="num">Seq</th><th>Event</th><th>Ref</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fee</th><th class="num">Realized</th><th class="num">Δ Balance</th><th class="num">Balance After</th><th>Run</th><th>Time</th></tr></thead>
-          <tbody>
-            <tr v-for="e in rows.data.value" :key="e.seq">
-              <td class="num" data-tone="mute">{{ e.seq }}</td>
-              <td class="mono">{{ e.event }}<span v-if="e.trigger" class="small" data-tone="warn"> {{ e.trigger }}</span></td>
-              <td class="mono small" data-tone="mute">{{ e.order_id || e.position_id || '—' }}</td>
-              <td class="num">{{ num(e.quantity) }}</td><td class="num">{{ e.price ? num(e.price) : '—' }}</td>
-              <td class="num" data-tone="dim">{{ e.fee ? num(e.fee, 4) : '—' }}</td>
-              <td class="num" :data-tone="e.event === 'fill' ? pnlTone(e.realized_pnl) : 'mute'">{{ e.event === 'fill' ? money(e.realized_pnl) : '—' }}</td>
-              <td class="num" :data-tone="e.event === 'fill' ? pnlTone(e.balance_delta) : 'mute'">{{ e.event === 'fill' ? money(e.balance_delta) : '—' }}</td>
-              <td class="num" data-tone="dim">{{ e.event === 'fill' ? num(e.balance_after, 2) : '—' }}</td>
-              <td class="mono"><RouterLink v-if="runLink(e.source)" :to="runLink(e.source)">#{{ e.source.run_id }}</RouterLink><span v-else :data-tone="e.source ? null : 'mute'">{{ e.source ? `#${e.source.run_id}` : '—' }}</span></td>
-              <td class="mono" data-tone="mute">{{ fmtTime(e.created_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <table v-else>
-          <thead><tr><th>Trade</th><th>Order</th><th>Symbol</th><th>Side</th><th>Role</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fee</th><th class="num">Realized</th><th>Run</th><th>Time</th></tr></thead>
-          <tbody>
-            <tr v-for="t in rows.data.value" :key="t.id">
-              <td class="mono small" data-tone="mute">{{ t.id }}</td><td class="mono small" data-tone="mute">{{ t.order_id }}</td>
-              <td class="mono">{{ t.symbol }} <span class="small" data-tone="dim">{{ t.product }}</span></td>
-              <td class="mono" :data-tone="tone(t.side)">{{ t.side }}</td><td class="mono small" data-tone="dim">{{ t.role }}</td>
-              <td class="num">{{ num(t.quantity) }}</td><td class="num">{{ num(t.price) }}</td><td class="num" data-tone="dim">{{ num(t.fee, 4) }}</td>
-              <td class="num" :data-tone="pnlTone(t.realized_pnl)">{{ money(t.realized_pnl) }}</td>
-              <td class="mono"><RouterLink v-if="runLink(t.source)" :to="runLink(t.source)">#{{ t.source.run_id }}</RouterLink><span v-else :data-tone="t.source ? null : 'mute'">{{ t.source ? `#${t.source.run_id}` : '—' }}</span></td>
-              <td class="mono" data-tone="mute">{{ fmtTime(t.created_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="!rows.data.value.length" class="note pad">沒有資料</p>
+        <div v-if="tab === 'positions'" class="position-cards">
+          <PositionCard v-for="p in rows.data.value" :key="p.id" :position="p" />
+          <p v-if="!rows.data.value.length" class="empty">目前沒有未平倉部位。</p>
+        </div>
+        <template v-else>
+          <ActivityList :kind="tab" :items="rows.data.value" />
+          <p v-if="!rows.data.value.length" class="note pad">沒有資料</p>
+        </template>
       </div>
       <p v-else class="note pad">載入中…</p>
-      <p v-if="tab === 'orders'" class="note pad" data-tone="neg">rejected 訂單的 reject_reason 直接顯示在 STATUS 欄下方，不用點開。</p>
     </section>
   </div>
 </template>
 
 <style scoped>
+.position-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+  padding: 10px;
+}
 .side {
   flex: 1 1 380px;
 }
