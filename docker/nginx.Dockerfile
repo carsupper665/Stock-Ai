@@ -12,7 +12,7 @@ ARG REVISION
 ARG SOURCE_DATE_EPOCH
 ARG VERSION
 RUN test -n "$BUILD_DATE" && test -n "$REVISION" && test -n "$SOURCE_DATE_EPOCH" && test -n "$VERSION"
-RUN apk upgrade --no-cache libexpat pcre2 tiff
+RUN apk upgrade --no-cache libexpat libx11 pcre2 tiff
 LABEL org.opencontainers.image.created=$BUILD_DATE \
       org.opencontainers.image.revision=$REVISION \
       org.opencontainers.image.source="https://github.com/carsupper665/Stock-Ai" \
