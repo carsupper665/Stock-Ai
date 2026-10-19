@@ -14,12 +14,8 @@ import (
 	"backend/internal/logging"
 )
 
-func TestAgentAccountLookupWorksWithStaticUSERDisabled(t *testing.T) {
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "false")
-	t.Setenv("OIDC_ISSUER", oidcIssuer)
-	t.Setenv("OIDC_AUDIENCE", oidcAudience)
-	t.Setenv("OIDC_USER_SUBJECT", oidcSubject)
-	t.Setenv("OIDC_JWKS_URL", "https://idp.example/jwks")
+func TestAgentServiceTokenOnlyReadsAccountLookup(t *testing.T) {
+	t.Setenv("USER_TOKEN", "middleware-internal-user-token")
 	t.Setenv("AGENT_SERVICE_TOKEN", "dedicated-agent-account-reader")
 	cfg, err := config.Load("")
 	if err != nil {
@@ -46,7 +42,7 @@ func TestAgentAccountLookupWorksWithStaticUSERDisabled(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
-		t.Fatal("JWT-shaped credential bypassed OIDC")
+		t.Fatal("JWT-shaped credential was accepted")
 	}
 	cfg.AgentServiceToken = "dedicated-agent-account-reader"
 	for _, tc := range []struct {

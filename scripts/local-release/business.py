@@ -63,7 +63,7 @@ class Browser:
 
 
 def fixture_observation(config, path):
-    if path not in ("market", "adapter", "backend-rejections"):
+    if path != "market":
         raise WorkflowError("Unapproved fixture observation")
     command = ["docker", "run", "--rm", "--network", "stock-ai-local-release_application", "--read-only",
                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "65532:65532",
@@ -83,13 +83,6 @@ def market_counters(config):
     return value
 
 
-def adapter_counters(config):
-    value = fixture_observation(config, "adapter")
-    if value.get("fixture") != "stock-ai-private-backend-oidc-adapter-v1" or value.get("account_credentials_preserved") is not True or value.get("user_token_ttl_seconds") != 45:
-        raise WorkflowError("Private Backend adapter provenance differs")
-    return value
-
-
 def market_boundary(config):
     network = json.loads(subprocess.run(["docker", "network", "inspect", "stock-ai-local-release_application"],
                                        check=True, capture_output=True, text=True, timeout=30).stdout)[0]
@@ -104,33 +97,17 @@ def market_boundary(config):
     fixture = services["idp"]["NetworkSettings"]["Networks"][network["Name"]]
     if "api.binance.com" not in fixture.get("Aliases", []):
         raise WorkflowError("Binance does not resolve to local fixture")
-    edge_ip = services["idp"]["NetworkSettings"]["Networks"]["stock-ai-local-release_edge"]["IPAddress"]
-    denied = subprocess.run(["docker", "run", "--rm", "--network", "stock-ai-local-release_edge", "--read-only",
-                            "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "65532:65532",
-                            "--entrypoint", "/bin/sh", config["services"]["nginx"]["image"], "-ec",
-                            'exec nc -z -w 2 "$1" 18081', "probe", edge_ip], capture_output=True, timeout=15)
-    if denied.returncode != 1:
-        raise WorkflowError("Backend credential adapter exposed on edge interface or negative probe failed")
     backend_env = services["backend"]["Config"]["Env"]
-    if "AGENT_SERVER_BACKEND_URL=http://idp:18081" not in services["agent-server"]["Config"]["Env"]:
-        raise WorkflowError("Agent does not use private scoped OIDC adapter")
     if "SSL_CERT_FILE=/run/release-tls/fullchain.pem" not in backend_env or any(
             entry.split("=", 1)[0].lower() in ("https_proxy", "http_proxy", "all_proxy") and entry.partition("=")[2]
             for entry in backend_env):
         raise WorkflowError("Backend TLS/proxy boundary differs")
     return {"application_network_internal": True, "binance_dns_alias": "local-idp-fixture",
-            "backend_certificate_verification": "existing SSL_CERT_FILE; no bypass", "all_running_digests_match": True,
-            "agent_private_backend_adapter": "http://idp:18081", "adapter_edge_interface_unreachable": True}
+            "backend_certificate_verification": "existing SSL_CERT_FILE; no bypass", "all_running_digests_match": True}
 
 
 def probe(runtime, report, config):
     report["market_boundary"] = market_boundary(config)
-    rejected = fixture_observation(config, "backend-rejections")
-    expected_rejections = ("anonymous", "static-user", "expired", "wrong-issuer", "wrong-audience", "wrong-subject")
-    if (rejected.get("fixture") != "stock-ai-backend-oidc-rejections-v1" or rejected.get("tokens_disclosed") is not False or
-            rejected.get("statuses") != {name: 401 for name in expected_rejections}):
-        raise WorkflowError("Backend OIDC rejection matrix failed")
-    report["backend_oidc_rejections"] = rejected
     with tempfile.TemporaryDirectory(prefix="business-", dir=runtime) as temporary:
         directory = Path(temporary)
         directory.chmod(0o700)
@@ -194,7 +171,6 @@ def probe(runtime, report, config):
         if not accounts or not accounts[0].get("token"):
             raise WorkflowError("Migrated account/token decryption failed")
         report["migrated_account_token_decrypted"] = True
-        adapter_before = adapter_counters(config)
         account = browser.request("POST", "/v1/accounts", {"user_name": "t15-local-fixture", "initial_balance": 10000}, expected=(201,))
         report["account_created"] = bool(account.get("id") and account.get("token"))
         if not report["account_created"]:
@@ -234,12 +210,6 @@ def probe(runtime, report, config):
         if persisted.get("stop_loss") != 90 or persisted.get("take_profit") != 110:
             raise WorkflowError("Persisted simulated stops differ")
         report["simulated_order_persisted_with_stops"] = True
-        adapter_after = adapter_counters(config)
-        for route in ("USER GET /v1/accounts/:id", "ACCOUNT GET /v1/market/price", "ACCOUNT POST /v1/orders"):
-            if adapter_after.get("routes", {}).get(route, 0) <= (adapter_before.get("routes") or {}).get(route, 0):
-                raise WorkflowError("Private Backend adapter route was not exercised")
-        report["private_backend_adapter"] = {"before": adapter_before, "after": adapter_after,
-                                             "credential_exchange_scoped": True, "account_credentials_preserved": True}
         browser.request("POST", f"/agent/api/v1/sessions/{session_id}/stop", expected=(200, 202, 204))
         report["session_stopped"] = True
         browser.request("POST", "/oauth2/logout", expected=(200, 302, 303))

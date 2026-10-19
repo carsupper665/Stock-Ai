@@ -1,77 +1,59 @@
-# Stock AI — compiled Windows x64 distribution
+# Stock AI — Windows x64 distribution
 
-Requirements: Windows x64 and PowerShell 7. Go, Node and npm are not needed to run
-this folder. Start with `pwsh -File ./start.ps1` from this folder or its full path.
+Requirements: Windows x64 and PowerShell 7. Go, Node, npm and Docker are not needed.
+Start with `pwsh -File ./start.ps1` from this folder.
 
-Open **http://127.0.0.1:8088** and sign in with `USER_TOKEN` from `.env`.
-The release frontend does not contain a prefilled login token. On the first
-successful package only, `.env` is generated from the configuration selected by
-the build command; it is not public data. Later packages never read, append, or
-replace the existing `.env`.
+Architecture: nginx serves the frontend and sends `/oauth2`, `/v1`, `/agent` and `/llm`
+to `middleware.exe`, the only login (OIDC) layer. The middleware adds internal tokens
+and forwards to Backend, Agent and LLM Provider, which listen on loopback only.
+
+## Before the first start
+
+1. Prepare an OIDC IdP client with redirect URI `https://<host>/oauth2/callback` and
+   post-logout URI `https://<host>/`.
+2. Prepare a domain `<host>` pointing at this machine and a TLS certificate and key for it.
+3. Edit `.env`: set `RELEASE_APP_HOST` (`host` or `host:port`; nginx listens on that
+   port, 443 if omitted), `RELEASE_TLS_CERT`, `RELEASE_TLS_KEY` and every `OIDC_*` value (`OIDC_USER_SUBJECT` is the one IdP subject
+   allowed to sign in). All OIDC URLs must be non-local HTTPS.
+4. Put the IdP client secret (at least 32 bytes) in
+   `secrets/stock-ai-release_oidc_client_secret`. The build never creates it.
 
 ## Files
 
-- `backend.exe`: trading, Accounts, market and messages.
-- `llm-provider-server.exe`: Provider/Token management and model catalog.
-- `agent-server.exe`: Agent Runtime, Events, History, Memory and monitoring.
-- `console.exe`: static frontend and authenticated same-origin reverse proxy.
-- `public/`: frontend assets only; `.env` and `data/` cannot be served here.
-- `.env`: all service configuration, including the existing encryption key.
-- `data/`, `logs/`: created on first start; preserved on subsequent builds.
+- `nginx/`: official nginx for Windows (pinned version, SHA-256 verified at build).
+  `nginx/html/` is the frontend; `nginx/conf/release-*` are the shipped templates that
+  `start.ps1` turns into `stock-ai-nginx.conf` / `stock-ai-edge.conf` on each start.
+- `middleware.exe`: OIDC login and authenticated reverse proxy (runs in Release mode).
+- `backend.exe`, `llm-provider-server.exe`, `agent-server.exe`: the internal services.
+- `.env`: non-secret settings and `*_FILE` paths only.
+- `secrets/stock-ai-release_<name>`: one file per secret. Generated on the first build
+  (only when `.env` does not exist) from `-ConfigurationFile` or new random values;
+  `backend_user_token` is used only by Agent and differs from `backend_middleware_token`.
+  Keep `llm_master_key` when moving a database with encrypted Provider tokens.
+- `data/`, `logs/`: created on first start; preserved on rebuilds (nginx logs are in `logs/`).
 
-## Rebuilding this folder
+## Building
 
-Stop every process running executables from this distribution, then run the build.
-The build does not stop services automatically. A locked release artifact fails
-preflight without changing the installed release.
+Run `scripts/build-distribution.ps1`. It downloads nginx 1.30.6 from nginx.org and
+rejects an archive whose SHA-256 differs from the pinned value; `-NginxArchive <zip>`
+(with `-NginxSha256`) uses a local archive instead. Stop every process running from
+`dist/` first; a locked artifact fails preflight without changing the release.
+Everything is prepared before publication, with backup and rollback if replacement
+fails. `.env`, `secrets/`, databases, History and logs are never modified by a rebuild.
+The first build fails if a launch-configuration token the middleware uses is shorter
+than 32 bytes.
 
-All binaries, frontend files, scripts, documentation, and explicitly requested
-CLI tools are prepared and validated before publication. Publication keeps a
-temporary backup and restores the prior artifact set if replacement fails. A
-failed build does not modify `.env`, databases, Agent History, or logs. Those
-persistent files are also preserved byte-for-byte after a successful rebuild.
+`-SkipFrontendBuild` requires an existing non-empty `frontend/dist`. Optional CLI tools:
+`-CodexExecutable <bin/codex.exe of the complete official package>` and
+`-ClaudeExecutable <claude.exe>`; a missing one is an error. A new `.env` points the
+matching `LLM_SERVER_*_EXECUTABLE` setting at `tools/`; an existing `.env` is yours to
+update.
 
-`-SkipFrontendBuild` requires an existing non-empty `frontend/dist`. CLI tools
-are optional: request them with `-CodexExecutable <path-to-codex.exe>` and/or
-`-ClaudeExecutable <path-to-claude.exe>`. An explicitly requested missing CLI is
-an error; omitting an option leaves that installed tool directory unchanged.
-For Codex 0.162.1, select the official package's `bin/codex.exe`. Packaging copies
-the complete package, including `bin/codex-code-mode-host.exe`, metadata and
-resource directories, and rejects an incomplete input before building. The new
-entrypoint is `tools/codex/bin/codex.exe`. When upgrading an existing distribution,
-update `LLM_SERVER_CODEX_EXECUTABLE` in its preserved `.env` to that path.
-When creating the distribution for the first time, use `-ConfigurationFile` to
-select the launch configuration used only to generate the initial `.env`.
+Databases start empty. To migrate, stop all services using the original DBs, copy the
+three databases and the Agent History directory into `data/`, and keep `llm_master_key`.
 
-This distribution uses separate empty databases on first start so it cannot race
-with the already running development services. To migrate existing data, stop all
-services using the original DBs, then copy all three databases and the Agent
-History directory to their corresponding `data/` paths. Keep the Gateway master
-key unchanged. Do not copy live SQLite files or run two Agent servers on one DB.
+## Stopping
 
-## Internet / LAN hosting
-
-Internal services bind loopback ports 17794, 18090 and 18080. Expose only the
-console: place HTTPS termination in front of port 8088, or configure
-`CONSOLE_TLS_CERT` and `CONSOLE_TLS_KEY` and set `CONSOLE_ADDR=0.0.0.0:8088`.
-Use strong USER/admin/runtime tokens before public access. Update matching Agent
-dependency-token settings together. Do not change an existing database's master
-key to rotate an admin token.
-
-The console authenticates browser USER credentials before adding internal service
-credentials. The browser never receives Agent/Gateway admin/runtime tokens.
-Backend account-level requests retain their own authorization rules.
-
-Provider → Token → **新增模型** → Account → Session → start is the shortest test
-path. Native OpenAI, Anthropic and compatible providers are wired. Codex and
-Claude Code run as optional CLI Harness providers. When explicitly requested,
-the build copies them into `tools/`; a newly generated `.env` points the matching
-executable setting there and references the current user's CLI authentication
-file without reading or copying that file. Existing `.env` settings remain the
-operator's responsibility. Harness status shows on the Providers page; a Harness
-model accepts no options or levels. Gemini and live-provider acceptance remain
-outstanding. The package is a deployable integration build, not final full-V1
-acceptance approval.
-
-Stop Agent first with Ctrl+C in its window, then Gateway and Backend. Keep the
-folder's `.env`, databases and History for the next start. Close console last.
+Stop nginx with `nginx\nginx.exe -s stop -p nginx -c nginx\conf\stock-ai-nginx.conf`
+from this folder. Stop the other services with Ctrl+C in their windows: Agent first,
+then middleware, LLM Provider and Backend.

@@ -3,8 +3,6 @@
 services:
   backend:
     user: "65532:${LOCAL_RELEASE_GID:?set private Release container group}"
-    environment:
-      ALLOW_STATIC_USER_TOKEN: "false"
     volumes:
       - "${OIDC_CA_BUNDLE:?set OIDC_CA_BUNDLE to a PEM file with extra IdP CA/intermediate certificates (may be empty)}:/etc/ssl/certs/oidc-ca.pem:ro"
   agent-server:
@@ -17,53 +15,12 @@ services:
       CODEX_CA_CERTIFICATE: "${CODEX_CA_CERTIFICATE:-}"
     volumes:
       - "${OIDC_CA_BUNDLE}:/etc/ssl/certs/oidc-ca.pem:ro"
-  console:
+  middleware:
     user: "65532:${LOCAL_RELEASE_GID}"
-    volumes:
-      - "${OIDC_CA_BUNDLE}:/etc/ssl/certs/oidc-ca.pem:ro"
-  oidc-gateway:
-    user: "65532:${LOCAL_RELEASE_GID}"
-    image: "${OIDC_GATEWAY_IMAGE:?set OIDC_GATEWAY_IMAGE to the approved OIDC Gateway image reference}"
-    restart: unless-stopped
-    init: true
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=16m
-    pids_limit: 128
     environment:
       STOCK_AI_ENVIRONMENT: Release
-      OIDC_GATEWAY_ADDR: ":4180"
-      OIDC_ISSUER: "${OIDC_ISSUER:?set the exact IdP issuer}"
-      OIDC_AUTHORIZATION_URL: "${OIDC_AUTHORIZATION_URL:?set the IdP authorization endpoint}"
-      OIDC_TOKEN_URL: "${OIDC_TOKEN_URL:?set the IdP token endpoint}"
-      OIDC_JWKS_URL: "${OIDC_JWKS_URL:?set the IdP JWKS endpoint}"
-      OIDC_END_SESSION_URL: "${OIDC_END_SESSION_URL:-}"
-      OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:?set the IdP client ID}"
-      OIDC_TOKEN_AUTH_METHOD: "${OIDC_TOKEN_AUTH_METHOD:-client_secret_basic}"
-      OIDC_CLIENT_SECRET_FILE: /run/secrets/stock-ai-release_oidc_client_secret
-      OIDC_COOKIE_KEY_FILE: /run/secrets/stock-ai-release_oidc_cookie_key
-      OIDC_REDIRECT_URI: "https://${RELEASE_APP_HOST:?set the Release app host[:port] users open}/oauth2/callback"
-      OIDC_POST_LOGOUT_URI: "https://${RELEASE_APP_HOST}/"
-      OIDC_COOKIE_NAME: __Host-stock-ai-release-session
-      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the allowed IdP subject}"
-      OIDC_AUDIENCE: "${OIDC_AUDIENCE:?set the API audience in the access token}"
-      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
-    secrets:
-      - source: release_oidc_client_secret
-        target: stock-ai-release_oidc_client_secret
-      - source: release_oidc_cookie_key
-        target: stock-ai-release_oidc_cookie_key
     volumes:
       - "${OIDC_CA_BUNDLE}:/etc/ssl/certs/oidc-ca.pem:ro"
-    networks: [edge]
-    expose: ["4180"]
-    healthcheck:
-      test: ["CMD", "/healthcheck", "http://127.0.0.1:4180/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
 
   nginx:
     image: "${NGINX_IMAGE:?set NGINX_IMAGE to an approved pinned Nginx image reference}"
@@ -95,13 +52,5 @@ services:
       - "${RELEASE_TLS_DIR:?set the directory holding fullchain.pem and privkey.pem for RELEASE_APP_HOST}:/run/release-tls:ro"
     networks: [edge]
     depends_on:
-      console:
+      middleware:
         condition: service_healthy
-      oidc-gateway:
-        condition: service_healthy
-
-secrets:
-  release_oidc_client_secret:
-    file: "${STOCK_AI_SECRETS_DIR:?set Release secrets directory}/stock-ai-release_oidc_client_secret"
-  release_oidc_cookie_key:
-    file: "${STOCK_AI_SECRETS_DIR}/stock-ai-release_oidc_cookie_key"

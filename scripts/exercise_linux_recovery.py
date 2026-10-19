@@ -33,7 +33,7 @@ APPLICATION_IMAGES = {
     "BACKEND_IMAGE": "stock-ai/backend:0.7.0",
     "AGENT_SERVER_IMAGE": "stock-ai/agent-server:0.7.0",
     "LLM_PROVIDER_SERVER_IMAGE": "stock-ai/llm-provider-server:0.7.0",
-    "CONSOLE_IMAGE": "stock-ai/console:0.7.0",
+    "MIDDLEWARE_IMAGE": "stock-ai/middleware:0.7.0",
 }
 NAMESPACE = "stock-ai-test"
 PROVIDER_ID = "recovery-provider"
@@ -179,7 +179,7 @@ def create_secret_set(directory: Path) -> tuple[dict[str, str], Path]:
     directory.mkdir(mode=0o700)
     values: dict[str, str] = {}
     for name in recovery.SECRETS:
-        if name in ("backend_account_token_key", "llm_master_key"):
+        if name in ("backend_account_token_key", "llm_master_key", "oidc_cookie_key"):
             value = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
         else:
             value = secrets.token_urlsafe(48)
@@ -217,11 +217,16 @@ def write_environment(
         "STOCK_AI_SECRETS_DIR": str(secret_directory),
         "STOCK_AI_BACKUP_DIR": str(backup_directory),
         **images,
-        "ALLOW_STATIC_USER_TOKEN": "true",
         "OIDC_ISSUER": "https://idp.recovery.invalid/realms/recovery",
-        "OIDC_AUDIENCE": "stock-ai-recovery",
-        "OIDC_USER_SUBJECT": "recovery-subject",
+        "OIDC_AUTHORIZATION_URL": "https://idp.recovery.invalid/realms/recovery/authorize",
+        "OIDC_TOKEN_URL": "https://idp.recovery.invalid/realms/recovery/token",
         "OIDC_JWKS_URL": "https://idp.recovery.invalid/realms/recovery/certs",
+        "OIDC_CLIENT_ID": "stock-ai-recovery",
+        "OIDC_REDIRECT_URI": "https://app.recovery.invalid/oauth2/callback",
+        "OIDC_POST_LOGOUT_URI": "https://app.recovery.invalid/",
+        "OIDC_COOKIE_NAME": "__Host-stock-ai-test-session",
+        "OIDC_USER_SUBJECT": "recovery-subject",
+        "OIDC_AUDIENCE": "stock-ai-recovery",
         "OIDC_TOKEN_TYPE": "at+jwt",
         "LLM_SERVER_MODEL_CATALOG": catalog,
     }
@@ -417,7 +422,7 @@ def seed_business_fixture(
     account = api_json(
         network,
         nginx_image,
-        secret_directory / f"{NAMESPACE}_backend_user_token",
+        secret_directory / f"{NAMESPACE}_backend_middleware_token",
         "http://backend:7794/v1/accounts",
         request_directory,
         {"user_name": FIXTURE_ACCOUNT, "initial_balance": 12345.67},
@@ -428,7 +433,7 @@ def seed_business_fixture(
     message = api_json(
         network,
         nginx_image,
-        secret_directory / f"{NAMESPACE}_backend_user_token",
+        secret_directory / f"{NAMESPACE}_backend_middleware_token",
         "http://backend:7794/v1/messages",
         request_directory,
         {"content": FIXTURE_MESSAGE},
@@ -498,14 +503,14 @@ def assert_restored_business_fixture(
     accounts = api_json(
         network,
         nginx_image,
-        secret_directory / f"{NAMESPACE}_backend_user_token",
+        secret_directory / f"{NAMESPACE}_backend_middleware_token",
         "http://backend:7794/v1/accounts",
         request_directory,
     ).get("accounts", [])
     messages = api_json(
         network,
         nginx_image,
-        secret_directory / f"{NAMESPACE}_backend_user_token",
+        secret_directory / f"{NAMESPACE}_backend_middleware_token",
         "http://backend:7794/v1/messages?sort=asc",
         request_directory,
     ).get("messages", [])

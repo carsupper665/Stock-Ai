@@ -44,7 +44,7 @@ HELPER_IMAGE = (
     "golang:1.27.2-alpine3.23@sha256:"
     "9e45f0eb4a63ed37ad6e604950407558b7c738e34e015ae77a5d4ad369cde079"
 )
-SERVICES = ("backend", "llm-provider-server", "agent-server", "console")
+SERVICES = ("backend", "llm-provider-server", "agent-server", "middleware")
 VOLUMES = {
     "backend": "backend_state",
     "llm-provider-server": "llm_state",
@@ -57,11 +57,14 @@ DATABASES = {
 }
 SECRETS = (
     "backend_user_token",
+    "backend_middleware_token",
     "backend_account_token_key",
     "agent_admin_token",
     "llm_admin_token",
     "llm_runtime_token",
     "llm_master_key",
+    "oidc_client_secret",
+    "oidc_cookie_key",
 )
 BACKUP_NAME = re.compile(
     r"^(?P<stack>[a-z0-9][a-z0-9-]{1,62})-(?P<stamp>\d{8}T\d{6}Z)\.sai-backup$"

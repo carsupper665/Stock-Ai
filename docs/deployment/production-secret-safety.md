@@ -42,8 +42,10 @@ commands above show the environment-specific form, not a shared-host workflow.
 The non-secret `production-config.json` records the environment, namespace,
 secret sources, Provider database path, and exact container mount allowlist. It
 contains no secret values. `legacy_user_auth` is fixed to `false`; static USER
-browser login is forbidden in Release. `backend_user_token` is a private
-service credential used only by Backend and Agent Server, not a browser login.
+browser login is forbidden. `backend_middleware_token` is the Backend's USER
+credential, held only by Backend and the middleware. `backend_user_token` is a
+separate private service credential used only by Backend and Agent Server (for
+Account lookup); neither is a browser login.
 
 ## Mandatory pre-start validation and safe diagnostics
 
@@ -93,12 +95,13 @@ mounts, alternate targets, and a Test filename in Release (or vice versa).
 | Secret | Allowed service containers |
 |---|---|
 | `backend_user_token` | Backend, Agent Server |
+| `backend_middleware_token` | Backend, Middleware |
 | `backend_account_token_key` | Backend |
-| `agent_admin_token` | Agent Server, Console |
-| `llm_admin_token` | LLM Provider Server, Console |
-| `llm_runtime_token` | LLM Provider Server, Agent Server, Console |
-| `oidc_client_secret` | OIDC Gateway |
-| `oidc_cookie_key` | OIDC Gateway |
+| `agent_admin_token` | Agent Server, Middleware |
+| `llm_admin_token` | LLM Provider Server, Middleware |
+| `llm_runtime_token` | LLM Provider Server, Agent Server, Middleware |
+| `oidc_client_secret` | Middleware |
+| `oidc_cookie_key` | Middleware |
 | `llm_master_key` | LLM Provider Server |
 
 Nginx and frontend build containers receive none of these files. A secret is

@@ -1,8 +1,6 @@
 package api
 
 import (
-	"time"
-
 	"backend/internal/account"
 	"backend/internal/auth"
 	"backend/internal/config"
@@ -33,21 +31,12 @@ func New(cfg *config.Config, store *database.Store, prices *market.Runtime, trad
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	var oidcSettings *auth.OIDCSettings
-	if cfg.OIDCIssuer != "" {
-		oidcSettings = &auth.OIDCSettings{
-			Issuer: cfg.OIDCIssuer, Audience: cfg.OIDCAudience, Subject: cfg.OIDCUserSubject,
-			JWKSURL: cfg.OIDCJWKSURL, TokenType: cfg.OIDCTokenType,
-			Timeout: 3 * time.Second, CacheTTL: 15 * time.Minute,
-		}
-	}
 	s := &Server{
 		cfg:   cfg,
 		log:   log,
 		store: store,
 		auth: auth.New(auth.Settings{
 			UserName: cfg.UserName, StaticUserToken: cfg.UserToken,
-			AllowStaticUserToken: cfg.AllowStaticUserToken, OIDC: oidcSettings,
 		}, store),
 		accounts: account.New(store),
 		market:   prices,

@@ -110,7 +110,6 @@ class Server:
     def _write_env(self):
         settings = {
             "USER_TOKEN": USER_TOKEN,
-            "ALLOW_STATIC_USER_TOKEN": "true",
             "USER_NAME": USER_NAME,
             "PORT": self.port,
             "DB_DRIVER": "sqlite",

@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / ".local-test"
-SERVICES = ("backend", "agent-server", "llm-provider-server", "console", "oidc-gateway")
+SERVICES = ("backend", "agent-server", "llm-provider-server", "middleware", "nginx")
 
 
 def main():

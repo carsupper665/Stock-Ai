@@ -184,6 +184,7 @@ def prepare_material() -> None:
     _ensure_jwks_key(CERTS / "jwks-signing-key.pem", gid)
     for name in (
         "stock-ai-test_backend_user_token",
+        "stock-ai-test_backend_middleware_token",
         "stock-ai-test_backend_account_token_key",
         "stock-ai-test_agent_admin_token",
         "stock-ai-test_llm_admin_token",
@@ -201,7 +202,7 @@ def main() -> None:
     if not references_path.is_file() or references_path.is_symlink():
         raise PrepareError("missing local registry-references.json; build and digest-pin all five production images first")
     references = json.loads(references_path.read_text(encoding="utf-8"))
-    expected = {"backend", "agent-server", "llm-provider-server", "console", "oidc-gateway"}
+    expected = {"backend", "agent-server", "llm-provider-server", "middleware", "nginx"}
     digest_ref = re.compile(r"^127\.0\.0\.1:5000/stock-ai/[a-z0-9-]+@sha256:[0-9a-f]{64}$")
     if set(references) != expected or any(not isinstance(value, str) or not digest_ref.fullmatch(value) for value in references.values()):
         raise PrepareError("local registry references must contain exactly five immutable localhost SHA-256 references")
@@ -216,9 +217,8 @@ def main() -> None:
         "BACKEND_IMAGE": references["backend"],
         "LLM_PROVIDER_SERVER_IMAGE": references["llm-provider-server"],
         "AGENT_SERVER_IMAGE": references["agent-server"],
-        "CONSOLE_IMAGE": references["console"],
-        "OIDC_GATEWAY_IMAGE": references["oidc-gateway"],
-        "NGINX_IMAGE": "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+        "MIDDLEWARE_IMAGE": references["middleware"],
+        "NGINX_IMAGE": references["nginx"],
         "TEST_APP_HOST": "app.localtest",
         "TEST_BIND_ADDRESS": "127.0.0.1",
         "TEST_TLS_DIR": str(CERTS),
@@ -229,7 +229,10 @@ def main() -> None:
         "OIDC_END_SESSION_URL": "https://idp.localtest:9443/realms/stock-ai-test/logout",
         "OIDC_AUDIENCE": "stock-ai-api-test",
         "OIDC_USER_SUBJECT": "local-test-user",
-        "ALLOW_STATIC_USER_TOKEN": "false",
+        "OIDC_CLIENT_ID": "stock-ai-test",
+        "OIDC_COOKIE_NAME": "__Host-stock-ai-test-session",
+        "OIDC_REDIRECT_URI": "https://app.localtest/oauth2/callback",
+        "OIDC_POST_LOGOUT_URI": "https://app.localtest/",
     }
     env_path = RUNTIME / "compose.env"
     temporary = RUNTIME / ".compose.env.tmp"

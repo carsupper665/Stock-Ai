@@ -31,21 +31,17 @@ services:
     image: "${BACKEND_IMAGE:?set BACKEND_IMAGE to the approved Backend image reference}"
     environment:
       STOCK_AI_ENVIRONMENT: "${STOCK_AI_ENVIRONMENT:?set STOCK_AI_ENVIRONMENT to Test or Release}"
-      ALLOW_STATIC_USER_TOKEN: "${ALLOW_STATIC_USER_TOKEN:-false}"
-      USER_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE:?set STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+      USER_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE:?set STOCK_AI_SECRET_NAMESPACE}_backend_middleware_token"
       AGENT_SERVICE_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
       ACCOUNT_TOKEN_KEY_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_backend_account_token_key"
-      OIDC_ISSUER: "${OIDC_ISSUER:-}"
-      OIDC_AUDIENCE: "${OIDC_AUDIENCE:-}"
-      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:-}"
-      OIDC_JWKS_URL: "${OIDC_JWKS_URL:-}"
-      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
       BACKEND_ADDR: "0.0.0.0:7794"
       DB_DRIVER: sqlite
       DB_DSN: /data/backend.db
       LOG_DIR: /data/logs
       DEBUG: "false"
     secrets:
+      - source: backend_middleware_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_backend_middleware_token"
       - source: backend_user_token
         target: "${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
       - source: backend_account_token_key
@@ -90,10 +86,6 @@ services:
           - llm-provider-server
     expose:
       - "8090"
-    depends_on:
-      backend:
-        condition: service_healthy
-        restart: true
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "/healthcheck", "http://127.0.0.1:8090/healthz"]
@@ -141,23 +133,34 @@ services:
     mem_limit: 768m
     cpus: 1.5
 
-  console:
+  middleware:
     <<: *runtime
-    image: "${CONSOLE_IMAGE:?set CONSOLE_IMAGE to the approved Console image reference}"
+    image: "${MIDDLEWARE_IMAGE:?set MIDDLEWARE_IMAGE to the approved Middleware image reference}"
     environment:
       STOCK_AI_ENVIRONMENT: "${STOCK_AI_ENVIRONMENT}"
-      CONSOLE_ADDR: "0.0.0.0:8088"
+      MIDDLEWARE_ADDR: ":4180"
       BACKEND_URL: http://backend:7794
       AGENT_SERVER_URL: http://agent-server:8080
       LLM_SERVER_URL: http://llm-provider-server:8090
-      OIDC_ISSUER: "${OIDC_ISSUER:?set the exact environment HTTPS issuer}"
-      OIDC_AUDIENCE: "${OIDC_AUDIENCE:?set the environment API audience}"
-      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the allowed environment subject}"
-      OIDC_JWKS_URL: "${OIDC_JWKS_URL:?set the environment HTTPS JWKS URL}"
-      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
       AGENT_SERVER_ADMIN_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_agent_admin_token"
       LLM_SERVER_ADMIN_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
       LLM_SERVER_RUNTIME_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+      BACKEND_USER_TOKEN_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_backend_middleware_token"
+      OIDC_ISSUER: "${OIDC_ISSUER:?set the exact IdP issuer}"
+      OIDC_AUTHORIZATION_URL: "${OIDC_AUTHORIZATION_URL:?set the IdP authorization endpoint}"
+      OIDC_TOKEN_URL: "${OIDC_TOKEN_URL:?set the IdP token endpoint}"
+      OIDC_JWKS_URL: "${OIDC_JWKS_URL:?set the IdP JWKS endpoint}"
+      OIDC_END_SESSION_URL: "${OIDC_END_SESSION_URL:-}"
+      OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:?set the IdP client ID}"
+      OIDC_CLIENT_SECRET_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_oidc_client_secret"
+      OIDC_COOKIE_KEY_FILE: "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_oidc_cookie_key"
+      OIDC_REDIRECT_URI: "${OIDC_REDIRECT_URI:?set the exact https://<app host>/oauth2/callback}"
+      OIDC_POST_LOGOUT_URI: "${OIDC_POST_LOGOUT_URI:?set the exact https://<app host>/}"
+      OIDC_COOKIE_NAME: "${OIDC_COOKIE_NAME:?set __Host-stock-ai-<environment>-session}"
+      OIDC_USER_SUBJECT: "${OIDC_USER_SUBJECT:?set the allowed IdP subject}"
+      OIDC_AUDIENCE: "${OIDC_AUDIENCE:?set the API audience in the access token}"
+      OIDC_TOKEN_TYPE: "${OIDC_TOKEN_TYPE:-at+jwt}"
+      OIDC_TOKEN_AUTH_METHOD: "${OIDC_TOKEN_AUTH_METHOD:-client_secret_basic}"
     secrets:
       - source: agent_admin_token
         target: "${STOCK_AI_SECRET_NAMESPACE}_agent_admin_token"
@@ -165,11 +168,17 @@ services:
         target: "${STOCK_AI_SECRET_NAMESPACE}_llm_admin_token"
       - source: llm_runtime_token
         target: "${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
+      - source: backend_middleware_token
+        target: "${STOCK_AI_SECRET_NAMESPACE}_backend_middleware_token"
+      - source: oidc_client_secret
+        target: "${STOCK_AI_SECRET_NAMESPACE}_oidc_client_secret"
+      - source: oidc_cookie_key
+        target: "${STOCK_AI_SECRET_NAMESPACE}_oidc_cookie_key"
     networks:
       - application
       - edge
     expose:
-      - "8088"
+      - "4180"
     depends_on:
       backend:
         condition: service_healthy
@@ -182,7 +191,7 @@ services:
         restart: true
     healthcheck:
       <<: *healthcheck
-      test: ["CMD", "/healthcheck", "http://127.0.0.1:8088/"]
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:4180/healthz"]
     stop_grace_period: 20s
     mem_limit: 256m
     cpus: 0.5
@@ -219,6 +228,8 @@ volumes:
 secrets:
   backend_user_token:
     file: "${STOCK_AI_SECRETS_DIR:?set STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_backend_user_token"
+  backend_middleware_token:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_backend_middleware_token"
   backend_account_token_key:
     file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_backend_account_token_key"
   agent_admin_token:
@@ -229,3 +240,7 @@ secrets:
     file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_llm_runtime_token"
   llm_master_key:
     file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_llm_master_key"
+  oidc_client_secret:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_oidc_client_secret"
+  oidc_cookie_key:
+    file: "${STOCK_AI_SECRETS_DIR}/${STOCK_AI_SECRET_NAMESPACE}_oidc_cookie_key"

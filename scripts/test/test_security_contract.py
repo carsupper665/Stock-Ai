@@ -34,7 +34,7 @@ class SecurityContractTest(unittest.TestCase):
     def test_account_cannot_become_agent_admin(self):
         rows = [dict(row) for row in self.rows]
         target = next(row for row in rows if row["case_id"] == "AGENT-003")
-        target.update(edge_action="allow", upstream="agent", upstream_credential="agent_admin")
+        target.update(middleware_action="inject_agent_admin", upstream="agent", upstream_credential="agent_admin")
         errors = MODULE.validate_matrix(rows)
         self.assertTrue(any("Account token unlocks" in error for error in errors), errors)
 
@@ -48,9 +48,32 @@ class SecurityContractTest(unittest.TestCase):
     def test_denial_cannot_contact_upstream(self):
         rows = [dict(row) for row in self.rows]
         target = next(row for row in rows if row["case_id"] == "HEADER-001")
-        target.update(upstream="console", upstream_credential="none")
+        target.update(upstream="agent", upstream_credential="none")
         errors = MODULE.validate_matrix(rows)
         self.assertTrue(any("denied request reaches" in error for error in errors), errors)
+
+    def test_browser_cannot_reach_llm_generate(self):
+        rows = [dict(row) for row in self.rows]
+        generate = next(row for row in rows if row["path"] == "/llm/v1/generate")
+        self.assertEqual((generate["middleware_action"], generate["upstream"], generate["expected_status"]),
+                         ("not_found", "none", "404"))
+        generate.update(middleware_action="inject_llm_runtime", upstream="llm", upstream_credential="llm_runtime")
+        errors = MODULE.validate_matrix(rows)
+        self.assertTrue(any("/llm/v1/generate" in error for error in errors), errors)
+
+    def test_backend_session_requests_use_the_middleware_credential(self):
+        rows = [dict(row) for row in self.rows]
+        target = next(row for row in rows if row["case_id"] == "API-001")
+        self.assertEqual(target["upstream_credential"], "backend_middleware_token")
+        target["upstream_credential"] = "oidc_access_token"
+        errors = MODULE.validate_matrix(rows)
+        self.assertTrue(any("backend_middleware_token" in error for error in errors), errors)
+
+    def test_contract_describes_middleware_not_console_or_gateway(self):
+        for value in ("Middleware", "backend_middleware_token", "Backend does not validate OIDC"):
+            self.assertIn(value, self.text)
+        for removed in ("OIDC Gateway", "Console", "auth_request"):
+            self.assertNotIn(removed, self.text)
 
     def test_invalid_expected_status_is_rejected(self):
         rows = [dict(row) for row in self.rows]

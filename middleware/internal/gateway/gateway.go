@@ -16,6 +16,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"strings"
 	"sync"
@@ -40,15 +41,21 @@ type Server struct {
 	mu       sync.Mutex
 	attempts map[string]loginAttempt
 	sessions map[string]session
+
+	backend, agent, llm *httputil.ReverseProxy
 }
 
 func New(cfg Config) (*Server, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	return &Server{cfg: cfg, now: time.Now, attempts: map[string]loginAttempt{}, sessions: map[string]session{}, client: &http.Client{
+	s := &Server{cfg: cfg, now: time.Now, attempts: map[string]loginAttempt{}, sessions: map[string]session{}, client: &http.Client{
 		Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}, nil
+	}}
+	if err := s.newProxies(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -56,9 +63,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /oauth2/start", s.start)
 	mux.HandleFunc("GET /oauth2/callback", s.callback)
-	mux.HandleFunc("GET /oauth2/auth", s.auth)
 	mux.HandleFunc("GET /oauth2/me", s.me)
 	mux.HandleFunc("POST /oauth2/logout", s.logout)
+	mux.HandleFunc("/v1", s.serveBackend)
+	mux.HandleFunc("/v1/", s.serveBackend)
+	mux.HandleFunc("/agent/", s.serveAgent)
+	mux.HandleFunc("/llm/", s.serveLLM)
 	return s.securityHeaders(mux)
 }
 
@@ -92,7 +102,7 @@ func safeReturnTo(raw string) string {
 	if err != nil || u.IsAbs() || u.Host != "" {
 		return "/"
 	}
-	for _, blocked := range []string{"/oauth2/callback", "/oauth2/auth", "/oauth2/logout"} {
+	for _, blocked := range []string{"/oauth2/callback", "/oauth2/logout"} {
 		if u.Path == blocked {
 			return "/"
 		}
@@ -283,27 +293,6 @@ func oauthErrorCode(raw []byte) string {
 	return body.Error
 }
 
-func (s *Server) auth(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.current(r)
-	if !ok {
-		s.clearCookie(w)
-		s.fail(w, http.StatusUnauthorized, "unauthenticated")
-		return
-	}
-	w.Header().Set("X-Auth-Request-Subject", sess.Subject)
-	w.Header().Set("X-Auth-Request-User", headerValue(sess.User))
-	w.Header().Set("X-Auth-Request-Email", headerValue(sess.Email))
-	w.Header().Set("X-Auth-Request-Access-Token", sess.AccessToken)
-	w.WriteHeader(http.StatusNoContent)
-}
-func headerValue(v string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '\r' || r == '\n' || r == 0 {
-			return -1
-		}
-		return r
-	}, v)
-}
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.current(r)
 	if !ok {

@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PROMOTION = ROOT / "deploy/evidence/local-test/promotion/promotion.json"
 OUTPUT = ROOT / "deploy/evidence/local-test/release-operator"
-SERVICES = ("backend", "agent-server", "llm-provider-server", "console")
+SERVICES = ("backend", "agent-server", "llm-provider-server", "middleware", "nginx")
 import sys
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -72,7 +72,7 @@ def main() -> None:
     manifest = json.loads(PROMOTION.read_text(encoding="utf-8"))
     images = manifest["images"]
     if set(images) != set(SERVICES):
-        raise SystemExit("generated promotion package does not contain the exact four Release images")
+        raise SystemExit("generated promotion package does not contain the exact five Release images")
     if OUTPUT.exists():
         raise SystemExit(f"refusing to overwrite Release Operator evidence: {OUTPUT}")
     OUTPUT.mkdir(parents=True)

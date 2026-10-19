@@ -1,7 +1,8 @@
 # Isolated local Release configuration (Ticket 11)
 
-The supported local Release consumes the four application digests and the
-OIDC Gateway digest from the complete, checksummed T10 promotion package.
+The supported local Release consumes the five product digests (Backend, Agent
+Server, LLM Provider Server, middleware, and Nginx with the bundled frontend)
+from the complete, checksummed T10 promotion package.
 Preparation verifies every referenced promotion artifact before writing the
 private env file. Release startup never builds images.
 
@@ -83,9 +84,10 @@ The fixture is an auxiliary image, distinct from the promoted product images.
 T11 parameterizes and tests its runtime identity configuration, with the old
 Test defaults preserved. Its image was built once in the Test auxiliary-image
 workflow and stored in the local registry by immutable digest.
-`deploy/local-release/auxiliary-images.json` records that tested digest and
-the unchanged T10-tested Nginx digest. Release uses them without a build
-directive or source compilation. No product or Gateway image was rebuilt.
+`deploy/local-release/auxiliary-images.json` records that tested digest, which
+is now the only auxiliary approval (`idp`); Nginx comes from the promotion
+package like the other product images. Release uses it without a build
+directive or source compilation.
 
 The lint rejects Test identifiers, placeholders, unresolved variables,
 unknown services, mutable or substituted images, any build directive,
@@ -93,13 +95,12 @@ additional/non-loopback/wrong ports, shared/external networks or volumes,
 missing writable SQLite/log/history persistence, incorrect identity or
 cookie policy, missing private secret mounts and malformed/insecure material.
 Loopback hosts and the local certificate are valid inputs.
-`ALLOW_STATIC_USER_TOKEN=false` is enforced both in the Release overlay and
-by lint; Release user authentication requires signed OIDC credentials.
-The Agent Server's legacy private Backend calls still expect a static user
-token; enabling it in Release is forbidden. T15 business acceptance must
-handle that existing limitation through the supported account-scoped
-credential path or a separately certified product change, not a fixture
-authentication bypass.
+Login is handled only by the middleware; the Backend no longer verifies OIDC.
+The Backend accepts the private `backend_middleware_token` (held only by the
+Backend and the middleware) for the USER identity, and the Agent Server reaches
+the Backend directly at `http://backend:7794` with its own `backend_user_token`,
+which only authorizes Account lookups. The fixture IdP no longer fronts the
+Agent's Backend calls.
 
 Validation performed locally:
 

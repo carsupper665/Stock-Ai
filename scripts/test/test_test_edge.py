@@ -33,76 +33,70 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertEqual(len(published["nginx"]), 2)
         self.assertRegex(" ".join(published["nginx"]), r":80:8080")
         self.assertRegex(" ".join(published["nginx"]), r":443:8443")
-        self.assertNotIn("ports", self.services["oidc-gateway"])
+        self.assertNotIn("ports", self.services["middleware"])
 
-    def test_gateway_uses_isolated_test_client_and_exact_https_urls(self):
-        env = self.services["oidc-gateway"]["environment"]
+    def test_middleware_uses_isolated_test_client_and_exact_https_urls(self):
+        env = self.services["middleware"]["environment"]
         self.assertEqual(env["STOCK_AI_ENVIRONMENT"], "Test")
+        self.assertEqual(env["MIDDLEWARE_ADDR"], ":4180")
         self.assertEqual(env["OIDC_CLIENT_ID"], "stock-ai-test")
         self.assertEqual(env["OIDC_COOKIE_NAME"], "__Host-stock-ai-test-session")
         self.assertTrue(env["OIDC_ISSUER"].startswith("${OIDC_ISSUER"))
         self.assertTrue(env["OIDC_JWKS_URL"].startswith("${OIDC_JWKS_URL"))
         self.assertTrue(env["OIDC_REDIRECT_URI"].startswith("https://${TEST_APP_HOST"))
-        self.assertEqual(
-            {secret["target"] for secret in self.services["oidc-gateway"]["secrets"]},
-            {"stock-ai-test_oidc_client_secret", "stock-ai-test_oidc_cookie_key"},
-        )
-        secret_sources = {secret["source"] for secret in self.services["oidc-gateway"]["secrets"]}
-        self.assertEqual(secret_sources, set(self.compose["secrets"]))
-        self.assertEqual(
-            set(self.compose["secrets"]),
-            {"test_oidc_client_secret", "test_oidc_cookie_key"},
-        )
+        self.assertNotIn("secrets", self.services["middleware"])
+        self.assertNotIn("secrets", self.compose)
         self.assertEqual(
             set(self.services["nginx"]["depends_on"]),
-            {"console", "oidc-gateway"},
+            {"middleware"},
         )
         for dependency in self.services["nginx"]["depends_on"].values():
             self.assertEqual(dependency["condition"], "service_healthy")
 
-    def test_forwarded_and_identity_headers_are_replaced_at_each_proxy_boundary(self):
+    def test_forwarded_headers_are_replaced_and_only_middleware_authenticates(self):
+        main = NGINX_MAIN.read_text(encoding="utf-8")
         for header in (
             "X-Real-IP $remote_addr",
             "X-Forwarded-For $remote_addr",
             "X-Forwarded-Proto https",
             "X-Forwarded-Host ${TEST_APP_HOST}",
             'Authorization ""',
-            'X-Auth-Request-Subject ""',
-            'X-Auth-Request-Access-Token ""',
             'X-Forwarded-Port ""',
             'X-Forwarded-Server ""',
             'X-Forwarded-Prefix ""',
             'Forwarded ""',
             'X-Original-URL ""',
             'X-Original-URI ""',
+            "Cookie $http_cookie",
+            "Authorization $http_authorization",
         ):
             self.assertIn(f"proxy_set_header {header};", self.nginx)
-        self.assertIn("auth_request /_oauth2_auth;", self.nginx)
-        self.assertIn("auth_request /_v1_auth;", self.nginx)
-        self.assertIn("internal;", self.nginx)
-        self.assertIn("location = /oauth2/auth", self.nginx)
-        self.assertRegex(self.nginx, r"location = /oauth2/auth\s*\{\s*return 404;")
-        self.assertIn("proxy_pass_request_body off;", self.nginx)
+        self.assertNotIn("auth_request", self.nginx)
+        self.assertNotIn("X-Auth-Request", self.nginx)
+        self.assertNotIn("stock_ai_console", self.nginx)
+        self.assertNotIn("stock_ai_gateway", self.nginx)
+        self.assertNotIn("oauth2/auth", self.nginx)
+        self.assertNotIn("$http_authorization != \"\"", self.nginx)
+        self.assertNotIn("$console_authorization", self.nginx + main)
+        self.assertEqual(
+            re.findall(r"upstream (\w+) \{ server ([^;]+);", self.nginx),
+            [("stock_ai_middleware", "middleware:4180")],
+        )
+        self.assertEqual(set(re.findall(r"proxy_pass (http://[\w]+)", self.nginx)), {"http://stock_ai_middleware"})
         self.assertGreaterEqual(self.nginx.count("proxy_pass_request_headers off;"), 5)
-        self.assertIn("map $uri $console_authorization", NGINX_MAIN.read_text(encoding="utf-8"))
-        self.assertIn("~^/v1(?:/|$) $http_authorization;", NGINX_MAIN.read_text(encoding="utf-8"))
-        self.assertIn("proxy_set_header Authorization $console_authorization;", self.nginx)
-        self.assertIn("proxy_set_header X-Auth-Request-Access-Token $oidc_access_token;", self.nginx)
-        self.assertRegex(self.nginx, r"location = /_v1_auth\s*\{\s*internal;\s*if \(\$http_authorization != \"\"\) \{ return 204; \}")
         self.assertIn('location = /healthz', self.nginx)
         self.assertIn('location ^~ /assets/', self.nginx)
         self.assertIn('location ~ ^/v1(?:/|$)', self.nginx)
         self.assertIn('location ^~ /agent/', self.nginx)
         self.assertIn('location ^~ /llm/', self.nginx)
-        self.assertIn('if ($http_authorization != "") { return 403; }', self.nginx)
-        self.assertNotIn("$v1_auth_subrequest", NGINX_MAIN.read_text(encoding="utf-8"))
-        console_location = self.nginx.split("location / {", 1)[1]
-        self.assertNotIn("proxy_set_header Cookie", console_location)
-        for header in ("Subject", "User", "Email"):
-            self.assertRegex(
-                self.nginx,
-                rf"proxy_set_header X-Auth-Request-{header} \$oidc_{header.lower()};",
-            )
+        self.assertIn("root /usr/share/nginx/html;", self.nginx)
+        self.assertIn("try_files $uri /index.html;", self.nginx)
+        for route in ("location ~ ^/v1(?:/|$) {", "location ^~ /agent/ {", "location ^~ /llm/ {", "location ^~ /oauth2/ {"):
+            block = self.nginx.split(route, 1)[1].split("\n    }", 1)[0]
+            self.assertIn("proxy_set_header Cookie $http_cookie;", block, route)
+            self.assertIn("proxy_pass http://stock_ai_middleware;", block, route)
+        static_root = self.nginx.split("location / {", 1)[1].split("\n    }", 1)[0]
+        self.assertNotIn("proxy_pass", static_root)
 
     def test_edge_limits_and_security_headers_are_in_configuration(self):
         config = self.nginx + NGINX_MAIN.read_text(encoding="utf-8")
@@ -156,8 +150,8 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertIn('"GET /oauth2/callback HTTP/1.1" 302', rendered)
         self.assertNotIn(marker, rendered)
 
-    def test_gateway_preflight_has_negative_unit_cases(self):
-        gateway_tests = ROOT / "oidc_gateway/internal/gateway"
+    def test_middleware_preflight_has_negative_unit_cases(self):
+        gateway_tests = ROOT / "middleware/internal/gateway"
         checks = (gateway_tests / "external_idp_test.go").read_text(encoding="utf-8")
         for case in (
             "func TestPreflightReportsExternalIdPMismatches",
@@ -175,7 +169,7 @@ class TestEdgePolicyTest(unittest.TestCase):
 
     def test_live_probe_covers_matrix_route_classes_and_role_rejection(self):
         script = EXTERNAL_CHECK.read_text(encoding="utf-8")
-        gateway_dockerfile = (ROOT / "docker/oidc-gateway.Dockerfile").read_text(encoding="utf-8")
+        gateway_dockerfile = (ROOT / "docker/middleware.Dockerfile").read_text(encoding="utf-8")
         for check in (
             '"https://$AppHost/healthz"',
             '"https://$AppHost/assets/app.js"',
@@ -186,8 +180,8 @@ class TestEdgePolicyTest(unittest.TestCase):
             "spoofed identity and forwarding headers do not authenticate",
         ):
             self.assertIn(check, script)
-        self.assertIn("oidc_gateway/internal/**/*_test.go", DOCKERIGNORE.read_text(encoding="utf-8"))
-        self.assertIn("COPY oidc_gateway/ ./", gateway_dockerfile)
+        self.assertIn("middleware/internal/**/*_test.go", DOCKERIGNORE.read_text(encoding="utf-8"))
+        self.assertIn("COPY middleware/ ./", gateway_dockerfile)
         self.assertNotIn("issuer-check", gateway_dockerfile)
 
     def test_http_redirect_and_auth_routes_preserve_browser_contract(self):
@@ -198,7 +192,6 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertIn("location = /oauth2/callback", self.nginx)
         self.assertIn("location = /oauth2/start", self.nginx)
         self.assertIn("location ^~ /oauth2/", self.nginx)
-        self.assertIn("return 302 /oauth2/start;", self.nginx)
         self.assertIn("server_name ${TEST_APP_HOST};", self.nginx)
 
     def test_operator_instructions_separate_static_review_from_live_acceptance(self):
@@ -208,7 +201,7 @@ class TestEdgePolicyTest(unittest.TestCase):
             "stock-ai-test",
             "stock-ai-test_oidc_client_secret",
             "stock-ai-test_oidc_cookie_key",
-            "oidc-gateway preflight",
+            "middleware preflight",
             "evidence",
             "not run",
         ):
@@ -243,7 +236,7 @@ class TestEdgePolicyTest(unittest.TestCase):
             "app_dns = [ordered]@{ a = $appIPv4; aaaa = $appIPv6 }",
             "issuer_dns = [ordered]@{ a = $idpIPv4; aaaa = $idpIPv6 }",
             "tls_chain_and_hostname_validated = $true",
-            "Account bearer reaches Console Account validation",
+            "Account bearer reaches Backend Account validation",
             "public edge health route",
             "anonymous API route",
             "unrecognized Host header is rejected",

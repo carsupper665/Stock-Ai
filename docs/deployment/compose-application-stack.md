@@ -2,7 +2,7 @@
 
 The single application definition is
 `deploy/compose/compose.yaml`. It runs Backend, Agent Server, LLM Provider
-Server, and Console. It does not build images and it never publishes an
+Server, and the middleware. It does not build images and it never publishes an
 application port on the host. Supply the approved Ticket 07 image references
 through an environment-local env file; Ticket 10 replaces those references
 with promoted digests.
@@ -12,19 +12,19 @@ with promoted digests.
 | Service | Networks | Compose DNS dependencies | Persistent volume |
 |---|---|---|---|
 | Backend | `application` | none | `${STOCK_AI_INSTANCE}_backend_state` (`backend.db`, application logs) |
-| LLM Provider Server | `application` | `backend` (ordering only) | `${STOCK_AI_INSTANCE}_llm_state` (`llm-provider.db`) |
+| LLM Provider Server | `application` | none | `${STOCK_AI_INSTANCE}_llm_state` (`llm-provider.db`) |
 | Agent Server | `application` | `backend`, `llm-provider-server` | `${STOCK_AI_INSTANCE}_agent_state` (`agent-server.db`, Agent History) |
-| Console | `application`, `edge` | all three private service names | none |
+| Middleware | `application`, `edge` | all three private service names | none |
 
-Only Console joins `${STOCK_AI_INSTANCE}_edge`; Ticket 09 attaches Nginx and
-the OIDC Gateway to that designated edge. All four services use `expose` only,
+Only the middleware joins `${STOCK_AI_INSTANCE}_edge`; Ticket 09 attaches Nginx
+to that designated edge. All four services use `expose` only,
 which documents their container listeners without creating a host binding.
 Backend, Agent Server, and LLM Provider Server cannot be reached by an edge-only
 container. Docker network membership is not authentication; every existing
 credential check remains mandatory.
 
 The `application` bridge deliberately permits outbound traffic. Backend needs
-HTTPS issuer/JWKS and market access, while LLM Provider Server needs its model
+market access, while LLM Provider Server needs its model
 providers. Making this network `internal` would silently break those approved
 outbound dependencies. It remains private because no listener is published and
 only explicitly attached containers are members.
@@ -38,10 +38,12 @@ unique `STOCK_AI_INSTANCE` and
 `STOCK_AI_SECRET_NAMESPACE` for Test or Release. Point the image variables at
 approved references and the secrets directory at the output of
 `scripts/production-secrets.ps1`. Compose mounts only each service's allowlisted
-secret files and the application reads them through `_FILE` variables.
+secret files and the application reads them through `_FILE` variables. The
+middleware also carries the full OIDC settings (required interpolation) and the
+`oidc_client_secret` and `oidc_cookie_key` secrets.
 
 For a Test acceptance run, start from the checked-in example, then replace its
-example issuer, subject, and image references with the approved Test values.
+example OIDC settings (issuer, endpoints, client ID, subject) and image references with the approved Test values.
 Do not place this env file under `C:\ProgramData` or put secret contents in it.
 Keep the secrets directory reference, for example
 `STOCK_AI_SECRETS_DIR=C:/ProgramData/StockAI/Test/secrets`.
@@ -75,8 +77,8 @@ docker compose --env-file $ComposeEnvPath `
 
 Every dependency uses `condition: service_healthy`; no process or Compose
 command uses a fixed startup sleep. Creation order is Backend, LLM Provider
-Server, Agent Server, Console. Compose removes or stops dependents in reverse:
-Console, Agent Server, LLM Provider Server (the application "Gateway"), then
+Server, Agent Server, middleware. Compose removes or stops dependents in reverse:
+middleware, Agent Server, LLM Provider Server (the application "Gateway"), then
 Backend. This gives Agent work a chance to stop before its model gateway and
 keeps Backend available until both are down.
 

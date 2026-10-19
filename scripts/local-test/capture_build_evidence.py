@@ -12,9 +12,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / ".local-test"
 OUTPUT = RUNTIME / "build-evidence"
-SERVICES = ("backend", "agent-server", "llm-provider-server", "console", "oidc-gateway")
+SERVICES = ("backend", "agent-server", "llm-provider-server", "middleware", "nginx")
 TRIVY = "aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa"
 CACHE_VOLUME = "stock-ai-t10-trivy-cache"
+# Upstream nginx image symlinks (to /dev/stdout, /dev/stderr and the CA bundle), not secrets.
+NGINX_IMAGE_SYMLINKS = {"var/log/nginx/access.log", "var/log/nginx/error.log", "etc/ssl/cert.pem"}
 
 
 def run(*args, stdout=None):
@@ -91,7 +93,7 @@ def main():
                 archive.unlink(missing_ok=True)
         else:
             paths = inventory.read_text(encoding="utf-8").splitlines()
-        text = "\n".join(paths).lower()
+        text = "\n".join(path for path in paths if path not in NGINX_IMAGE_SYMLINKS).lower()
         sensitive_path = re.compile(
             r"(^|/)(?:\.env(?:\..*)?|secrets?/[^/]+|credentials?/[^/]+|"
             r"[^/]+\.(?:db|sqlite|pem|p12|pfx|key|log)|"

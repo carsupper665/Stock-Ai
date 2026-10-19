@@ -2,7 +2,9 @@ param(
     [switch]$SkipFrontendBuild,
     [string]$CodexExecutable = '',
     [string]$ClaudeExecutable = '',
-    [string]$ConfigurationFile = ''
+    [string]$ConfigurationFile = '',
+    [string]$NginxArchive = '',
+    [string]$NginxSha256 = 'c6ee35edb0a861063323f709192ae50d1eefaf2ea7d00678bd2b22d8542dc61e'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +14,8 @@ $frontendOutput = Join-Path $root 'frontend/dist'
 $buildRoot = Join-Path $root ('.distribution-build-' + [Guid]::NewGuid().ToString('N'))
 $releaseStage = Join-Path $buildRoot 'release'
 $initialEnv = Join-Path $buildRoot 'initial.env'
+$initialSecrets = Join-Path $buildRoot 'initial-secrets'
+$nginxVersion = '1.30.6'
 $backupRoot = Join-Path $root ('.distribution-backup-' + [Guid]::NewGuid().ToString('N'))
 $distExisted = Test-Path -LiteralPath $dist
 
@@ -47,7 +51,13 @@ function Assert-Unlocked([string]$Path) {
     }
 }
 
-function Write-InitialEnvironment([string]$Path, [string]$Source, [bool]$IncludeCodex, [bool]$IncludeClaude) {
+function New-RandomBytes([int]$Count) {
+    $bytes = [byte[]]::new($Count)
+    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return $bytes
+}
+
+function Write-InitialEnvironment([string]$Path, [string]$SecretsPath, [string]$Source, [bool]$IncludeCodex, [bool]$IncludeClaude) {
     if (!(Test-Path -LiteralPath $Source -PathType Leaf)) {
         throw "Configuration file not found: $Source"
     }
@@ -64,22 +74,54 @@ function Write-InitialEnvironment([string]$Path, [string]$Source, [bool]$Include
     foreach ($required in @('USER_TOKEN','AGENT_SERVER_ADMIN_TOKEN','LLM_SERVER_ADMIN_TOKEN','LLM_SERVER_RUNTIME_TOKEN','LLM_SERVER_MASTER_KEY')) {
         if (!$values[$required]) { throw "Configuration missing $required; .env was not created" }
     }
+    # The middleware (Release mode) rejects tokens shorter than 32 bytes; fail here instead of at start.
+    foreach ($token in @('USER_TOKEN','AGENT_SERVER_ADMIN_TOKEN','LLM_SERVER_ADMIN_TOKEN','LLM_SERVER_RUNTIME_TOKEN')) {
+        if ($values[$token].Length -lt 32) { throw "$token must be at least 32 bytes for the middleware; .env was not created" }
+    }
+
+    $secrets = [ordered]@{
+        backend_middleware_token = $values.USER_TOKEN
+        agent_admin_token = $values.AGENT_SERVER_ADMIN_TOKEN
+        llm_admin_token = $values.LLM_SERVER_ADMIN_TOKEN
+        llm_runtime_token = $values.LLM_SERVER_RUNTIME_TOKEN
+        llm_master_key = $values.LLM_SERVER_MASTER_KEY
+        backend_user_token = [Convert]::ToHexString((New-RandomBytes 32)).ToLowerInvariant()
+        oidc_cookie_key = [Convert]::ToBase64String((New-RandomBytes 32))
+    }
+    New-Item -ItemType Directory -Path $SecretsPath -Force | Out-Null
+    foreach ($name in $secrets.Keys) {
+        [IO.File]::WriteAllText((Join-Path $SecretsPath "stock-ai-release_$name"), $secrets[$name], [Text.UTF8Encoding]::new($false))
+    }
+    $secretFile = { param($name) "secrets/stock-ai-release_$name" }
 
     $lines = @(
-        '# Initial local credentials copied from the explicitly selected configuration.',
-        '# Preserve LLM_SERVER_MASTER_KEY when moving a database containing encrypted Provider tokens.',
-        "USER_TOKEN=$($values.USER_TOKEN)", "USER_NAME=$($values.USER_NAME)",
+        '# Non-secret settings. Secrets live in secrets/stock-ai-release_<name>; put oidc_client_secret there yourself.',
+        '# Preserve llm_master_key when moving a database containing encrypted Provider tokens.',
+        "USER_TOKEN_FILE=$(& $secretFile 'backend_middleware_token')", "AGENT_SERVICE_TOKEN_FILE=$(& $secretFile 'backend_user_token')", "USER_NAME=$($values.USER_NAME)",
         'PORT=17794', 'BACKEND_ADDR=127.0.0.1:17794', 'DB_DRIVER=sqlite', 'DB_DSN=data/backend.db', 'LOG_DIR=logs',
         'BACKEND_URL=http://127.0.0.1:17794',
         'LLM_SERVER_URL=http://127.0.0.1:18090', 'LLM_SERVER_ADDR=127.0.0.1:18090', 'LLM_SERVER_DB_PATH=data/llm-provider.db',
-        "LLM_SERVER_ADMIN_TOKEN=$($values.LLM_SERVER_ADMIN_TOKEN)", "LLM_SERVER_RUNTIME_TOKEN=$($values.LLM_SERVER_RUNTIME_TOKEN)",
-        "LLM_SERVER_MASTER_KEY=$($values.LLM_SERVER_MASTER_KEY)", 'LLM_SERVER_MODEL_CATALOG=[]', 'LLM_SERVER_PROVIDER_TIMEOUT=180s',
+        "LLM_SERVER_ADMIN_TOKEN_FILE=$(& $secretFile 'llm_admin_token')", "LLM_SERVER_RUNTIME_TOKEN_FILE=$(& $secretFile 'llm_runtime_token')",
+        "LLM_SERVER_MASTER_KEY_FILE=$(& $secretFile 'llm_master_key')", 'LLM_SERVER_MODEL_CATALOG=[]', 'LLM_SERVER_PROVIDER_TIMEOUT=180s',
         'AGENT_SERVER_URL=http://127.0.0.1:18080', 'AGENT_SERVER_ADDR=127.0.0.1:18080', 'AGENT_SERVER_DB_PATH=data/agent-server.db',
-        'AGENT_SERVER_HISTORY_DIR=data/agent-history', "AGENT_SERVER_ADMIN_TOKEN=$($values.AGENT_SERVER_ADMIN_TOKEN)",
-        'AGENT_SERVER_BACKEND_URL=http://127.0.0.1:17794', "AGENT_SERVER_BACKEND_USER_TOKEN=$($values.USER_TOKEN)",
-        'AGENT_SERVER_GATEWAY_URL=http://127.0.0.1:18090', "AGENT_SERVER_GATEWAY_RUNTIME_TOKEN=$($values.LLM_SERVER_RUNTIME_TOKEN)",
+        'AGENT_SERVER_HISTORY_DIR=data/agent-history', "AGENT_SERVER_ADMIN_TOKEN_FILE=$(& $secretFile 'agent_admin_token')",
+        'AGENT_SERVER_BACKEND_URL=http://127.0.0.1:17794', "AGENT_SERVER_BACKEND_USER_TOKEN_FILE=$(& $secretFile 'backend_user_token')",
+        'AGENT_SERVER_GATEWAY_URL=http://127.0.0.1:18090', "AGENT_SERVER_GATEWAY_RUNTIME_TOKEN_FILE=$(& $secretFile 'llm_runtime_token')",
         'AGENT_SERVER_REQUEST_TIMEOUT=200s', 'AGENT_SERVER_TOOL_TIMEOUT=10s',
-        'CONSOLE_ADDR=127.0.0.1:8088', 'CONSOLE_PUBLIC_DIR=public', 'CONSOLE_TLS_CERT=', 'CONSOLE_TLS_KEY='
+        '# Middleware (OIDC). Fill these in with your IdP values; see README.md.',
+        'MIDDLEWARE_ADDR=127.0.0.1:4180',
+        'OIDC_ISSUER=https://idp.example.com/realms/stock-ai',
+        'OIDC_AUTHORIZATION_URL=https://idp.example.com/realms/stock-ai/protocol/openid-connect/auth',
+        'OIDC_TOKEN_URL=https://idp.example.com/realms/stock-ai/protocol/openid-connect/token',
+        'OIDC_JWKS_URL=https://idp.example.com/realms/stock-ai/protocol/openid-connect/certs',
+        'OIDC_END_SESSION_URL=https://idp.example.com/realms/stock-ai/protocol/openid-connect/logout',
+        'OIDC_CLIENT_ID=stock-ai', 'OIDC_USER_SUBJECT=', 'OIDC_AUDIENCE=stock-ai-api',
+        'OIDC_REDIRECT_URI=https://app.example.com/oauth2/callback', 'OIDC_POST_LOGOUT_URI=https://app.example.com/',
+        'OIDC_COOKIE_NAME=__Host-stock-ai-release-session',
+        "OIDC_CLIENT_SECRET_FILE=$(& $secretFile 'oidc_client_secret')", "OIDC_COOKIE_KEY_FILE=$(& $secretFile 'oidc_cookie_key')",
+        "BACKEND_USER_TOKEN_FILE=$(& $secretFile 'backend_middleware_token')",
+        '# nginx: your domain and TLS certificate.',
+        'RELEASE_APP_HOST=app.example.com', 'RELEASE_TLS_CERT=tls/fullchain.pem', 'RELEASE_TLS_KEY=tls/privkey.pem'
     )
     if ($IncludeCodex) {
         $lines += 'LLM_SERVER_CODEX_EXECUTABLE=tools/codex/bin/codex.exe'
@@ -92,7 +134,7 @@ function Write-InitialEnvironment([string]$Path, [string]$Source, [bool]$Include
     [IO.File]::WriteAllLines($Path, $lines, [Text.UTF8Encoding]::new($false))
 }
 
-$managedPaths = @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'public', 'start.ps1', 'README.md')
+$managedPaths = @('backend.exe', 'middleware.exe', 'agent-server.exe', 'llm-provider-server.exe', 'nginx', 'start.ps1', 'README.md')
 $codexRequested = ![string]::IsNullOrWhiteSpace($CodexExecutable)
 $claudeRequested = ![string]::IsNullOrWhiteSpace($ClaudeExecutable)
 
@@ -119,9 +161,20 @@ try {
 
     New-Item -ItemType Directory -Path $releaseStage -Force | Out-Null
 
+    $nginxZip = $NginxArchive
+    if ([string]::IsNullOrWhiteSpace($nginxZip)) {
+        $nginxZip = Join-Path $buildRoot "nginx-$nginxVersion.zip"
+        Invoke-WebRequest -Uri "https://nginx.org/download/nginx-$nginxVersion.zip" -OutFile $nginxZip
+    } elseif (!(Test-Path -LiteralPath $nginxZip -PathType Leaf)) {
+        throw "Requested nginx archive not found: $nginxZip"
+    }
+    if ((Get-FileHash -LiteralPath $nginxZip -Algorithm SHA256).Hash -ne $NginxSha256) {
+        throw "Nginx archive SHA-256 mismatch for $nginxZip; expected $NginxSha256"
+    }
+
     foreach ($build in @(
         @('backend', '.', 'backend.exe'),
-        @('backend', './cmd/console', 'console.exe'),
+        @('middleware', './cmd/middleware', 'middleware.exe'),
         @('agent_server', './cmd/agent-server', 'agent-server.exe'),
         @('llm_provider_server', './cmd/llm-provider-server', 'llm-provider-server.exe')
     )) {
@@ -139,10 +192,19 @@ try {
         @(Get-ChildItem -LiteralPath $frontendOutput -File -Recurse -Force).Count -eq 0) {
         throw "Frontend output is missing or empty: $frontendOutput"
     }
+    $nginxExtract = Join-Path $buildRoot 'nginx-extract'
+    Expand-Archive -LiteralPath $nginxZip -DestinationPath $nginxExtract
+    $nginxStage = Join-Path $releaseStage 'nginx'
+    Move-Item -LiteralPath (Join-Path $nginxExtract "nginx-$nginxVersion") -Destination $nginxStage
+    Assert-File (Join-Path $nginxStage 'nginx.exe') 'nginx/nginx.exe'
+    Remove-Path (Join-Path $nginxStage 'html')
     try {
-        Copy-Item -LiteralPath $frontendOutput -Destination (Join-Path $releaseStage 'public') -Recurse -Force
+        Copy-Item -LiteralPath $frontendOutput -Destination (Join-Path $nginxStage 'html') -Recurse -Force
     } catch {
         throw "Failed to stage frontend output: $($_.Exception.Message)"
+    }
+    foreach ($template in @('release-edge.conf.template', 'release-nginx.conf')) {
+        Copy-Item -LiteralPath (Join-Path $root "deploy/nginx/$template") -Destination (Join-Path $nginxStage "conf/$template") -Force
     }
 
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'distribution-start.ps1') -Destination (Join-Path $releaseStage 'start.ps1') -Force
@@ -164,10 +226,10 @@ try {
         $managedPaths += 'tools/claude'
     }
 
-    foreach ($required in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'start.ps1', 'README.md')) {
+    foreach ($required in @('backend.exe', 'middleware.exe', 'agent-server.exe', 'llm-provider-server.exe', 'nginx/nginx.exe', 'nginx/conf/release-edge.conf.template', 'nginx/conf/release-nginx.conf', 'start.ps1', 'README.md')) {
         Assert-File (Join-Path $releaseStage $required) $required
     }
-    if (@(Get-ChildItem -LiteralPath (Join-Path $releaseStage 'public') -File -Recurse -Force).Count -eq 0) {
+    if (@(Get-ChildItem -LiteralPath (Join-Path $nginxStage 'html') -File -Recurse -Force).Count -eq 0) {
         throw 'Staged frontend is empty'
     }
 
@@ -178,7 +240,10 @@ try {
         } elseif (![IO.Path]::IsPathRooted($ConfigurationFile)) {
             $ConfigurationFile = Join-Path $root $ConfigurationFile
         }
-        Write-InitialEnvironment $initialEnv $ConfigurationFile $codexRequested $claudeRequested
+        if (Test-Path -LiteralPath (Join-Path $dist 'secrets')) {
+            throw "$dist/secrets exists but .env is missing; restore .env or remove secrets, then retry"
+        }
+        Write-InitialEnvironment $initialEnv $initialSecrets $ConfigurationFile $codexRequested $claudeRequested
     }
 
     foreach ($relativePath in $managedPaths) {
@@ -188,6 +253,7 @@ try {
     $backedUp = @()
     $published = @()
     $envPublished = $false
+    $secretsPublished = $false
     try {
         New-Item -ItemType Directory -Path $dist -Force | Out-Null
         New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
@@ -212,12 +278,17 @@ try {
         if ((Test-Path -LiteralPath $initialEnv -PathType Leaf) -and !(Test-Path -LiteralPath $envFile)) {
             Move-Item -LiteralPath $initialEnv -Destination $envFile
             $envPublished = $true
+            Move-Item -LiteralPath $initialSecrets -Destination (Join-Path $dist 'secrets')
+            $secretsPublished = $true
         }
     } catch {
         $publishError = $_
         $rollbackErrors = @()
         for ($index = $published.Count - 1; $index -ge 0; $index--) {
             try { Remove-Path (Join-Path $dist $published[$index]) } catch { $rollbackErrors += $_.Exception.Message }
+        }
+        if ($secretsPublished) {
+            try { Remove-Path (Join-Path $dist 'secrets') } catch { $rollbackErrors += $_.Exception.Message }
         }
         if ($envPublished) {
             try { Remove-Path $envFile } catch { $rollbackErrors += $_.Exception.Message }
@@ -239,7 +310,7 @@ try {
     }
 
     Remove-Path $backupRoot
-    Write-Host "Built $dist. Existing .env, data, History, and logs were not modified. Run dist/start.ps1."
+    Write-Host "Built $dist. Existing .env, secrets, data, History, and logs were not modified. Run dist/start.ps1."
 } finally {
     Remove-Path $buildRoot
     if ((Test-Path -LiteralPath $backupRoot) -and !(Get-ChildItem -LiteralPath $backupRoot -Force)) {

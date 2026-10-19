@@ -64,16 +64,23 @@ try {
     $backendUser = New-EphemeralSecret
     $llmRuntime = New-EphemeralSecret
     $llmAdmin = New-EphemeralSecret
+    $backendMiddleware = New-EphemeralSecret
     $runtimeSecretsDirectory = Join-Path ([IO.Path]::GetTempPath()) "stock-ai-image-secrets-$PID"
     if (Test-Path -LiteralPath $runtimeSecretsDirectory) { throw 'Refusing to reuse a runtime secret directory.' }
     New-Item -ItemType Directory -Path $runtimeSecretsDirectory | Out-Null
-    $gatewaySecretPath = Join-Path $runtimeSecretsDirectory 'stock-ai-test_oidc_client_secret'
-    $gatewayCookieKeyPath = Join-Path $runtimeSecretsDirectory 'stock-ai-test_oidc_cookie_key'
-    [IO.File]::WriteAllText($gatewaySecretPath, (New-EphemeralSecret))
-    [IO.File]::WriteAllText($gatewayCookieKeyPath, (New-EphemeralSecret))
+    $middlewareSecretFiles = [ordered]@{}
+    foreach ($entry in @(
+        @('oidc_client_secret', (New-EphemeralSecret)), @('oidc_cookie_key', (New-EphemeralSecret)),
+        @('agent_admin_token', $agentAdmin), @('llm_admin_token', $llmAdmin),
+        @('llm_runtime_token', $llmRuntime), @('backend_middleware_token', $backendMiddleware)
+    )) {
+        $secretPath = Join-Path $runtimeSecretsDirectory "stock-ai-test_$($entry[0])"
+        [IO.File]::WriteAllText($secretPath, $entry[1])
+        $middlewareSecretFiles["/run/secrets/stock-ai-test_$($entry[0])"] = $secretPath
+    }
     $services = @(
         @{ Name = 'backend'; Dockerfile = 'docker/backend.Dockerfile'; Memory = '512m'; CPUs = '1.0'; PIDs = 100; DataProbe = '/data/backend.db'; HealthURL = 'http://127.0.0.1:7794/v1/health'; Environment = [ordered]@{
-            ALLOW_STATIC_USER_TOKEN = 'true'; USER_TOKEN = $backendUser; ACCOUNT_TOKEN_KEY = (New-EphemeralSecret)
+            USER_TOKEN = $backendMiddleware; ACCOUNT_TOKEN_KEY = (New-EphemeralSecret)
         } },
         @{ Name = 'agent-server'; Dockerfile = 'docker/agent-server.Dockerfile'; Memory = '1g'; CPUs = '2.0'; PIDs = 200; DataProbe = '/data/agent-server.db'; HealthURL = 'http://127.0.0.1:8080/health'; Environment = [ordered]@{
             AGENT_SERVER_ADMIN_TOKEN = $agentAdmin; AGENT_SERVER_BACKEND_USER_TOKEN = $backendUser
@@ -83,17 +90,9 @@ try {
         @{ Name = 'llm-provider-server'; Dockerfile = 'docker/llm-provider-server.Dockerfile'; Memory = '512m'; CPUs = '1.0'; PIDs = 100; DataProbe = '/data/llm-provider.db'; HealthURL = 'http://127.0.0.1:8090/healthz'; Environment = [ordered]@{
             LLM_SERVER_ADMIN_TOKEN = $llmAdmin; LLM_SERVER_RUNTIME_TOKEN = $llmRuntime; LLM_SERVER_MASTER_KEY = (New-EphemeralSecret)
         } },
-        @{ Name = 'console'; Dockerfile = 'docker/console.Dockerfile'; Memory = '128m'; CPUs = '0.5'; PIDs = 50; DataProbe = $null; HealthURL = 'http://127.0.0.1:8088/'; Environment = [ordered]@{
-            AGENT_SERVER_ADMIN_TOKEN = $agentAdmin; LLM_SERVER_ADMIN_TOKEN = $llmAdmin; LLM_SERVER_RUNTIME_TOKEN = $llmRuntime
+        @{ Name = 'middleware'; Dockerfile = 'docker/middleware.Dockerfile'; Memory = '256m'; CPUs = '0.5'; PIDs = 64; DataProbe = $null; HealthURL = 'http://127.0.0.1:4180/healthz'; SecretFiles = $middlewareSecretFiles; Environment = [ordered]@{
+            STOCK_AI_ENVIRONMENT = 'Test'; MIDDLEWARE_ADDR = ':4180'
             BACKEND_URL = 'http://backend.invalid'; AGENT_SERVER_URL = 'http://agent.invalid'; LLM_SERVER_URL = 'http://llm.invalid'
-            OIDC_ISSUER = 'https://identity.invalid/realms/acceptance'; OIDC_AUDIENCE = 'stock-ai-acceptance'
-            OIDC_USER_SUBJECT = 'acceptance-user'; OIDC_JWKS_URL = 'https://identity.invalid/realms/acceptance/keys'
-        } },
-        @{ Name = 'oidc-gateway'; Dockerfile = 'docker/oidc-gateway.Dockerfile'; Memory = '256m'; CPUs = '0.5'; PIDs = 64; DataProbe = $null; HealthURL = 'http://127.0.0.1:4180/healthz'; SecretFiles = [ordered]@{
-            '/run/secrets/stock-ai-test_oidc_client_secret' = $gatewaySecretPath
-            '/run/secrets/stock-ai-test_oidc_cookie_key' = $gatewayCookieKeyPath
-        }; Environment = [ordered]@{
-            STOCK_AI_ENVIRONMENT = 'Test'; OIDC_GATEWAY_ADDR = ':4180'
             OIDC_ISSUER = 'https://identity.invalid/realms/stock-ai-test'
             OIDC_AUTHORIZATION_URL = 'https://identity.invalid/realms/stock-ai-test/protocol/openid-connect/auth'
             OIDC_TOKEN_URL = 'https://identity.invalid/realms/stock-ai-test/protocol/openid-connect/token'
@@ -101,15 +100,28 @@ try {
             OIDC_END_SESSION_URL = 'https://identity.invalid/realms/stock-ai-test/protocol/openid-connect/logout'
             OIDC_CLIENT_ID = 'stock-ai-test'; OIDC_CLIENT_SECRET_FILE = '/run/secrets/stock-ai-test_oidc_client_secret'
             OIDC_COOKIE_KEY_FILE = '/run/secrets/stock-ai-test_oidc_cookie_key'
+            AGENT_SERVER_ADMIN_TOKEN_FILE = '/run/secrets/stock-ai-test_agent_admin_token'
+            LLM_SERVER_ADMIN_TOKEN_FILE = '/run/secrets/stock-ai-test_llm_admin_token'
+            LLM_SERVER_RUNTIME_TOKEN_FILE = '/run/secrets/stock-ai-test_llm_runtime_token'
+            BACKEND_USER_TOKEN_FILE = '/run/secrets/stock-ai-test_backend_middleware_token'
             OIDC_REDIRECT_URI = 'https://app-test.example/oauth2/callback'
             OIDC_POST_LOGOUT_URI = 'https://app-test.example/'
             OIDC_COOKIE_NAME = '__Host-stock-ai-test-session'; OIDC_USER_SUBJECT = 'acceptance-user'
-        } }
+            OIDC_AUDIENCE = 'stock-ai-api-test'
+        } },
+        # Pinned upstream nginx runtime (not scratch): static frontend only; it runs as 101 with the nginx default configuration.
+        @{ Name = 'nginx'; Dockerfile = 'docker/nginx.Dockerfile'; Memory = '128m'; CPUs = '0.5'; PIDs = 64; DataProbe = $null; HealthURL = 'http://127.0.0.1:80/'
+            User = '101:101'; HealthCmd = 'wget -q -O /dev/null http://127.0.0.1:80/'
+            Tmpfs = @('/var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101', '/run:rw,noexec,nosuid,size=1m,uid=101,gid=101')
+            Environment = [ordered]@{} }
     )
     $images = [ordered]@{}
     foreach ($service in $services) {
         $name = $service.Name
         $tag = "stock-ai/${name}:$Version"
+        $isNginx = $name -eq 'nginx'
+        $runtimeUser = if ($service.ContainsKey('User')) { $service.User } else { '65532:65532' }
+        $runtimeUid = $runtimeUser.Split(':')[0]
         $metadataPath = Join-Path $EvidenceDirectory "$name-build-metadata.json"
         $ociPath = Join-Path $EvidenceDirectory "$name-image.oci.tar"
         & docker buildx build --builder $builder --platform linux/amd64 --file $service.Dockerfile --tag $tag `
@@ -154,9 +166,9 @@ try {
         $labelRevision = (& docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' $tag).Trim()
         if ($labelRevision -ne $revision) { throw "$name revision label does not match HEAD." }
         $user = (& docker image inspect --format '{{.Config.User}}' $tag).Trim()
-        if ($user -ne '65532:65532') { throw "$name does not run as the fixed non-root identity." }
+        if (!$isNginx -and $user -ne '65532:65532') { throw "$name does not run as the fixed non-root identity." }
         $health = (& docker image inspect --format '{{json .Config.Healthcheck.Test}}' $tag).Trim()
-        if (!$health -or $health -eq 'null' -or !$health.Contains($service.HealthURL)) {
+        if (!$isNginx -and (!$health -or $health -eq 'null' -or !$health.Contains($service.HealthURL))) {
             throw "$name does not have the expected image health check."
         }
 
@@ -169,12 +181,25 @@ try {
             & docker export --output $exportPath $container
             $inventory = @(& tar -tf $exportPath | Sort-Object -Unique)
             $inventory | Set-Content -Encoding utf8NoBOM (Join-Path $EvidenceDirectory "$name-files.txt")
-            $forbidden = $inventory | Where-Object {
-                $_ -match '(^|/)(\.env[^/]*|node_modules|[^/]+\.(go|c|cc|cpp|h|db|log))$' -or
-                $_ -match '(^|/)(sh|ash|bash|busybox|apk|apt|apt-get|dpkg|curl|wget|go|gcc|node|npm|npx)$' -or
-                $_ -match '(^|/)(auth|credentials|token|secret)[^/]*\.(json|txt|env)$'
+            if ($isNginx) {
+                # The pinned upstream nginx runtime legitimately ships a shell and package tools; source, state and secrets remain forbidden.
+                $forbidden = $inventory | Where-Object {
+                    $_ -match '(^|/)(\.env[^/]*|node_modules|[^/]+\.(go|db))$' -or
+                    $_ -match '(^|/)(auth|credentials|token|secret)[^/]*\.(json|txt|env)$'
+                }
+            } else {
+                $forbidden = $inventory | Where-Object {
+                    $_ -match '(^|/)(\.env[^/]*|node_modules|[^/]+\.(go|c|cc|cpp|h|db|log))$' -or
+                    $_ -match '(^|/)(sh|ash|bash|busybox|apk|apt|apt-get|dpkg|curl|wget|go|gcc|node|npm|npx)$' -or
+                    $_ -match '(^|/)(auth|credentials|token|secret)[^/]*\.(json|txt|env)$'
+                }
             }
             if ($forbidden) { throw "$name contains forbidden runtime files: $($forbidden -join ', ')" }
+            if ($isNginx) {
+                foreach ($required in @('usr/share/nginx/html/index.html', 'usr/sbin/nginx')) {
+                    if ($inventory -notcontains $required) { throw "$name is missing required file $required" }
+                }
+            }
             if ($name -eq 'llm-provider-server') {
                 foreach ($required in @('opt/codex/bin/codex', 'opt/codex/bin/codex-code-mode-host', 'opt/codex/codex-package.json')) {
                     if ($inventory -notcontains $required) { throw "$name is missing Codex package file $required" }
@@ -234,7 +259,13 @@ try {
         try {
             $runArgs = @('run', '--detach', '--name', $runtimeContainer, '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m',
                 '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--memory', $service.Memory,
-                '--cpus', $service.CPUs, '--pids-limit', [string]$service.PIDs)
+                '--cpus', $service.CPUs, '--pids-limit', [string]$service.PIDs, '--user', $runtimeUser)
+            if ($service.ContainsKey('Tmpfs')) {
+                foreach ($mount in $service.Tmpfs) { $runArgs += @('--tmpfs', $mount) }
+            }
+            if ($service.ContainsKey('HealthCmd')) {
+                $runArgs += @('--health-cmd', $service.HealthCmd, '--health-interval', '2s', '--health-retries', '15')
+            }
             if ($service.DataProbe) {
                 & docker volume create $runtimeVolume | Out-Null
                 $volumeCreated = $true
@@ -263,8 +294,8 @@ try {
             } while ($healthStatus -ne 'healthy' -and [DateTime]::UtcNow -lt $deadline)
             if ($healthStatus -ne 'healthy') { throw "$name did not become healthy within 90 seconds." }
 
-            $top = @(& docker top $runtimeContainer -eo user,pid,comm)
-            if (($top -join "`n") -notmatch '(?m)^65532\s+') { throw "$name is not running as numeric user 65532." }
+            $top = @(& docker top $runtimeContainer -eo uid,pid,comm)
+            if (($top -join "`n") -notmatch "(?m)^$runtimeUid\s+") { throw "$name is not running as numeric user $runtimeUid." }
             $hostConfig = (& docker inspect --format '{{json .HostConfig}}' $runtimeContainer) | ConvertFrom-Json
             $mounts = @((& docker inspect --format '{{json .Mounts}}' $runtimeContainer) | ConvertFrom-Json)
             if (!$hostConfig.ReadonlyRootfs -or $hostConfig.Memory -le 0 -or $hostConfig.NanoCpus -le 0 -or $hostConfig.PidsLimit -le 0 -or
@@ -279,7 +310,7 @@ try {
             $caInfo = Get-Item $caCopy
             if ($caInfo.Length -le 0) { throw "$name CA root bundle is empty." }
             $runtimeResult = [ordered]@{
-                image_id = $imageID; health = $healthStatus; process = $top; user = '65532:65532'
+                image_id = $imageID; health = $healthStatus; process = $top; user = $runtimeUser
                 read_only_root = $hostConfig.ReadonlyRootfs; tmpfs = $hostConfig.Tmpfs.'/tmp'; memory_bytes = $hostConfig.Memory
                 nano_cpus = $hostConfig.NanoCpus; pids = $hostConfig.PidsLimit; capabilities_dropped = $hostConfig.CapDrop
                 security_options = $hostConfig.SecurityOpt; mounts = $mounts
@@ -314,10 +345,10 @@ try {
 
     $inputs = @(
         '.dockerignore', 'docker/backend.Dockerfile', 'docker/agent-server.Dockerfile',
-        'docker/llm-provider-server.Dockerfile', 'docker/console.Dockerfile', 'docker/oidc-gateway.Dockerfile', 'docker/healthcheck.go',
-        'oidc_gateway/go.mod', 'oidc_gateway/cmd/gateway/main.go',
-        'oidc_gateway/internal/gateway/config.go', 'oidc_gateway/internal/gateway/gateway.go',
-        'oidc_gateway/internal/gateway/preflight.go',
+        'docker/llm-provider-server.Dockerfile', 'docker/middleware.Dockerfile', 'docker/nginx.Dockerfile', 'docker/healthcheck.go',
+        'middleware/go.mod', 'middleware/cmd/middleware/main.go',
+        'middleware/internal/gateway/config.go', 'middleware/internal/gateway/gateway.go',
+        'middleware/internal/gateway/preflight.go', 'middleware/internal/gateway/proxy.go',
         'backend/go.mod', 'backend/go.sum', 'agent_server/go.mod', 'agent_server/go.sum',
         'llm_provider_server/go.mod', 'llm_provider_server/go.sum',
         'frontend/package.json', 'frontend/package-lock.json'
@@ -349,7 +380,7 @@ try {
         critical_high_findings = 0
         sbom = 'pass: SPDX JSON and BuildKit attestation present for every image'
         filesystem_policy = 'pass: forbidden files and tools absent from every flattened image'
-        runtime_policy = 'pass: healthy as 65532:65532 with read-only root, bounded resources, CA roots, and declared writable state'
+        runtime_policy = 'pass: healthy as 65532:65532 (nginx: 101:101) with read-only root, bounded resources, CA roots, and declared writable state'
         reproducibility = 'pass: same-input image IDs and provenance materials match; per-invocation attestation envelope digests are recorded'
         images = $images
     } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $EvidenceDirectory 'acceptance-summary.json')
@@ -362,7 +393,7 @@ try {
     if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
         throw 'The production build modified the source checkout.'
     }
-    Write-Host "PASS: five production and identity images built and scanned by pinned Trivy; evidence: $EvidenceDirectory"
+    Write-Host "PASS: five production images built and scanned by pinned Trivy; evidence: $EvidenceDirectory"
 } finally {
     if ($builderCreated) { & docker buildx rm $builder | Out-Null }
     if ($trivyCacheCreated) { & docker volume rm $trivyCache | Out-Null }

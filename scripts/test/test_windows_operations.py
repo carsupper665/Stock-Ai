@@ -54,9 +54,18 @@ class WindowsOperationsPolicyTest(unittest.TestCase):
 
     def test_ordered_shutdown_digest_gate_and_deterministic_rollback(self):
         stop = self.script.split("'Stop' {", 1)[1].split("'Update' {", 1)[0]
-        self.assertLess(stop.index("'console'"), stop.index("'agent-server'"))
+        self.assertLess(stop.index("'middleware'"), stop.index("'agent-server'"))
         self.assertLess(stop.index("'agent-server'"), stop.index("'llm-provider-server'"))
         self.assertLess(stop.index("'llm-provider-server'"), stop.index("'backend'"))
+        self.assertIn("MIDDLEWARE_IMAGE", self.script)
+        recovery = (ROOT / "scripts" / "recovery.ps1").read_text(encoding="utf-8")
+        self.assertIn("'backend_middleware_token'", self.script)
+        self.assertIn("'backend_middleware_token'", recovery)
+        for secret in ("oidc_client_secret", "oidc_cookie_key"):
+            self.assertIn(f"'{secret}'", self.script)
+            self.assertIn(f"'{secret}'", recovery)
+        self.assertNotIn("CONSOLE_IMAGE", self.script)
+        self.assertNotIn("oidc-gateway", self.script)
         self.assertIn("@sha256:[0-9a-f]{64}", self.script)
         self.assertIn("if ($service.build)", self.script)
         self.assertIn("SHA256SUMS", self.script)
@@ -118,7 +127,7 @@ class WindowsOperationsPolicyTest(unittest.TestCase):
         checksum_prefix = re.search(
             r"\$script:ChecksumLinePrefixRegex = '([^']+)'", self.script
         ).group(1)
-        services = {"backend", "llm-provider-server", "agent-server", "console"}
+        services = {"backend", "llm-provider-server", "agent-server", "middleware", "nginx"}
 
         def validate_fixture(manifest_text, checksum_text, filename="promotion.json"):
             try:

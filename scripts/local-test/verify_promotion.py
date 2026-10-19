@@ -11,7 +11,7 @@ from pathlib import Path
 from verify_release import ReleaseVerificationError, verify_manifest_bytes, verify_release_configuration
 
 
-SERVICES = ("backend", "agent-server", "llm-provider-server", "console")
+SERVICES = ("backend", "agent-server", "llm-provider-server", "middleware", "nginx")
 
 
 def write_result(directory, name, details):

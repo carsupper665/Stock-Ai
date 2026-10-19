@@ -2,6 +2,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import prepare
 from scripts.local_operations import WorkflowError
@@ -20,6 +21,11 @@ SETTINGS = {
 
 class ExternalIdPPreparationTest(unittest.TestCase):
     def setUp(self):
+        images = {name: f"registry.local/{name}@sha256:{'a' * 64}" for name in
+                  ("backend", "agent-server", "llm-provider-server", "middleware", "nginx", "idp")}
+        approval = patch.object(prepare, "approved_images", return_value=(images, "b" * 64))
+        approval.start()
+        self.addCleanup(approval.stop)
         self.temporary = tempfile.TemporaryDirectory(prefix="release-external-")
         self.base = Path(self.temporary.name)
         cert, key = self.base / "fullchain.pem", self.base / "privkey.pem"
@@ -59,6 +65,14 @@ class ExternalIdPPreparationTest(unittest.TestCase):
         for key in ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_TOKEN_AUTH_METHOD", "OIDC_TOKEN_TYPE", "OIDC_AUDIENCE", "RELEASE_APP_HOST"):
             self.assertEqual(values[key], SETTINGS[key])
         self.assertNotIn("LOCAL_RELEASE_FIXTURE_IMAGE", values)
+        self.assertEqual(values["OIDC_REDIRECT_URI"], "https://stock-ai.corp.internal:8443/oauth2/callback")
+        self.assertEqual(values["OIDC_POST_LOGOUT_URI"], "https://stock-ai.corp.internal:8443/")
+        self.assertEqual(values["OIDC_COOKIE_NAME"], "__Host-stock-ai-release-session")
+        self.assertIn("MIDDLEWARE_IMAGE", values)
+        self.assertIn("NGINX_IMAGE", values)
+        self.assertNotIn("CONSOLE_IMAGE", values)
+        self.assertNotIn("OIDC_GATEWAY_IMAGE", values)
+        self.assertTrue((runtime / "secrets/stock-ai-release_backend_middleware_token").exists())
         self.assertNotIn("RELEASE_TLS_KEY", values)
         self.assertEqual(Path(values["OIDC_CA_BUNDLE"]).read_bytes(), bundle.read_bytes())
         self.assertEqual(values["CODEX_CA_CERTIFICATE"], "/etc/ssl/certs/oidc-ca.pem")

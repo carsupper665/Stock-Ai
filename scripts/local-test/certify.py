@@ -46,7 +46,7 @@ RESULT_NAMES = (
     "release_exact_digest", "release_manifest_substitution", "release_manifest_tamper",
     "release_build_directive",
 )
-IMAGE_NAMES = ("backend", "agent-server", "llm-provider-server", "console", "oidc-gateway")
+IMAGE_NAMES = ("backend", "agent-server", "llm-provider-server", "middleware", "nginx")
 
 
 class LocalHTTPSConnection(http.client.HTTPSConnection):
@@ -433,57 +433,17 @@ def cert_main():
         browser = Browser()
         status, final_url, redirects = browser.navigate_with_trace("/")
         final = urllib.parse.urlparse(final_url)
-        app_redirects = [event for event in redirects
-                         if urllib.parse.urlparse(event["target"]).hostname == "app.localtest"]
-        assert status == 200 and final.path == "/", "browser did not complete protected-root OIDC navigation"
-        assert any(urllib.parse.urlparse(event["target"]).path == "/oauth2/start" for event in app_redirects), (
-            "protected root did not enter the public OIDC start route")
-        assert all(urllib.parse.urlparse(event["target"]).port != 8443 for event in redirects), (
-            "browser followed an internal :8443 redirect from protected root")
+        assert status == 200 and final.path == "/" and not redirects, (
+            "anonymous root was not served as the static app without an edge redirect")
         auth_status, _ = current_user(browser)
-        assert auth_status == 200, "protected-root browser redirect did not establish its OIDC session"
+        assert auth_status == 401, "anonymous root navigation unexpectedly created an OIDC session"
 
         protected = Browser()
         protected_status, _, _ = protected.request("GET", "/v1/accounts", follow_redirects=False)
         assert protected_status == 401, f"anonymous protected API returned HTTP {protected_status}"
 
-        cookie_path = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=RUNTIME, prefix=".curl-cookie-", delete=False) as cookie_file:
-                cookie_path = Path(cookie_file.name)
-            cookie_path.chmod(0o600)
-            command = ["curl", "--silent", "--show-error", "--location", "--max-redirs", "12",
-                       "--resolve", "app.localtest:80:127.0.0.1", "--resolve", "app.localtest:443:127.0.0.1",
-                       "--resolve", "idp.localtest:9443:127.0.0.1", "--cacert", str(RUNTIME / "certs/fullchain.pem"),
-                       "--cookie", str(cookie_path), "--cookie-jar", str(cookie_path), "--dump-header", "-",
-                       "--output", "/dev/null", "--write-out", "\\n%{http_code} %{url_effective}",
-                       "https://app.localtest/"]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=60)
-            assert result.returncode == 0, "curl failed while following protected-root OIDC redirects"
-            lines = result.stdout.splitlines()
-            status_code, effective_url = lines[-1].split(" ", 1)
-            curl_final = urllib.parse.urlparse(effective_url)
-            curl_locations = [line.lower() for line in lines if line.lower().startswith("location:")]
-            assert status_code == "200" and curl_final.hostname == "app.localtest" and curl_final.path == "/", (
-                "curl did not complete protected-root navigation over public HTTPS")
-            assert curl_final.port != 8443 and all(":8443" not in line for line in curl_locations), (
-                "curl followed an internal :8443 redirect from protected root")
-            curl_targets = [urllib.parse.urlparse(line.split(":", 1)[1].strip()) for line in curl_locations]
-            assert any(target.path == "/oauth2/start" for target in curl_targets), (
-                "curl protected-root chain did not enter the public OIDC start route")
-        finally:
-            if cookie_path is not None:
-                cookie_path.unlink(missing_ok=True)
-
-        return {"navigations": observations, "protected_root_browser_status": status,
-                "protected_root_redirects": [{"status": event["status"],
-                                               "target_host": urllib.parse.urlparse(event["target"]).hostname,
-                                               "target_path": urllib.parse.urlparse(event["target"]).path,
-                                               "target_port": urllib.parse.urlparse(event["target"]).port}
-                                              for event in redirects],
-                "protected_root_curl_status": int(status_code), "protected_api_status": protected_status,
-                "protected_root_curl_redirects": [{"target_host": target.hostname, "target_path": target.path,
-                                                    "target_port": target.port} for target in curl_targets],
+        return {"navigations": observations, "anonymous_root_status": status, "anonymous_root_redirects": 0,
+                "protected_api_status": protected_status,
                 "anonymous_login_paths": True, "auth_error_path_does_not_loop": True,
                 "public_port_chain_only": True}
 
@@ -494,11 +454,11 @@ def cert_main():
         image_refs = json.loads((RUNTIME / "registry-references.json").read_text(encoding="utf-8"))
         manifest = {
             "schema": "stock-ai.promotion-manifest.v1", "status": "promoted", "environment": "Test",
-            "images": {name: image_refs[name] for name in IMAGE_NAMES[:-1]},
+            "images": {name: image_refs[name] for name in IMAGE_NAMES},
             "test_stack_images": image_refs,
             "artifacts": {name: {"build_digest": image_refs[name].rsplit("@", 1)[1]} for name in IMAGE_NAMES},
         }
-        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES[:-1]}}
+        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES}}
         accepted = verify_release_configuration(manifest, compose_config)
         assert accepted == manifest["images"], "local Release did not consume exact Test-accepted digests"
         return {"services_checked": list(accepted), "exact_test_digests": True,
@@ -511,11 +471,11 @@ def cert_main():
         image_refs = json.loads((RUNTIME / "registry-references.json").read_text(encoding="utf-8"))
         manifest = {
             "schema": "stock-ai.promotion-manifest.v1", "status": "promoted", "environment": "Test",
-            "images": {name: image_refs[name] for name in IMAGE_NAMES[:-1]},
+            "images": {name: image_refs[name] for name in IMAGE_NAMES},
             "test_stack_images": image_refs,
             "artifacts": {name: {"build_digest": image_refs[name].rsplit("@", 1)[1]} for name in IMAGE_NAMES},
         }
-        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES[:-1]}}
+        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES}}
         image = compose_config["services"]["backend"]["image"]
         digest = image.rsplit("@", 1)[1]
         substitute = "0" * 64 if digest != "sha256:" + "0" * 64 else "1" * 64
@@ -548,11 +508,11 @@ def cert_main():
         image_refs = json.loads((RUNTIME / "registry-references.json").read_text(encoding="utf-8"))
         manifest = {
             "schema": "stock-ai.promotion-manifest.v1", "status": "promoted", "environment": "Test",
-            "images": {name: image_refs[name] for name in IMAGE_NAMES[:-1]},
+            "images": {name: image_refs[name] for name in IMAGE_NAMES},
             "test_stack_images": image_refs,
             "artifacts": {name: {"build_digest": image_refs[name].rsplit("@", 1)[1]} for name in IMAGE_NAMES},
         }
-        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES[:-1]}}
+        compose_config = {"services": {name: {"image": manifest["images"][name]} for name in IMAGE_NAMES}}
         compose_config["services"]["backend"]["build"] = {"context": "."}
         try:
             verify_release_configuration(manifest, compose_config)
@@ -576,7 +536,7 @@ def cert_main():
     evidence["idp_restart"], results["idp_restart"] = run_case("idp_restart", idp_restart)
 
     def internal_restart():
-        services = ("backend", "llm-provider-server", "agent-server", "console", "oidc-gateway")
+        services = ("backend", "llm-provider-server", "agent-server", "middleware")
         for service in services:
             compose("restart", service)
             wait_healthy(service)

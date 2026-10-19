@@ -15,12 +15,12 @@ MATRIX = ROOT / "docs" / "deployment" / "authorization-matrix.csv"
 
 FIELDS = {
     "case_id", "method", "path", "principal", "presented_credential",
-    "edge_action", "console_action", "upstream", "upstream_credential",
+    "edge_action", "middleware_action", "upstream", "upstream_credential",
     "expected_status",
 }
 PRINCIPALS = {"anonymous", "oidc_user", "account"}
-ACTIONS = {"allow", "redirect_login", "deny", "not_found"}
-UPSTREAMS = {"none", "console", "backend", "agent", "llm", "oidc_gateway", "edge"}
+ACTIONS = {"allow", "deny", "not_found"}
+UPSTREAMS = {"none", "middleware", "backend", "agent", "llm", "edge"}
 PRIVATE_PREFIXES = ("/agent", "/llm")
 REQUIRED_PATH_PREFIXES = ("/v1", "/agent", "/llm", "/assets", "/healthz", "/oauth2")
 REQUIRED_SECTIONS = (
@@ -33,19 +33,20 @@ REQUIRED_SECTIONS = (
     "## 7. Risk register",
 )
 REQUIRED_COMPONENTS = (
-    "Nginx edge", "OIDC Gateway", "Console", "Backend", "Agent Server",
+    "Nginx edge", "Middleware", "Backend", "Agent Server",
     "LLM Provider Server", "IdP", "External model/market providers",
     "Container registry", "DNS, time and trust services", "Persistent data",
 )
 REQUIRED_IDENTITIES = (
-    "Anonymous browser", "OIDC USER", "Account token", "Console",
+    "Anonymous browser", "OIDC USER", "Account token", "Middleware",
     "Agent Server", "LLM Provider Server", "Operator",
 )
 REQUIRED_SECURITY_ITEMS = (
     "TLS private key/certificate", "OIDC client secret",
     "OIDC cookie encryption/signing key", "Account tokens",
     "IdP signing private key", "Allowed USER subjects",
-    "Agent Admin credential", "Agent→Backend USER credential",
+    "Agent Admin credential", "Backend middleware credential",
+    "Agent→Backend USER credential",
     "LLM Admin credential", "LLM Runtime credential", "LLM master key",
     "Provider API tokens", "Backend DB", "Agent DB and History",
     "LLM Provider DB", "IdP database/key store", "Logs and backup sets",
@@ -135,21 +136,26 @@ def validate_matrix(rows: list[dict[str, str]]) -> list[str]:
         status = row.get("expected_status", "")
         if status != "success" and not re.fullmatch(r"[1-5]\d\d", status):
             fail(errors, f"{case_id}: invalid expected_status")
-        denied = row.get("edge_action") in {"deny", "not_found"}
+        denied = row.get("edge_action") in {"deny", "not_found"} or row.get("middleware_action") in {"deny", "not_found"}
         if denied and (row.get("upstream") != "none" or row.get("upstream_credential") != "none"):
             fail(errors, f"{case_id}: denied request reaches an upstream")
         if row.get("principal") == "anonymous" and row.get("path", "").startswith(PRIVATE_PREFIXES):
-            if row.get("edge_action") != "deny" or row.get("upstream") != "none":
-                fail(errors, f"{case_id}: anonymous private-service request is not blocked at edge")
+            if row.get("middleware_action") != "deny" or row.get("upstream") != "none":
+                fail(errors, f"{case_id}: anonymous private-service request is not blocked by Middleware")
         if row.get("principal") == "account" and row.get("path", "").startswith(PRIVATE_PREFIXES):
-            if row.get("edge_action") != "deny":
+            if row.get("middleware_action") != "deny":
                 fail(errors, f"{case_id}: Account token unlocks a private service")
         if row.get("upstream") == "agent" and row.get("upstream_credential") != "agent_admin":
             fail(errors, f"{case_id}: Agent upstream lacks exact Admin substitution")
         if row.get("upstream") == "llm":
-            expected = "llm_runtime" if row.get("path") in {"/llm/v1/models", "/llm/v1/generate"} else "llm_admin"
+            expected = "llm_runtime" if row.get("path") == "/llm/v1/models" else "llm_admin"
             if row.get("upstream_credential") != expected:
                 fail(errors, f"{case_id}: LLM route has wrong credential role")
+        if row.get("path") == "/llm/v1/generate" and row.get("upstream") != "none":
+            fail(errors, f"{case_id}: /llm/v1/generate is open to browsers")
+        if row.get("upstream") == "backend" and row.get("principal") == "oidc_user":
+            if row.get("upstream_credential") != "backend_middleware_token":
+                fail(errors, f"{case_id}: Backend session request lacks the backend_middleware_token credential")
         if row.get("upstream") == "backend" and row.get("principal") == "account":
             if row.get("upstream_credential") != "account_bearer":
                 fail(errors, f"{case_id}: Account bearer not preserved to Backend")

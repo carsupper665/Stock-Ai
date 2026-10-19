@@ -73,7 +73,7 @@ func startTradingBackend(t *testing.T, sourceURL string) string {
 	command := exec.Command(binaryPath)
 	command.Dir = backendRoot
 	command.Env = crossBackendEnvironment(map[string]string{
-		"USER_TOKEN": crossBackendUserToken, "ALLOW_STATIC_USER_TOKEN": "true", "USER_NAME": "ticket-trading", "DB_DRIVER": "sqlite",
+		"USER_TOKEN": crossBackendUserToken, "USER_NAME": "ticket-trading", "DB_DRIVER": "sqlite",
 		"DB_DSN": filepath.Join(t.TempDir(), "backend.db"), "LOG_DIR": filepath.Join(t.TempDir(), "logs"),
 		"PORT": "0", "LOG_MAX_LINES": "1000", "DEBUG": "false", "FEE_RATE_MAKER": "0.0002", "FEE_RATE_TAKER": "0.0004",
 		"MARKET_FRESH_TTL": "100ms", "MARKET_IDLE_TIMEOUT": "1s", "MARKET_WAIT_TIMEOUT": "1s",

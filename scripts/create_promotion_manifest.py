@@ -23,12 +23,14 @@ TEST_IMAGES = (
     "backend",
     "agent-server",
     "llm-provider-server",
-    "console",
-    "oidc-gateway",
+    "middleware",
+    "nginx",
 )
-RELEASE_IMAGES = TEST_IMAGES[:-1]
+RELEASE_IMAGES = TEST_IMAGES
 IMMUTABLE_REFERENCE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
+# Upstream nginx image symlinks (to /dev/stdout, /dev/stderr and the CA bundle), not secrets.
+NGINX_IMAGE_SYMLINKS = {"var/log/nginx/access.log", "var/log/nginx/error.log", "etc/ssl/cert.pem"}
 
 
 class PromotionError(ValueError):
@@ -82,7 +84,7 @@ def require_clean_inventory(directory, records, filename):
         r"[^/]+\.(?:db|sqlite|pem|p12|pfx|key|log)|"
         r"[^/]*(?:secret|credential|session|token)[^/]*\.(?:env|json|txt|pem|key|db))$"
     )
-    hits = [entry for entry in inventory if forbidden.search(entry)]
+    hits = [entry for entry in inventory if entry not in NGINX_IMAGE_SYMLINKS and forbidden.search(entry)]
     if "stock-ai-test" in "\n".join(inventory) or hits:
         raise PromotionError(f"Test material or sensitive runtime path found in {filename}")
     return artifact

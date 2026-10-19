@@ -22,8 +22,8 @@ class PrepareTests(unittest.TestCase):
             '{"backend":"127.0.0.1:5000/stock-ai/backend@sha256:' + "a" * 64 + '",'
             '"agent-server":"127.0.0.1:5000/stock-ai/agent-server@sha256:' + "b" * 64 + '",'
             '"llm-provider-server":"127.0.0.1:5000/stock-ai/llm-provider-server@sha256:' + "c" * 64 + '",'
-            '"console":"127.0.0.1:5000/stock-ai/console@sha256:' + "d" * 64 + '",'
-            '"oidc-gateway":"127.0.0.1:5000/stock-ai/oidc-gateway@sha256:' + "e" * 64 + '"}\n',
+            '"middleware":"127.0.0.1:5000/stock-ai/middleware@sha256:' + "d" * 64 + '",'
+            '"nginx":"127.0.0.1:5000/stock-ai/nginx@sha256:' + "e" * 64 + '"}\n',
             encoding="utf-8",
         )
 
@@ -67,6 +67,25 @@ class PrepareTests(unittest.TestCase):
             self.assertEqual(mode & 0o007, 0, path.name)
         self.assertTrue(self.can_access_as(prepare.CERTS, 101, os.getgid()))
         self.assertTrue(self.can_access_as(prepare.CERTS / "privkey.pem", 101, os.getgid()))
+
+    def test_compose_environment_uses_the_five_promoted_images_and_middleware_token(self):
+        prepare.main()
+        values = dict(line.split("=", 1) for line in (prepare.RUNTIME / "compose.env").read_text(encoding="utf-8").splitlines())
+        self.assertEqual(values["MIDDLEWARE_IMAGE"], "127.0.0.1:5000/stock-ai/middleware@sha256:" + "d" * 64)
+        self.assertEqual(values["NGINX_IMAGE"], "127.0.0.1:5000/stock-ai/nginx@sha256:" + "e" * 64)
+        for removed in ("CONSOLE_IMAGE", "OIDC_GATEWAY_IMAGE"):
+            self.assertNotIn(removed, values)
+        # Base compose requires the middleware's full OIDC client settings from the env file.
+        self.assertEqual(values["OIDC_CLIENT_ID"], "stock-ai-test")
+        self.assertEqual(values["OIDC_COOKIE_NAME"], "__Host-stock-ai-test-session")
+        self.assertEqual(values["OIDC_REDIRECT_URI"], "https://app.localtest/oauth2/callback")
+        self.assertEqual(values["OIDC_POST_LOGOUT_URI"], "https://app.localtest/")
+        token = prepare.SECRETS / "stock-ai-test_backend_middleware_token"
+        self.assertTrue(prepare._valid_token(token.read_bytes().rstrip(b"\n")))
+        distinct = {(prepare.SECRETS / name).read_bytes() for name in (
+            "stock-ai-test_backend_middleware_token", "stock-ai-test_backend_user_token",
+            "stock-ai-test_agent_admin_token", "stock-ai-test_llm_admin_token", "stock-ai-test_llm_runtime_token")}
+        self.assertEqual(len(distinct), 5)
 
     def test_partial_tls_pair_is_rejected_without_rotating_remaining_bytes(self):
         prepare.main()

@@ -9,18 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from prepare import approved_images, DEFAULT_MANIFEST
-from scripts.local_operations import DIGEST_RE
 
 TRIVY = "aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa"
 
 
-def scan(output, nginx_candidate=None):
+def scan(output):
     output.mkdir(parents=True, exist_ok=True)
     images, manifest_hash = approved_images(DEFAULT_MANIFEST)
-    if nginx_candidate:
-        if not DIGEST_RE.fullmatch(nginx_candidate):
-            raise ValueError("Candidate must be an immutable Nginx image")
-        images["nginx"] = nginx_candidate
     records = {}
     for service, reference in sorted(images.items()):
         print(f"Scanning {service}", flush=True)
@@ -62,7 +57,6 @@ def scan(output, nginx_candidate=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--nginx-candidate")
     args = parser.parse_args()
-    result = scan(args.output, args.nginx_candidate)
+    result = scan(args.output)
     raise SystemExit(0 if result["status"] == "passed" else 1)

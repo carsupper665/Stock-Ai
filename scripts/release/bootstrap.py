@@ -142,8 +142,8 @@ def main(args):
     if codex_auth:
         compose.extend(["-f", str(files[2])])
     if idp:
-        # Runs in the Gateway image with the deployment's trust store; prints the URIs to register in the IdP.
-        if subprocess.run(compose + ["run", "--rm", "--no-deps", "oidc-gateway", "preflight"]).returncode:
+        # Runs in the Middleware image with the deployment's trust store; prints the URIs to register in the IdP.
+        if subprocess.run(compose + ["run", "--rm", "--no-deps", "middleware", "preflight"]).returncode:
             raise ValueError("OIDC preflight failed; fix the IdP settings shown above, then install into a new runtime")
     subprocess.run(compose + ["up", "-d", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180"], check=True)
     if idp:

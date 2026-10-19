@@ -28,12 +28,13 @@ SCHEMA_VERSION = 1
 ENVIRONMENTS = {"Test": "stock-ai-test", "Release": "stock-ai-release"}
 SECRET_SPECS = {
     "backend_user_token": ("token", ("backend", "agent-server")),
+    "backend_middleware_token": ("token", ("backend", "middleware")),
     "backend_account_token_key": ("key", ("backend",)),
-    "agent_admin_token": ("token", ("agent-server", "console")),
-    "llm_admin_token": ("token", ("llm-provider-server", "console")),
-    "llm_runtime_token": ("token", ("llm-provider-server", "agent-server", "console")),
-    "oidc_client_secret": ("token", ("oidc-gateway",)),
-    "oidc_cookie_key": ("key", ("oidc-gateway",)),
+    "agent_admin_token": ("token", ("agent-server", "middleware")),
+    "llm_admin_token": ("token", ("llm-provider-server", "middleware")),
+    "llm_runtime_token": ("token", ("llm-provider-server", "agent-server", "middleware")),
+    "oidc_client_secret": ("token", ("middleware",)),
+    "oidc_cookie_key": ("key", ("middleware",)),
     "llm_master_key": ("key", ("llm-provider-server",)),
 }
 FORBIDDEN_NAMES = {

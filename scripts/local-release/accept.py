@@ -91,11 +91,11 @@ def accept(args):
     # exact unchanged product promotion independently before backing up the
     # incumbent old auxiliary/config/CA profile.
     images, manifest_sha = approved_images(args.manifest)
-    for service in ("backend", "agent-server", "llm-provider-server", "console", "oidc-gateway"):
+    for service in ("backend", "agent-server", "llm-provider-server", "middleware", "nginx"):
         if config["services"][service]["image"] != images[service]:
             raise WorkflowError("Incumbent product digest differs from certification")
     incumbents = project_containers()
-    if len(incumbents) != 7 or any(not entry["State"]["Running"] or
+    if len(incumbents) != 6 or any(not entry["State"]["Running"] or
                                  entry["State"].get("Health", {}).get("Status") != "healthy" for entry in incumbents):
         raise WorkflowError("Complete incumbent healthy profile required")
     if any(entry["Config"]["Image"] != config["services"][entry["Config"]["Labels"]["com.docker.compose.service"]]["image"]
@@ -115,7 +115,7 @@ def accept(args):
     original.write_evidence("predeployment-backup.json", backup)
     report = {"schema": "stock-ai.t15-acceptance.v1", "status": "running", "started_at_utc": utc().isoformat(),
               "predeployment_backup_sha256": backup["sha256"], "promotion_manifest_sha256": manifest_sha,
-              "product_images": {name: images[name] for name in images if name not in ("idp", "nginx")},
+              "product_images": {name: images[name] for name in images if name != "idp"},
               "auxiliary_image": images["idp"], "product_images_rebuilt": False}
     original.write_evidence("acceptance.json", report)
     with tempfile.TemporaryDirectory(prefix="t15-profile-", dir=runtime) as temporary:

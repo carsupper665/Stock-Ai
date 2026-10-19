@@ -19,7 +19,8 @@ def refs(prefix="registry.local/stock-ai"):
         "backend": f"{prefix}/backend@sha256:{'a' * 64}",
         "llm-provider-server": f"{prefix}/llm@sha256:{'b' * 64}",
         "agent-server": f"{prefix}/agent@sha256:{'c' * 64}",
-        "console": f"{prefix}/console@sha256:{'d' * 64}",
+        "middleware": f"{prefix}/middleware@sha256:{'d' * 64}",
+        "nginx": f"{prefix}/nginx@sha256:{'e' * 64}",
     }
 
 
@@ -34,7 +35,8 @@ class LocalOperationsTests(unittest.TestCase):
             "backend": "stock-ai/backend:0.7.0",
             "llm-provider-server": "stock-ai/llm-provider-server:0.7.0",
             "agent-server": "stock-ai/agent-server:0.7.0",
-            "console": "stock-ai/console:0.7.0",
+            "middleware": "stock-ai/middleware:0.7.0",
+            "nginx": "stock-ai/nginx:0.7.0",
         }
         self.write_env(self.old)
         self.evidence = self.root / "operator evidence"
@@ -65,7 +67,6 @@ class LocalOperationsTests(unittest.TestCase):
             "services": {
                 service: {"image": values[variable], "networks": {"app": {}}}
                 for service, variable in local_operations.IMAGE_VARIABLES.items()
-                if service != "oidc-gateway"
             },
         }
 
@@ -75,7 +76,6 @@ class LocalOperationsTests(unittest.TestCase):
         path = directory / "promotion.json"
         images = images or refs()
         test_images = dict(images)
-        test_images["oidc-gateway"] = f"registry.local/stock-ai/gateway@sha256:{'e' * 64}"
         artifacts = {}
         all_files = []
 
@@ -202,7 +202,7 @@ class LocalOperationsTests(unittest.TestCase):
     def test_stop_uses_graceful_edge_to_core_order_and_keeps_volumes(self):
         operator = self.operator()
         operator.compose_config = lambda: {
-            "services": {name: {} for name in ("backend", "llm-provider-server", "agent-server", "console", "oidc-gateway", "nginx")}
+            "services": {name: {} for name in ("backend", "llm-provider-server", "agent-server", "middleware", "nginx")}
         }
         stops = []
 
@@ -213,7 +213,7 @@ class LocalOperationsTests(unittest.TestCase):
         operator.compose_run = fake_compose
         operator.container = lambda service: None
         result = operator.stop()
-        self.assertEqual(stops, ["nginx", "console", "oidc-gateway", "agent-server", "llm-provider-server", "backend"])
+        self.assertEqual(stops, ["nginx", "middleware", "agent-server", "llm-provider-server", "backend"])
         self.assertFalse(result["volumes_removed"])
 
     def test_test_tags_allowed_but_release_tags_fail_closed(self):
@@ -222,7 +222,7 @@ class LocalOperationsTests(unittest.TestCase):
         self.assertEqual(operator.validate_config(config), [])
         operator.values["STOCK_AI_ENVIRONMENT"] = "Release"
         issues = operator.validate_config(config)
-        self.assertEqual(len(issues), 4)
+        self.assertEqual(len(issues), 5)
         self.assertTrue(all("mutable" in issue for issue in issues))
         digest_config = {"services": {name: {"image": ref} for name, ref in refs().items()}}
         self.assertEqual(operator.validate_config(digest_config), [])
@@ -277,9 +277,9 @@ class LocalOperationsTests(unittest.TestCase):
             operator.promotion(invalid, config)
 
         missing = refs()
-        del missing["console"]
+        del missing["middleware"]
         invalid = self.make_manifest(missing)
-        with self.assertRaisesRegex(local_operations.WorkflowError, "four application images"):
+        with self.assertRaisesRegex(local_operations.WorkflowError, "five images"):
             operator.promotion(invalid, config)
 
     def test_promotion_requires_top_level_t10_provenance_and_acceptance_refs(self):
@@ -354,13 +354,12 @@ class LocalOperationsTests(unittest.TestCase):
         with self.assertRaisesRegex(local_operations.WorkflowError, "distinct checksummed refs"):
             operator.promotion(manifest, self.config_from_env())
 
-    def test_promotion_rejects_failed_acceptance_and_maps_test_gateway_artifact(self):
+    def test_promotion_rejects_failed_acceptance(self):
         operator = self.operator()
         config = self.config_from_env()
         manifest = self.make_manifest()
-        config["services"]["oidc-gateway"] = {"image": "stock-ai/gateway:test"}
         mapped, _ = operator.promotion(manifest, config)
-        self.assertEqual(mapped["oidc-gateway"], f"registry.local/stock-ai/gateway@sha256:{'e' * 64}")
+        self.assertEqual(mapped["nginx"], refs()["nginx"])
 
         document = json.loads(manifest.read_text(encoding="utf-8"))
         document["acceptance_results"]["test_material_absence"]["status"] = "not_run"
@@ -382,19 +381,14 @@ class LocalOperationsTests(unittest.TestCase):
             report, code = operator.preflight(manifest)
         self.assertEqual(code, 0, report["issues"])
 
-        release_with_gateway = self.config_from_env()
-        release_with_gateway["services"]["oidc-gateway"] = {
-            "image": f"registry.local/stock-ai/gateway@sha256:{'e' * 64}"
-        }
-        operator.compose_config = lambda: release_with_gateway
+        release_nginx = self.config_from_env()
+        release_nginx["services"]["nginx"]["image"] = f"registry.local/stock-ai/nginx@sha256:{'f' * 64}"
+        operator.compose_config = lambda: release_nginx
         with patch.object(local_operations, "run", return_value=docker_result):
-            gateway_report, gateway_code = operator.preflight(manifest)
-        self.assertEqual(gateway_code, 0, gateway_report["issues"])
-        release_with_gateway["services"]["oidc-gateway"]["image"] = f"registry.local/stock-ai/gateway@sha256:{'f' * 64}"
-        with patch.object(local_operations, "run", return_value=docker_result):
-            gateway_mismatch, gateway_code = operator.preflight(manifest)
-        self.assertEqual(gateway_code, 1)
-        self.assertTrue(any("Gateway image differs" in issue for issue in gateway_mismatch["issues"]))
+            nginx_mismatch, nginx_code = operator.preflight(manifest)
+        self.assertEqual(nginx_code, 1)
+        self.assertTrue(any("differ from the checksummed promotion" in issue for issue in nginx_mismatch["issues"]))
+        operator.compose_config = self.config_from_env
 
         with patch.object(local_operations, "run", return_value=docker_result):
             missing, missing_code = operator.preflight()

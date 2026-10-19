@@ -15,7 +15,8 @@ Account Token
 
 ### USER Token
 
-USER 自己在 `.env` 設定：
+USER Token 是 middleware 驗完登入後，對 Backend 的 `/v1` 請求帶的內部 token。Backend 不驗 OIDC / JWT。
+USER 自己在 `.env` 設定（Test / Release 改由 `USER_TOKEN_FILE` 讀 secret 檔）：
 
 ```env
 USER_TOKEN=...

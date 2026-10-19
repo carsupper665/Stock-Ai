@@ -3,14 +3,15 @@
 The authoritative recovery path is `scripts/linux_recovery.py` on WSL/Linux
 with Docker Desktop in Linux-container mode. It creates a consistent encrypted
 set containing all three SQLite databases, Agent History, the Compose file,
-the environment file, and these six namespace-scoped secrets:
+the environment file, and these nine namespace-scoped secrets:
 
-- Backend USER token and Account-token encryption key
+- Backend middleware token, Agent service token (`backend_user_token`), and Account-token encryption key
 - Agent admin token
 - LLM admin token, runtime token, and matching Provider master key
+- OIDC client secret and cookie key (the middleware)
 
 The Provider database and master key are one recovery unit. Never restore one
-without the other. The recovery key is separate from the six application
+without the other. The recovery key is separate from the nine application
 secrets and is never included in a backup.
 
 ## Prerequisites and permissions
@@ -35,7 +36,7 @@ directories private to the operator:
 The split secret ownership is necessary for Linux file-backed Compose secrets:
 the application image runs as uid `65532`, while the operator still needs
 group read access to back up the files. Directory `0700` prevents other group
-members from traversing the host directory. Prepare and verify the six files
+members from traversing the host directory. Prepare and verify the nine files
 without exposing their values:
 
 ```bash
@@ -53,7 +54,7 @@ Keep the recovery key as canonical base64 for exactly 32 random bytes and mode
 
 ## Consistent encrypted backup and verification
 
-Backup validates all six secrets and Compose metadata, requires every
+Backup validates all nine secrets and Compose metadata, requires every
 application image reference to be either a full local `sha256:<64 hex>` ID or
 `repository@sha256:<64 hex>` digest, records those exact references, stops the
 stack, and copies `/data` from the stopped containers. Mutable tags are rejected
@@ -147,7 +148,7 @@ python3 scripts/linux_recovery.py restore \
 ```
 
 The new recovery directory contains `compose.yaml`, rewritten `compose.env`,
-the six restored secrets, and sanitized restore metadata. The environment
+the nine restored secrets, and sanitized restore metadata. The environment
 points only to the new stack and recovery secret directory; image references
 must equal those in the backup. Review these metadata, then create the stack
 and capture a stopped pre-start validation before starting:

@@ -42,7 +42,7 @@ function Get-ServiceContainer([string]$Service) {
 
 function Wait-Healthy {
     $deadline = [DateTime]::UtcNow.AddSeconds($HealthTimeoutSeconds)
-    $services = @('backend', 'llm-provider-server', 'agent-server', 'console')
+    $services = @('backend', 'llm-provider-server', 'agent-server', 'middleware')
     while ([DateTime]::UtcNow -lt $deadline) {
         $pending = @()
         foreach ($service in $services) {
@@ -59,7 +59,7 @@ function Wait-Healthy {
 }
 
 function Assert-NetworkBoundary {
-    foreach ($service in @('backend', 'llm-provider-server', 'agent-server', 'console')) {
+    foreach ($service in @('backend', 'llm-provider-server', 'agent-server', 'middleware')) {
         $identifier = Get-ServiceContainer $service
         $bindings = (Invoke-Docker @('inspect', '--format', '{{json .HostConfig.PortBindings}}', $identifier) | Out-String).Trim()
         if ($bindings -ne 'null' -and $bindings -ne '{}') {
@@ -70,8 +70,8 @@ function Assert-NetworkBoundary {
         $application = $names | Where-Object { $_ -like '*_application' }
         $edge = $names | Where-Object { $_ -like '*_edge' }
         if ($application.Count -ne 1) { throw "$service is not on exactly one application network" }
-        if ($service -eq 'console') {
-            if ($edge.Count -ne 1) { throw 'Console is not on exactly one designated edge network' }
+        if ($service -eq 'middleware') {
+            if ($edge.Count -ne 1) { throw 'Middleware is not on exactly one designated edge network' }
         } elseif ($edge.Count -ne 0) {
             throw "$service unexpectedly joins the edge network"
         }

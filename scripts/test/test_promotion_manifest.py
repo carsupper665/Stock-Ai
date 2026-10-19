@@ -96,7 +96,8 @@ class PromotionManifestTest(unittest.TestCase):
         self.assertEqual(manifest["status"], "promoted")
         self.assertEqual(manifest["git_revision"], self.revision)
         self.assertEqual(set(manifest["test_stack_images"]), set(TEST_IMAGES))
-        self.assertEqual(set(manifest["images"]), set(TEST_IMAGES[:-1]))
+        self.assertEqual(TEST_IMAGES, ("backend", "agent-server", "llm-provider-server", "middleware", "nginx"))
+        self.assertEqual(set(manifest["images"]), set(TEST_IMAGES))
         self.assertEqual(set(manifest["artifacts"]), set(TEST_IMAGES))
         for records in manifest["artifacts"].values():
             for key in ("sbom", "scan", "filesystem_inventory", "provenance", "acceptance"):
@@ -119,7 +120,7 @@ class PromotionManifestTest(unittest.TestCase):
             create_manifest(self.build, self.certification_path, self.references_path)
 
     def test_test_material_in_flattened_image_inventory_blocks_promotion(self):
-        inventory = self.build / "console-files.txt"
+        inventory = self.build / "middleware-files.txt"
         inventory.write_text("app\nrun/secrets/stock-ai-test_oidc_client_secret\n", encoding="utf-8")
         lines = []
         for path in sorted(self.build.iterdir()):
@@ -127,6 +128,23 @@ class PromotionManifestTest(unittest.TestCase):
                 lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
         (self.build / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="ascii")
         with self.assertRaisesRegex(PromotionError, "Test material"):
+            create_manifest(self.build, self.certification_path, self.references_path)
+
+    def _rewrite_build_sums(self):
+        lines = [f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}"
+                 for path in sorted(self.build.iterdir()) if path.name != "SHA256SUMS"]
+        (self.build / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="ascii")
+
+    def test_nginx_runtime_log_symlinks_are_not_sensitive_but_other_logs_are(self):
+        inventory = self.build / "nginx-files.txt"
+        inventory.write_text(
+            "usr/share/nginx/html/index.html\nvar/log/nginx/access.log\nvar/log/nginx/error.log\netc/ssl/cert.pem\n",
+            encoding="utf-8")
+        self._rewrite_build_sums()
+        create_manifest(self.build, self.certification_path, self.references_path)
+        inventory.write_text("usr/share/nginx/html/index.html\nvar/log/nginx/other.log\n", encoding="utf-8")
+        self._rewrite_build_sums()
+        with self.assertRaisesRegex(PromotionError, "sensitive runtime path"):
             create_manifest(self.build, self.certification_path, self.references_path)
 
     def test_modified_build_evidence_fails_checksum_validation(self):
@@ -159,7 +177,8 @@ class PromotionManifestTest(unittest.TestCase):
         self.assertEqual(len(entries), 35)
         for name, digest in entries.items():
             self.assertEqual(hashlib.sha256((output.parent / name).read_bytes()).hexdigest(), digest)
-        self.assertIn("oidc-gateway-sbom.spdx.json", entries)
+        self.assertIn("middleware-sbom.spdx.json", entries)
+        self.assertIn("nginx-sbom.spdx.json", entries)
 
     def test_generated_manifest_is_consumed_by_release_operator(self):
         output = self.root / "release-package" / "promotion.json"

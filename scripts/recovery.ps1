@@ -17,13 +17,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'recovery-policy.psm1') -Force
-$Services = @('backend', 'llm-provider-server', 'agent-server', 'console')
+$Services = @('backend', 'llm-provider-server', 'agent-server', 'middleware')
 $Volumes = [ordered]@{
     backend = 'backend_state'
     'llm-provider-server' = 'llm_state'
     'agent-server' = 'agent_state'
 }
-$Secrets = @('backend_user_token', 'backend_account_token_key', 'agent_admin_token', 'llm_admin_token', 'llm_runtime_token', 'llm_master_key')
+$Secrets = @('backend_user_token', 'backend_middleware_token', 'backend_account_token_key', 'agent_admin_token', 'llm_admin_token', 'llm_runtime_token', 'llm_master_key', 'oidc_client_secret', 'oidc_cookie_key')
 $DockerCommand = Get-Command 'docker.exe' -ErrorAction SilentlyContinue
 if (!$DockerCommand) { $DockerCommand = Get-Command 'docker' -ErrorAction SilentlyContinue }
 if (!$DockerCommand) { throw 'Docker CLI is unavailable.' }

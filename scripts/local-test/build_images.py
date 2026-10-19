@@ -15,8 +15,8 @@ SERVICES = {
     "backend": "docker/backend.Dockerfile",
     "agent-server": "docker/agent-server.Dockerfile",
     "llm-provider-server": "docker/llm-provider-server.Dockerfile",
-    "console": "docker/console.Dockerfile",
-    "oidc-gateway": "docker/oidc-gateway.Dockerfile",
+    "middleware": "docker/middleware.Dockerfile",
+    "nginx": "docker/nginx.Dockerfile",
 }
 
 

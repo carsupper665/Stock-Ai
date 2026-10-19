@@ -18,7 +18,6 @@ const (
 type Identity struct {
 	Kind      Kind
 	AccountID string
-	Subject   string
 	UserName  string
 }
 
@@ -34,26 +33,19 @@ var (
 )
 
 type Settings struct {
-	UserName             string
-	StaticUserToken      string
-	AllowStaticUserToken bool
-	OIDC                 *OIDCSettings
+	UserName        string
+	StaticUserToken string
 }
 
-// Authenticator keeps OIDC USER and opaque Account-token authentication as
-// separate paths. A JWT-shaped token never falls back after OIDC rejection.
+// Authenticator 認兩種 token：middleware 帶來的內部 USER token，
+// 以及不透明的 Account token。Backend 不驗 OIDC / JWT。
 type Authenticator struct {
 	settings Settings
-	oidc     *OIDCVerifier
 	store    *database.Store
 }
 
 func New(settings Settings, store *database.Store) *Authenticator {
-	var verifier *OIDCVerifier
-	if settings.OIDC != nil {
-		verifier = NewOIDCVerifier(*settings.OIDC)
-	}
-	return &Authenticator{settings: settings, oidc: verifier, store: store}
+	return &Authenticator{settings: settings, store: store}
 }
 
 func (a *Authenticator) Resolve(ctx context.Context, raw string) (Identity, error) {
@@ -62,18 +54,7 @@ func (a *Authenticator) Resolve(ctx context.Context, raw string) (Identity, erro
 		return Identity{}, ErrNoToken
 	}
 
-	if strings.Count(token, ".") == 2 {
-		if a.oidc == nil {
-			return Identity{}, ErrInvalidToken
-		}
-		subject, err := a.oidc.Verify(ctx, token)
-		if err != nil {
-			return Identity{}, ErrInvalidToken
-		}
-		return Identity{Kind: KindUser, Subject: subject, UserName: a.settings.UserName}, nil
-	}
-
-	if a.settings.AllowStaticUserToken && token == a.settings.StaticUserToken {
+	if token == a.settings.StaticUserToken {
 		return Identity{Kind: KindUser, UserName: a.settings.UserName}, nil
 	}
 

@@ -14,17 +14,17 @@ class LocalReleaseGateTest(unittest.TestCase):
     def setUp(self):
         self.digests = {
             name: f"127.0.0.1:5000/stock-ai/{name}@sha256:{index:064x}"
-            for index, name in enumerate(("backend", "agent-server", "llm-provider-server", "console", "oidc-gateway"), 1)
+            for index, name in enumerate(("backend", "agent-server", "llm-provider-server", "middleware", "nginx"), 1)
         }
         self.manifest = {
             "schema": "stock-ai.promotion-manifest.v1",
             "status": "promoted",
             "environment": "Test",
-            "images": {name: self.digests[name] for name in ("backend", "agent-server", "llm-provider-server", "console")},
+            "images": self.digests,
             "test_stack_images": self.digests,
             "artifacts": {name: {"build_digest": value.rsplit("@", 1)[1]} for name, value in self.digests.items()},
         }
-        self.compose = {"services": {name: {"image": self.manifest["images"][name]} for name in self.manifest["images"]}}
+        self.compose = {"services": {name: {"image": self.digests[name]} for name in self.digests}}
 
     def test_exact_test_digests_are_consumed(self):
         self.assertEqual(verify_release_configuration(self.manifest, self.compose), self.manifest["images"])
@@ -35,7 +35,7 @@ class LocalReleaseGateTest(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseVerificationError, "differs from Test promotion"):
             verify_release_configuration(self.manifest, substitution)
         build = copy.deepcopy(self.compose)
-        build["services"]["console"]["build"] = "."
+        build["services"]["middleware"]["build"] = "."
         with self.assertRaisesRegex(ReleaseVerificationError, "build directive"):
             verify_release_configuration(self.manifest, build)
 

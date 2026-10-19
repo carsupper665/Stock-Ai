@@ -51,11 +51,11 @@ Agent（LLM 虛擬帳號）不用前端，拿 Account Token 直接打 API（B §
 
 | # | 需求 | 來源 |
 |---|---|---|
-| X-01 | 以環境專用 confidential OIDC Gateway 登入；重新整理以 HttpOnly session 恢復身分，access token 不進 JavaScript/Web Storage/URL，可處理到期並由 POST 登出。Agent/LLM 憑證只在私有代理邊界替換。 | `SEC-DEPLOY-01`；Ticket 04 |
+| X-01 | 以環境專用 confidential OIDC middleware（唯一的登入層）登入；重新整理以 HttpOnly session 恢復身分，access token 不進 JavaScript/Web Storage/URL，可處理到期並由 POST 登出。Backend／Agent／LLM 憑證只在 middleware 的私有邊界替換。 | `SEC-DEPLOY-01`；Ticket 04 |
 | X-02 | 殼上看得到三個服務各自活不活。交易後端 `GET /v1/health` → `ok`／`degraded`；LLM Server `GET /healthz` → `ok`，但它不代表各 Provider 通；Agent Server 沒定義（待定 5） | F §10.2 A；L §23 |
 | X-03 | 時間全是 UTC／RFC3339。顯示本地時間；列表可用相對時間（「3 分鐘前」）、明細要完整時間（建議） | B §15；F §10.1 |
 | X-04 | 數字只格式化，不做金額運算 | F §10.1 |
-| X-05 | 錯誤：三個服務三種信封（見 §7），使用者只要看到給人看的訊息；可重試的（`market_unavailable`、`market_timeout`、`RATE_LIMITED`、`PROVIDER_TIMEOUT`）要能重試。Gateway session request 收到 401 → 清除顯示身分並回登入頁 | F §5、§10.5；A §54；L §22 |
+| X-05 | 錯誤：三個服務三種信封（見 §7），使用者只要看到給人看的訊息；可重試的（`market_unavailable`、`market_timeout`、`RATE_LIMITED`、`PROVIDER_TIMEOUT`）要能重試。middleware session request 收到 401 → 清除顯示身分並回登入頁 | F §5、§10.5；A §54；L §22 |
 | X-06 | 沒有 WebSocket／SSE，全部輪詢或手動重載。running 中的 Session 輪詢 `runs/current`；價格輪詢；其他頁面要有「重新整理」並顯示最後更新時間（建議） | A §46；F §6 |
 | X-07 | 追溯：重要資料都能回到 `session_id + run_id`。Ledger 條目 → Run；Memory → Run；Event → 建立它的 Run；Run → 完整歷史。任何地方出現 `run_id` 都可以點過去 | A §1、§53、§59 |
 | X-08 | 破壞性操作要確認，並把後果講清楚（下表） | — |
@@ -259,7 +259,7 @@ X-10 分頁：
 
 | # | 問題 | 規格現況 | 影響前端哪裡 |
 |---|---|---|---|
-| 1 | 三個服務的認證（已解決） | `SEC-DEPLOY-01`：OIDC Gateway session；Console 驗 OIDC 後依 route 替換 private-service credential | Ticket 04 已完成登入頁/session；Ticket 05 完成 Console boundary |
+| 1 | 三個服務的認證（已解決） | `SEC-DEPLOY-01`：middleware 的 OIDC session；middleware 驗 session 後依 route 替換 private-service credential（Backend 只認 middleware 的內部 token，不驗 OIDC） | Ticket 04 已完成登入頁/session；Ticket 05 的 Console boundary 已併入 middleware |
 | 2 | Session ↔ 交易帳號 | A §23 說 Trading Tools 直接映射交易後端 API、帳戶變動帶 `session_id + run_id`；B §4 說帳號由 Account Token 決定；B 的 order／trade 沒有 `session_id`／`run_id` 欄位（F §10.3） | 建 Session 表單要不要選帳號；Session 明細的帳戶摘要；帳號列表「被誰用」（T-05）；Ledger 怎麼對到 Run（A-39） |
 | 3 | `model_name`／`model_level` 合法值 | A §4、§55 由 `model_name` 解析 Provider；L §18 Provider 有 `default_model`；L §21 有 `GET /v1/models` 但沒定義回應 | 建 Session 是下拉還是手填；填錯只能靠 400 |
 | 4 | Server Default 能不能查 | A §4 只說有 default | 建 Session 表單能否顯示預設 prompt／`max_loop`／`max_tool_call` |

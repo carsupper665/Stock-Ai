@@ -50,13 +50,8 @@ class BusinessGateTest(unittest.TestCase):
             routes = ("/api/v3/ticker/price", "/api/v3/exchangeInfo", "/api/v3/klines")
             counters = [{"routes": {route: 0 for route in routes}},
                         {"routes": {route: int(counters_advance) for route in routes}}]
-            adapter_routes = ("USER GET /v1/accounts/:id", "ACCOUNT GET /v1/market/price", "ACCOUNT POST /v1/orders")
-            adapters = [{"routes": {route: count for route in adapter_routes}} for count in (0, 1)]
-            rejections = {"fixture": "stock-ai-backend-oidc-rejections-v1", "tokens_disclosed": False,
-                          "statuses": {name: 401 for name in ("anonymous", "static-user", "expired", "wrong-issuer", "wrong-audience", "wrong-subject")}}
             with patch("business.Browser", FixtureBrowser), patch("business.market_boundary", return_value={}), \
-                    patch("business.market_counters", side_effect=counters), patch("business.time.sleep"), \
-                    patch("business.adapter_counters", side_effect=adapters), patch("business.fixture_observation", return_value=rejections):
+                    patch("business.market_counters", side_effect=counters), patch("business.time.sleep"):
                 if expect_failure:
                     with self.assertRaises(WorkflowError):
                         business.probe(runtime, report, {})

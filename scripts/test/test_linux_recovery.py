@@ -118,7 +118,7 @@ class LinuxRecoveryTests(unittest.TestCase):
 
         self.assertEqual(result["action"], "verify")
         self.assertTrue(result["encryption_authenticated"])
-        self.assertEqual(result["secret_file_count"], 6)
+        self.assertEqual(result["secret_file_count"], 9)
         self.assertEqual(result["history_file_count"], 1)
         self.assertEqual(
             result["databases"]["agent-server"]["table_counts"]["table_3"], 3
@@ -147,7 +147,7 @@ class LinuxRecoveryTests(unittest.TestCase):
         contents = self.make_contents()
         manifest_path = contents / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["images"]["console"] = "example/console:latest"
+        manifest["images"]["middleware"] = "example/middleware:latest"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         os.chmod(manifest_path, 0o600)
         with self.assertRaisesRegex(recovery.RecoveryError, "full local SHA-256"):
@@ -198,7 +198,7 @@ class LinuxRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(recovery.RecoveryError, "0440"):
             recovery.require_linux_secret_file(path, "fixture")
 
-    def test_prepare_secrets_targets_only_the_six_compose_files(self) -> None:
+    def test_prepare_secrets_targets_only_the_nine_compose_files(self) -> None:
         secret_directory = self.root / "secrets"
         secret_directory.mkdir(mode=0o700)
         namespace = "stock-ai-test"
@@ -220,7 +220,7 @@ class LinuxRecoveryTests(unittest.TestCase):
         ):
             result = recovery.prepare_secrets(env, helper)
         prepare.assert_called_once_with(secret_directory, helper, expected)
-        self.assertEqual(result["secret_file_count"], 6)
+        self.assertEqual(result["secret_file_count"], 9)
 
     def test_archive_rejects_links_and_traversal(self) -> None:
         archive = self.root / "unsafe.tar.gz"

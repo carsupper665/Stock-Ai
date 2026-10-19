@@ -1,9 +1,14 @@
 # WSL/Linux local Release handover (T16)
 
 This release is for the agreed local WSL/Linux scope. It uses an OIDC identity
-fixture, fake LLM Provider, deterministic Binance market fixture, and a private
-service credential adapter. No external IdP, real exchange, external test host,
+fixture, fake LLM Provider, and deterministic Binance market fixture. No external IdP, real exchange, external test host,
 public DNS/TLS renewal, or Windows reboot is required for this acceptance.
+
+The evidence, image and test counts below were recorded at T16 acceptance,
+before the middleware merge (the OIDC Gateway and Console became one
+middleware, the Nginx image joined the promoted product images, and the Agent
+adapter was removed); rerun the sign-off to refresh them. The architecture
+section describes the current topology.
 
 The authoritative result is [summary.json](../../deploy/evidence/local-release/t16/summary.json).
 Every public artifact is covered by [SHA256SUMS](../../deploy/evidence/local-release/t16/SHA256SUMS)
@@ -25,39 +30,41 @@ tests** passed: 110 repository, 30 Release and four private-material tests.
 Only Nginx publishes `127.0.0.1:8443`. The local application origin is
 `https://app.localrelease:8443`. Add `127.0.0.1 app.localrelease` to the client
 host's hosts file if needed; host acceptance uses curl `--connect-to` instead.
-Nginx connects to Console and Gateway on the edge network. Console routes
-private APIs to Backend, Agent Server and LLM Provider Server on the internal
-application network. The fixture belongs to both networks, but its private
-adapter listens only on the application interface. The application network is
+Nginx serves the bundled frontend directly and proxies `/oauth2`, `/v1`, `/agent`
+and `/llm` to the middleware on the edge network; it has no `auth_request` and
+holds no token. The middleware is the only login layer and routes private APIs to
+Backend, Agent Server and LLM Provider Server on the internal application
+network. The fixture belongs to both networks. The application network is
 Docker `internal: true`; `api.binance.com` resolves to the fixture there.
 
 Browser login uses authorization code, PKCE, state, nonce and signed tokens.
 The issuer is `https://app.localrelease:8443/realms/stock-ai-release`, user
-subject `local-release-user`, audience `stock-ai-api-release`. Backend static
-USER authentication is disabled. Browser identity headers are stripped and
-replaced at the trusted boundary. Account tokens retain their existing scope.
+subject `local-release-user`, audience `stock-ai-api-release`. The Backend does
+not verify OIDC; it accepts the private `backend_middleware_token` that only the
+middleware holds. Browser identity headers are stripped at the middleware.
+Account tokens retain their existing scope.
 
-The immutable Agent image still makes native static USER service calls. The
-local private adapter validates the existing service secret in constant time
-and exchanges it for a 45-second signed token only for the two allowed USER
-reads. Account-authenticated tool calls preserve their original credentials.
-Mutation/monitoring routes never receive USER elevation. This compatibility
-adapter is a local fixture; native Agent service OIDC has not been implemented.
+The Agent Server connects directly to `http://backend:7794` with its own
+`backend_user_token`, which only authorizes Account lookups. Account-authenticated
+tool calls preserve their original credentials, and mutation/monitoring routes
+never receive USER elevation. The earlier fixture adapter on 18081 that exchanged
+the Agent's service secret for a signed token has been removed.
 
 ## Accepted versions and immutable images
 
 [Final summary](../../deploy/evidence/local-release/t16/summary.json) records the
 actual Docker engine and Nginx versions, all seven immutable image references,
 promotion hash, completion time and accepted backup hash. The five product
-images match Test promotion exactly. Auxiliary images are approved separately
-in [auxiliary-images.json](../../deploy/local-release/auxiliary-images.json).
-The identity fixture approval binds its reviewed source bytes to its digest.
+images (Backend, Agent Server, LLM Provider Server, middleware and Nginx) match
+Test promotion exactly. The only auxiliary image is the identity fixture, approved
+separately in [auxiliary-images.json](../../deploy/local-release/auxiliary-images.json);
+its approval binds its reviewed source bytes to its digest.
 
 T16 found 43 High/Critical findings in the old Nginx image. Updating to the
 pinned official stable Alpine base removed most, but three library findings
-remained. [Dockerfile.nginx](../../deploy/local-release/Dockerfile.nginx) updates
-libexpat, pcre2 and tiff. The accepted image records installed package versions
-and immutable digest in auxiliary approval. The original failing scan is
+remained, so the then-separate local Nginx image updated libexpat, pcre2 and
+tiff. That image has since been replaced by the promoted Nginx image built from
+`docker/nginx.Dockerfile`. The original failing scan is
 retained, and the intermediate candidate's three findings are recorded in
 `nginx-update-history.json`; only `t16/scans/summary.json` certifies the accepted set.
 There are no severity exceptions or ignored unfixed findings in this gate.
@@ -181,13 +188,10 @@ The final T16 `rollback.json` reflects the updated auxiliary hash and env, not
 the historical T14/T15 metadata. Copy it to persistent operational evidence
 before using it. Retain prior images and backups until a new release passes.
 
-For an auxiliary Nginx update: build from the reviewed immutable base, push to
-the local registry, scan the candidate with `scan_release.py --nginx-candidate
-<immutable-reference>`, and run `update_nginx.py --runtime <runtime> --scans
-<passing-scan-directory>`. It creates a fresh complete backup, updates public
-auxiliary approval and the persistent env/bundle, recreates only Nginx, and
-requires healthy services plus strict login. Failure restores the old complete
-profile. Re-run full sign-off and issue a new local tag after accepting changes.
+An Nginx update is now an ordinary product image update: promote a new package
+and use the update workflow in [local-operations.md](local-operations.md). There
+is no separate auxiliary Nginx updater. Re-run full sign-off and issue a new
+local tag after accepting changes.
 
 ## Incident response and remaining local limitations
 

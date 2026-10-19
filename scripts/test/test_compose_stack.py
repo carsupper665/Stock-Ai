@@ -8,7 +8,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = ROOT / "deploy" / "compose" / "compose.yaml"
 ACCEPTANCE_PATH = ROOT / "scripts" / "test-compose-stack.ps1"
-SERVICES = {"backend", "agent-server", "llm-provider-server", "console"}
+SERVICES = {"backend", "agent-server", "llm-provider-server", "middleware"}
 PRIVATE_SERVICES = {"backend", "agent-server", "llm-provider-server"}
 
 
@@ -29,13 +29,14 @@ class ComposeStackPolicyTest(unittest.TestCase):
         for name in PRIVATE_SERVICES:
             self.assertEqual(set(self.services[name]["networks"]), {"application"})
 
-    def test_only_console_joins_designated_edge(self):
+    def test_only_middleware_joins_designated_edge(self):
         edge_members = {
             name
             for name, service in self.services.items()
             if "edge" in service.get("networks", {})
         }
-        self.assertEqual(edge_members, {"console"})
+        self.assertEqual(edge_members, {"middleware"})
+        self.assertEqual(set(self.services["middleware"]["networks"]), {"application", "edge"})
         self.assertEqual(
             self.compose["networks"]["edge"]["labels"]["stock-ai.boundary"],
             "designated-edge",
@@ -45,9 +46,9 @@ class ComposeStackPolicyTest(unittest.TestCase):
         expected = {
             ("agent-server", "AGENT_SERVER_BACKEND_URL"): "http://backend:7794",
             ("agent-server", "AGENT_SERVER_GATEWAY_URL"): "http://llm-provider-server:8090",
-            ("console", "BACKEND_URL"): "http://backend:7794",
-            ("console", "AGENT_SERVER_URL"): "http://agent-server:8080",
-            ("console", "LLM_SERVER_URL"): "http://llm-provider-server:8090",
+            ("middleware", "BACKEND_URL"): "http://backend:7794",
+            ("middleware", "AGENT_SERVER_URL"): "http://agent-server:8080",
+            ("middleware", "LLM_SERVER_URL"): "http://llm-provider-server:8090",
         }
         for (service, variable), value in expected.items():
             self.assertEqual(self.services[service]["environment"][variable], value)
@@ -61,7 +62,7 @@ class ComposeStackPolicyTest(unittest.TestCase):
         }
         for service, mount in expected.items():
             self.assertIn(":".join(mount), self.services[service]["volumes"])
-        self.assertNotIn("volumes", self.services["console"])
+        self.assertNotIn("volumes", self.services["middleware"])
         for name, volume in self.compose["volumes"].items():
             self.assertEqual(volume["name"], "${STOCK_AI_INSTANCE}_" + name)
             self.assertEqual(
@@ -72,9 +73,9 @@ class ComposeStackPolicyTest(unittest.TestCase):
     def test_all_dependencies_are_health_gated_and_encode_stop_order(self):
         expected_dependencies = {
             "backend": set(),
-            "llm-provider-server": {"backend"},
+            "llm-provider-server": set(),
             "agent-server": {"backend", "llm-provider-server"},
-            "console": {"backend", "llm-provider-server", "agent-server"},
+            "middleware": {"backend", "llm-provider-server", "agent-server"},
         }
         for service, expected in expected_dependencies.items():
             dependencies = self.services[service].get("depends_on", {})
@@ -82,9 +83,8 @@ class ComposeStackPolicyTest(unittest.TestCase):
             for dependency in dependencies.values():
                 self.assertEqual(dependency["condition"], "service_healthy")
         # Compose creates in dependency order and removes in reverse dependency
-        # order: console -> agent -> LLM gateway -> backend.
+        # order: middleware -> agent -> LLM gateway / backend.
         self.assertIn("llm-provider-server", self.services["agent-server"]["depends_on"])
-        self.assertIn("backend", self.services["llm-provider-server"]["depends_on"])
 
     def test_health_and_graceful_runtime_controls_are_explicit(self):
         for name, service in self.services.items():
@@ -100,9 +100,43 @@ class ComposeStackPolicyTest(unittest.TestCase):
     def test_production_secrets_are_files_not_environment_values(self):
         secret_variables = re.findall(r"\b[A-Z][A-Z0-9_]*(?:TOKEN|KEY)(?:_FILE)?\b", self.raw)
         direct = {name for name in secret_variables if not name.endswith("_FILE")}
-        self.assertEqual(direct, {"ALLOW_STATIC_USER_TOKEN"})
+        self.assertEqual(direct, set())
         for secret in self.compose["secrets"].values():
             self.assertIn("${STOCK_AI_SECRET_NAMESPACE}", secret["file"])
+
+    def test_backend_has_no_oidc_and_middleware_token_is_not_shared_with_agent(self):
+        backend_env = self.services["backend"]["environment"]
+        self.assertFalse([name for name in backend_env if name.startswith("OIDC_")])
+        self.assertNotIn("ALLOW_STATIC_USER_TOKEN", backend_env)
+        self.assertNotIn("ALLOW_STATIC_USER_TOKEN", self.raw)
+        self.assertTrue(backend_env["USER_TOKEN_FILE"].endswith("_backend_middleware_token"))
+        self.assertTrue(backend_env["AGENT_SERVICE_TOKEN_FILE"].endswith("_backend_user_token"))
+        holders = {
+            name
+            for name, service in self.services.items()
+            if any(secret["source"] == "backend_middleware_token" for secret in service.get("secrets", []))
+        }
+        self.assertEqual(holders, {"backend", "middleware"})
+        self.assertTrue(
+            self.services["middleware"]["environment"]["BACKEND_USER_TOKEN_FILE"].endswith("_backend_middleware_token")
+        )
+
+    def test_base_middleware_is_self_sufficient_for_oidc(self):
+        env = self.services["middleware"]["environment"]
+        for name in ("OIDC_ISSUER", "OIDC_AUTHORIZATION_URL", "OIDC_TOKEN_URL", "OIDC_JWKS_URL", "OIDC_CLIENT_ID",
+                     "OIDC_REDIRECT_URI", "OIDC_POST_LOGOUT_URI", "OIDC_COOKIE_NAME", "OIDC_USER_SUBJECT", "OIDC_AUDIENCE"):
+            self.assertRegex(env[name], r"^\$\{" + name + r":\?", name)
+        for name in ("OIDC_END_SESSION_URL", "OIDC_TOKEN_TYPE", "OIDC_TOKEN_AUTH_METHOD"):
+            self.assertRegex(env[name], r"^\$\{" + name + r":-", name)
+        for name, secret in (("OIDC_CLIENT_SECRET_FILE", "oidc_client_secret"), ("OIDC_COOKIE_KEY_FILE", "oidc_cookie_key")):
+            self.assertEqual(env[name], "/run/secrets/${STOCK_AI_SECRET_NAMESPACE}_" + secret)
+            self.assertIn(secret, self.compose["secrets"])
+        mounts = {item["source"]: item["target"] for item in self.services["middleware"]["secrets"]}
+        for secret in ("oidc_client_secret", "oidc_cookie_key"):
+            self.assertEqual(mounts[secret], "${STOCK_AI_SECRET_NAMESPACE}_" + secret)
+        holders = {name for name, service in self.services.items()
+                   if any(item["source"].startswith("oidc_") for item in service.get("secrets", []))}
+        self.assertEqual(holders, {"middleware"})
 
     def test_windows_acceptance_covers_recovery_without_volume_deletion(self):
         script = ACCEPTANCE_PATH.read_text(encoding="utf-8")

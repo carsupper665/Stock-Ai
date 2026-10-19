@@ -16,21 +16,31 @@ function Write-Text([string]$Path, [string]$Text) {
     [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
 }
 
+function New-LaunchJson([string]$UserToken) {
+    $assignments = "`$env:USER_TOKEN='$UserToken'; `$env:USER_NAME='Fixture'; `$env:AGENT_SERVER_ADMIN_TOKEN='fixture-agent-token-0123456789abcdefgh'; `$env:LLM_SERVER_ADMIN_TOKEN='fixture-admin-token-0123456789abcdefghi'; `$env:LLM_SERVER_RUNTIME_TOKEN='fixture-runtime-token-0123456789abcdefg'; `$env:LLM_SERVER_MASTER_KEY='fixture-master-key'"
+    return (@{ configurations = @(@{ runtimeArgs = @($assignments) }) } | ConvertTo-Json -Depth 5)
+}
+
+function New-NginxArchive([string]$Path) {
+    $stage = Join-Path $testRoot 'nginx-archive-stage'
+    Write-Text (Join-Path $stage 'nginx-1.30.6/nginx.exe') 'fake nginx'
+    Write-Text (Join-Path $stage 'nginx-1.30.6/conf/nginx.conf') 'default nginx conf'
+    Write-Text (Join-Path $stage 'nginx-1.30.6/html/index.html') 'default nginx page'
+    Compress-Archive -Path (Join-Path $stage 'nginx-1.30.6') -DestinationPath $Path
+}
+
 function New-Fixture([string]$Name, [switch]$WithoutEnvironment) {
     $root = Join-Path $testRoot $Name
-    foreach ($directory in @('scripts', 'backend/cmd/console', 'agent_server/cmd/agent-server', 'llm_provider_server/cmd/llm-provider-server', 'frontend', 'fake-bin', 'fake-state')) {
+    foreach ($directory in @('scripts', 'middleware/cmd/middleware', 'deploy/nginx', 'agent_server/cmd/agent-server', 'llm_provider_server/cmd/llm-provider-server', 'frontend', 'fake-bin', 'fake-state')) {
         [IO.Directory]::CreateDirectory((Join-Path $root $directory)) | Out-Null
     }
     Copy-Item -LiteralPath $sourceBuildScript -Destination (Join-Path $root 'scripts/build-distribution.ps1')
     Write-Text (Join-Path $root 'scripts/distribution-start.ps1') 'synthetic start script'
     Write-Text (Join-Path $root 'scripts/distribution-readme.md') 'synthetic distribution readme'
-    Write-Text (Join-Path $root 'synthetic-launch.json') @'
-{
-  "configurations": [
-    { "runtimeArgs": ["$env:ALLOW_STATIC_USER_TOKEN='true'; $env:USER_TOKEN='fixture-user'; $env:USER_NAME='Fixture'; $env:AGENT_SERVER_ADMIN_TOKEN='fixture-agent'; $env:LLM_SERVER_ADMIN_TOKEN='fixture-admin'; $env:LLM_SERVER_RUNTIME_TOKEN='fixture-runtime'; $env:LLM_SERVER_MASTER_KEY='fixture-master'"] }
-  ]
-}
-'@
+    Write-Text (Join-Path $root 'deploy/nginx/release-edge.conf.template') 'synthetic edge template'
+    Write-Text (Join-Path $root 'deploy/nginx/release-nginx.conf') 'synthetic nginx main'
+    Write-Text (Join-Path $root 'synthetic-launch.json') (New-LaunchJson 'fixture-user-token-0123456789abcdefghij')
+    Write-Text (Join-Path $root 'short-launch.json') (New-LaunchJson 'too-short')
 
     $fakeGo = @'
 $ErrorActionPreference = 'Stop'
@@ -60,13 +70,13 @@ $output = Join-Path $args[$prefixIndex + 1] 'dist/index.html'
     Write-Text (Join-Path $root 'fake-bin/npm.cmd') '@pwsh -NoProfile -File "%~dp0fake-npm.ps1" %*'
 
     $dist = Join-Path $root 'dist'
-    foreach ($relativePath in @('public', 'tools/codex', 'tools/claude', 'data/agent-history', 'logs')) {
+    foreach ($relativePath in @('nginx/html', 'tools/codex', 'tools/claude', 'data/agent-history', 'logs')) {
         [IO.Directory]::CreateDirectory((Join-Path $dist $relativePath)) | Out-Null
     }
-    foreach ($file in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'start.ps1', 'README.md')) {
+    foreach ($file in @('backend.exe', 'middleware.exe', 'agent-server.exe', 'llm-provider-server.exe', 'nginx/nginx.exe', 'start.ps1', 'README.md')) {
         Write-Text (Join-Path $dist $file) "old-$file"
     }
-    Write-Text (Join-Path $dist 'public/index.html') 'old frontend'
+    Write-Text (Join-Path $dist 'nginx/html/index.html') 'old frontend'
     Write-Text (Join-Path $dist 'tools/codex/bin/codex.exe') 'old codex'
     Write-Text (Join-Path $dist 'tools/claude/claude.exe') 'old claude'
     [IO.File]::WriteAllBytes((Join-Path $dist 'data/backend.db'), [byte[]](0, 255, 13, 10, 7, 8, 9))
@@ -91,7 +101,7 @@ function Get-PersistentHashes([string]$Root) {
 function Get-ReleaseHashes([string]$Root) {
     $dist = Join-Path $Root 'dist'
     $result = @{}
-    foreach ($relativePath in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'public/index.html', 'start.ps1', 'README.md', 'tools/codex/bin/codex.exe', 'tools/claude/claude.exe')) {
+    foreach ($relativePath in @('backend.exe', 'middleware.exe', 'agent-server.exe', 'llm-provider-server.exe', 'nginx/nginx.exe', 'nginx/html/index.html', 'start.ps1', 'README.md', 'tools/codex/bin/codex.exe', 'tools/claude/claude.exe')) {
         $path = Join-Path $dist $relativePath
         if (Test-Path -LiteralPath $path -PathType Leaf) { $result[$relativePath] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
     }
@@ -145,13 +155,24 @@ if (!(Test-Path -LiteralPath $TemporaryParent -PathType Container)) {
 [IO.Directory]::CreateDirectory($testRoot) | Out-Null
 
 try {
-    $configArgs = @('-ConfigurationFile', 'synthetic-launch.json')
+    $nginxArchive = Join-Path $testRoot 'nginx-fixture.zip'
+    New-NginxArchive $nginxArchive
+    $nginxHash = (Get-FileHash -LiteralPath $nginxArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    $nginxArgs = @('-NginxArchive', $nginxArchive, '-NginxSha256', $nginxHash)
+    $configArgs = @('-ConfigurationFile', 'synthetic-launch.json') + $nginxArgs
 
     $env:FAKE_GO_FAIL_ON = '3'
     Invoke-FailureCase 'third Go build failure' {} $configArgs 'Build failed: agent-server.exe'
     $env:FAKE_GO_FAIL_ON = $null
 
     $env:FAKE_NPM_FAIL = '1'
+    Invoke-FailureCase 'nginx archive hash mismatch' {} (@('-ConfigurationFile', 'synthetic-launch.json', '-NginxArchive', $nginxArchive, '-NginxSha256', ('0' * 64))) 'Nginx archive SHA-256 mismatch'
+
+    Invoke-FailureCase 'short launch token' {
+        param($root)
+        Write-Text (Join-Path $root 'frontend/dist/index.html') 'new frontend'
+    } (@('-SkipFrontendBuild', '-ConfigurationFile', 'short-launch.json') + $nginxArgs) 'USER_TOKEN must be at least 32 bytes' -WithoutEnvironment
+
     Invoke-FailureCase 'frontend build failure' {} $configArgs 'Frontend build failed'
     $env:FAKE_NPM_FAIL = $null
 
@@ -182,18 +203,24 @@ try {
     Write-Text (Join-Path $successRoot 'cli/claude.exe') 'new claude'
     $oldRelease = Get-ReleaseHashes $successRoot
     $persistentBefore = Get-PersistentHashes $successRoot
-    $success = Invoke-Packaging $successRoot @(
+    $success = Invoke-Packaging $successRoot (@(
         '-SkipFrontendBuild', '-ConfigurationFile', 'synthetic-launch.json',
         '-CodexExecutable', (Join-Path $successRoot 'cli/bin/codex.exe'),
         '-ClaudeExecutable', (Join-Path $successRoot 'cli/claude.exe')
-    )
+    ) + $nginxArgs)
     Assert-True ($success.ExitCode -eq 0) "successful release failed: $($success.Output)"
     Assert-Hashes $persistentBefore (Get-PersistentHashes $successRoot) 'successful release persistent state'
     $newRelease = Get-ReleaseHashes $successRoot
-    foreach ($key in @('backend.exe', 'console.exe', 'agent-server.exe', 'llm-provider-server.exe', 'public/index.html', 'start.ps1', 'README.md', 'tools/codex/bin/codex.exe', 'tools/claude/claude.exe')) {
+    foreach ($key in @('backend.exe', 'middleware.exe', 'agent-server.exe', 'llm-provider-server.exe', 'nginx/nginx.exe', 'nginx/html/index.html', 'start.ps1', 'README.md', 'tools/codex/bin/codex.exe', 'tools/claude/claude.exe')) {
         Assert-True ($oldRelease[$key] -ne $newRelease[$key]) "successful release did not replace $key"
     }
-    Assert-True (([IO.File]::ReadAllText((Join-Path $successRoot 'dist/public/index.html'))) -eq 'new frontend') 'successful release frontend content is wrong'
+    Assert-True (([IO.File]::ReadAllText((Join-Path $successRoot 'dist/nginx/html/index.html'))) -eq 'new frontend') 'successful release frontend content is wrong'
+    foreach ($removed in @('console.exe', 'public')) {
+        Assert-True (!(Test-Path -LiteralPath (Join-Path $successRoot "dist/$removed"))) "successful release contains $removed"
+    }
+    Assert-True (([IO.File]::ReadAllText((Join-Path $successRoot 'dist/nginx/conf/release-edge.conf.template'))) -eq 'synthetic edge template') 'successful release edge template was not copied verbatim'
+    Assert-True (([IO.File]::ReadAllText((Join-Path $successRoot 'dist/nginx/conf/release-nginx.conf'))) -eq 'synthetic nginx main') 'successful release nginx main config was not copied verbatim'
+    Assert-True (!(Test-Path -LiteralPath (Join-Path $successRoot 'dist/secrets'))) 'successful release with an existing .env generated secrets'
     Assert-True (Test-Path -LiteralPath (Join-Path $successRoot 'dist/tools/codex/bin/codex-helper.exe')) 'successful release omitted Codex companion executable'
     Assert-True (Test-Path -LiteralPath (Join-Path $successRoot 'dist/tools/codex/bin/codex-code-mode-host.exe')) 'successful release omitted Codex tool host'
     Assert-True (Test-Path -LiteralPath (Join-Path $successRoot 'dist/tools/codex/codex-resources/fixture.txt')) 'successful release omitted Codex package resources'
@@ -229,7 +256,39 @@ try {
     $initial = Invoke-Packaging $initialRoot (@('-SkipFrontendBuild') + $configArgs)
     Assert-True ($initial.ExitCode -eq 0) "initial environment release failed: $($initial.Output)"
     $initialEnv = [IO.File]::ReadAllLines((Join-Path $initialRoot 'dist/.env'))
-    Assert-True ($initialEnv -contains 'USER_TOKEN=fixture-user') 'initial environment omitted synthetic USER_TOKEN'
+    $initialEnvText = [IO.File]::ReadAllText((Join-Path $initialRoot 'dist/.env'))
+    Assert-True ($initialEnv -contains 'USER_TOKEN_FILE=secrets/stock-ai-release_backend_middleware_token') 'initial environment omitted USER_TOKEN_FILE'
+    Assert-True ($initialEnv -contains 'AGENT_SERVICE_TOKEN_FILE=secrets/stock-ai-release_backend_user_token') 'initial environment omitted AGENT_SERVICE_TOKEN_FILE'
+    Assert-True ($initialEnv -contains 'AGENT_SERVER_BACKEND_USER_TOKEN_FILE=secrets/stock-ai-release_backend_user_token') 'Agent does not use the Agent-only backend token'
+    Assert-True ($initialEnv -contains 'MIDDLEWARE_ADDR=127.0.0.1:4180') 'initial environment omitted MIDDLEWARE_ADDR'
+    Assert-True ($initialEnv -contains 'OIDC_COOKIE_NAME=__Host-stock-ai-release-session') 'initial environment omitted OIDC_COOKIE_NAME'
+    Assert-True ($initialEnvText -notmatch 'CONSOLE_') 'initial environment still contains CONSOLE_ settings'
+    $secretsDirectory = Join-Path $initialRoot 'dist/secrets'
+    $expectedSecrets = @{
+        backend_middleware_token = 'fixture-user-token-0123456789abcdefghij'
+        agent_admin_token = 'fixture-agent-token-0123456789abcdefgh'
+        llm_admin_token = 'fixture-admin-token-0123456789abcdefghi'
+        llm_runtime_token = 'fixture-runtime-token-0123456789abcdefg'
+        llm_master_key = 'fixture-master-key'
+    }
+    foreach ($name in $expectedSecrets.Keys) {
+        $secretFile = Join-Path $secretsDirectory "stock-ai-release_$name"
+        Assert-True (Test-Path -LiteralPath $secretFile -PathType Leaf) "secret file $name is missing"
+        Assert-True (([IO.File]::ReadAllText($secretFile)) -eq $expectedSecrets[$name]) "secret file $name does not hold the launch configuration value"
+    }
+    $agentToken = [IO.File]::ReadAllText((Join-Path $secretsDirectory 'stock-ai-release_backend_user_token'))
+    Assert-True ($agentToken.Length -ge 32) 'generated backend_user_token is shorter than 32 bytes'
+    Assert-True ($agentToken -ne $expectedSecrets.backend_middleware_token) 'backend_user_token equals backend_middleware_token'
+    $cookieKey = [IO.File]::ReadAllText((Join-Path $secretsDirectory 'stock-ai-release_oidc_cookie_key'))
+    $cookieKeyBytes = [Convert]::FromBase64String($cookieKey)
+    Assert-True ($cookieKeyBytes.Length -eq 32 -and [Convert]::ToBase64String($cookieKeyBytes) -eq $cookieKey) 'oidc_cookie_key is not canonical base64 of 32 bytes'
+    Assert-True (!(Test-Path -LiteralPath (Join-Path $secretsDirectory 'stock-ai-release_oidc_client_secret'))) 'build generated oidc_client_secret'
+    foreach ($secretValue in @($expectedSecrets.Values) + @($agentToken, $cookieKey)) {
+        Assert-True (!$initialEnvText.Contains($secretValue)) '.env contains a secret value'
+    }
+    foreach ($artifact in @('middleware.exe', 'nginx/nginx.exe')) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $initialRoot "dist/$artifact") -PathType Leaf) "initial release omitted $artifact"
+    }
     Assert-True ($initialEnv -notcontains 'LLM_SERVER_CODEX_EXECUTABLE=tools/codex/bin/codex.exe') 'initial environment claimed an unrequested Codex CLI'
     Assert-True (([IO.File]::ReadAllText((Join-Path $initialRoot 'dist/tools/codex/bin/codex.exe'))) -eq 'old codex') 'unrequested Codex tool was changed'
     Assert-True (([IO.File]::ReadAllText((Join-Path $initialRoot 'dist/tools/claude/claude.exe'))) -eq 'old claude') 'unrequested Claude tool was changed'

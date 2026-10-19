@@ -1,12 +1,15 @@
 # Traceable production images
 
-Ticket 07 packages Backend, Agent Server, LLM Provider Server, and Console as
-Linux/amd64 images for Docker Desktop in Linux-container mode. Ticket 09 adds
-the OIDC Gateway to the same traceable image build and runtime gate. The only
-final base is `scratch`. Each final filesystem contains a statically linked service,
-a statically linked health probe and CA roots; Go's pinned `timetzdata` build
-tag embeds the timezone database. Console also has
-the compiled frontend. Build stages use these immutable official-image indexes:
+Ticket 07 packages Backend, Agent Server, and LLM Provider Server as
+Linux/amd64 images for Docker Desktop in Linux-container mode. The middleware
+(login and API proxy) and Nginx (with the compiled frontend) are built by the
+same traceable image build and runtime gate, so there are five images. Apart from
+Nginx, the only final base is `scratch`. Each such filesystem contains a statically
+linked service, a statically linked health probe and CA roots; Go's pinned
+`timetzdata` build tag embeds the timezone database. The Nginx image
+(`docker/nginx.Dockerfile`) is a pinned upstream Nginx runtime that carries only
+the compiled frontend and runs as user 101. Build stages use these immutable
+official-image indexes:
 
 | Build base | Manifest-list digest |
 |---|---|
@@ -15,7 +18,7 @@ the compiled frontend. Build stages use these immutable official-image indexes:
 | `aquasec/trivy:0.75.0` (acceptance scanner) | `sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa` |
 
 Go 1.27.2 is the exact toolchain accepted by the Ticket 06 gate. Node 24 is the
-supported LTS line used only to compile Console. Alpine is confined to build
+supported LTS line used only to compile the frontend into the Nginx image. Alpine is confined to build
 stages, so its shell and package manager cannot enter a production image. The
 global `.dockerignore` admits only locked dependency manifests and required
 source files; it rejects `.git`, `.scratch`, `.env`, tests, local databases,
@@ -60,10 +63,10 @@ expected to differ and both values are recorded rather than treated as image
 drift. Retain both provenance files for independent review; only the first OCI
 archive is kept in the sealed evidence directory.
 
-The retained Ticket 07 evidence artifact records the four application images
-from its original run. Ticket 09 has not yet produced a new five-image build
-artifact; run the clean-checkout build before certifying or promoting the Test
-Gateway image.
+The retained Ticket 07 evidence artifact records the four images from its
+original run, which predates the middleware merge. It has not yet been replaced by
+a new five-image build artifact; run the clean-checkout build before certifying
+or promoting the middleware and Nginx images.
 
 The script deliberately does not publish. Ticket 10 assigns registry digests
 only after Test certification and promotes those exact digests to Release.
@@ -73,7 +76,7 @@ only after Test certification and promotes those exact digests to Release.
 All images run as numeric user/group `65532:65532`. Backend writes only
 `/data/backend.db` and `/data/logs`; Agent Server writes only
 `/data/agent-server.db` and `/data/history`; LLM Provider Server writes only
-`/data/llm-provider.db`; Console has no persistent writable path. Secret files
+`/data/llm-provider.db`; the middleware and Nginx have no persistent writable path. Secret files
 are read-only mounts under the environment-specific namespace specified in
 `production-secret-safety.md`. Optional Codex/Claude CLI harness executables
 and their authentication files are not in the LLM image; enabling a harness
@@ -82,21 +85,22 @@ requires separately approved, read-only mounts and a new image/security review.
 Run the images only with the following constraints (Ticket 08 encodes these in
 Compose):
 
-| Constraint | Backend | Agent | LLM | Console | OIDC Gateway |
+| Constraint | Backend | Agent | LLM | Middleware | Nginx |
 |---|---:|---:|---:|---:|---:|
 | read-only root | required | required | required | required | required |
 | writable volume | `/data` | `/data` | `/data` | none | none |
-| tmpfs `/tmp` (`noexec,nosuid`, 16 MiB) | required | required | required | required | required |
-| memory | 512 MiB | 1 GiB | 512 MiB | 128 MiB | 256 MiB |
+| tmpfs `/tmp` (`noexec,nosuid`, 16 MiB) | required | required | required | required | `/var/cache/nginx` and `/run` instead |
+| memory | 512 MiB | 1 GiB | 512 MiB | 256 MiB | 128 MiB |
 | CPUs | 1.0 | 2.0 | 1.0 | 0.5 | 0.5 |
-| PIDs | 100 | 200 | 100 | 50 | 64 |
+| PIDs | 100 | 200 | 100 | 64 | 64 |
 | capabilities | drop all | drop all | drop all | drop all | drop all |
 | privilege escalation | forbidden | forbidden | forbidden | forbidden | forbidden |
 
 Backend `/v1/health` verifies its database. Agent `/health` verifies the
 runtime persistence latch. LLM `/healthz` verifies its database-backed server.
-Console `/` verifies both its HTTP server and compiled `index.html`. None of
-the probes needs a shell or credential.
+The middleware `/healthz` verifies its HTTP server; Nginx `/` serves the compiled
+`index.html`. None of the probes needs a credential, and the scratch-based
+images need no shell.
 
 ## Review gate
 

@@ -39,7 +39,7 @@ with open(output, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
-for module in backend agent_server llm_provider_server oidc_gateway; do
+for module in backend agent_server llm_provider_server middleware; do
     (cd "$module" && go test -race -count=1 -json ./...) >"$artifact_dir/go-test-$module.json"
     (cd "$module" && go vet ./...) >"$artifact_dir/go-vet-$module.log" 2>&1
     (cd "$module" && "$govulncheck" -json ./...) >"$artifact_dir/govulncheck-$module.json"
@@ -55,7 +55,7 @@ projects = {
     "backend": "backend",
     "agent_server": "stock-ai/agent-server",
     "llm_provider_server": "stock-ai/llm-provider-server",
-    "oidc_gateway": "oidc_gateway",
+    "middleware": "middleware",
 }
 allowed = {
     "GO-2026-5932": {

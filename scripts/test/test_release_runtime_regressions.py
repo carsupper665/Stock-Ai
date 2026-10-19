@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 class ReleaseRuntimeRegressionTest(unittest.TestCase):
     def test_every_outbound_client_mounts_extra_trust(self):
         services = yaml.safe_load((ROOT / "deploy/compose/compose.release.yaml").read_text())["services"]
-        for name in ("backend", "console", "oidc-gateway", "llm-provider-server", "agent-server"):
+        for name in ("backend", "middleware", "llm-provider-server", "agent-server"):
             with self.subTest(service=name):
                 self.assertTrue(any("OIDC_CA_BUNDLE" in volume for volume in services[name].get("volumes", [])), name)
 

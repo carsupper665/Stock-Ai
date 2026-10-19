@@ -18,7 +18,8 @@ OIDC and cookie keys separate from Release.
 
 The tested auxiliary image is approved in
 [`auxiliary-images.json`](../../deploy/local-release/auxiliary-images.json).
-Five product digests remain the certified T10 digests. To rebuild this
+The five product digests (including middleware and Nginx) come from the
+promotion package; the fixture IdP is the only auxiliary image. To rebuild this
 auxiliary alone after a reviewed fixture change:
 
 ```sh
@@ -112,47 +113,26 @@ back a separately placed Account-authenticated simulated order with stops,
 stops the Session, logs out, and verifies HTTP 401 for the cleared session.
 No external Provider installation, account, credential or login is requested.
 
-## Local Agent service-identity adapter
+## Agent service identity (adapter removed)
 
 The first real run passed encrypted migration, rollback, strict local market
 provenance, Provider generation and Account checks, then failed Session
-creation with HTTP 502. The immutable Agent's `fetchAccount` and
-`fetchPriceSample` send its configured static Backend USER credential, while
-Release correctly keeps `ALLOW_STATIC_USER_TOKEN=false`. The runner restored
-the full original T14 profile and all seven healthy services. This was a
-failed acceptance, not a completed release. A later attempt stopped at source
-approval before runtime mutation; editing approved fixture bytes requires a
-fresh auxiliary build and approval.
+creation with HTTP 502, because the then-current Backend refused the Agent's
+static service credential once static USER authentication was disabled. The
+runner restored the full original T14 profile and all seven healthy services.
+This was a failed acceptance, not a completed release. A later attempt stopped at
+source approval before runtime mutation; editing approved fixture bytes requires
+a fresh auxiliary build and approval.
 
-The auxiliary fixture supplies the authorized local identity adapter on port
-18081, bound only to its own application interface resolved through the
-application-only `fake-provider.localrelease` alias. It has no host port and
-does not listen on the edge interface; a live edge connection probe must fail.
-Only Agent's private `AGENT_SERVER_BACKEND_URL` changes to `http://idp:18081`.
-The fixture mounts the existing private `backend_user_token` and compares
-credentials in constant time. Only `GET /v1/accounts/:id` and
-`GET /v1/market/price` service calls receive a newly signed 45-second RS256
-`typ=at+jwt` with the exact Release issuer, audience and subject. Backend
-validates that token through its normal JWKS-backed OIDC boundary. Static USER
-authentication stays disabled.
-
-Account-authenticated tools retain their original Account bearer. Their exact
-existing Backend method/path allowlist covers market, account monitoring,
-orders, positions, trades, ledger and messages. The service credential cannot
-be elevated on those routes or mutations. Unknown methods/routes, path escape,
-absolute request URLs, missing credentials and unapproved headers are rejected
-or stripped. Upstream is fixed to `backend:7794`, proxy use and redirects are
-disabled, bodies and timeouts are bounded, and tokens never enter evidence.
-
-Acceptance requires private per-route counters proving USER account lookup
-and Account market/order calls, with original Account credentials preserved.
-A separate private fixture probe makes actual anonymous/static/expired/wrong
-issuer/audience/subject requests to Backend and records six HTTP 401 results,
-without returning any JWT. Unit tests cover wrong credentials, route/method
-escape, no mutation elevation, header stripping and claim rejection; the real
-Backend OIDC test matrix also passes. This local credential adapter compensates
-for missing native Agent service OIDC. It does **not** establish support for
-external production service identity.
+That was worked around with a fixture adapter on port 18081 that exchanged the
+Agent's service secret for a signed token. The adapter has been removed. The
+Backend no longer verifies OIDC and accepts the Agent's own `backend_user_token`
+(`AGENT_SERVICE_TOKEN`) directly for `GET /v1/accounts/:id`, so the Agent's
+`AGENT_SERVER_BACKEND_URL` is `http://backend:7794`. Account-authenticated tools
+retain their original Account bearer. Acceptance still requires private
+per-route counters proving USER account lookup and Account market/order calls,
+with original Account credentials preserved. The T15 evidence on record was
+produced with the adapter and predates this change.
 
 Any smoke/migration failure triggers full pre-deployment rollback, including
 old auxiliary/config/CA/env, stores and encryption keys. Evidence distinguishes

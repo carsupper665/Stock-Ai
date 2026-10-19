@@ -12,7 +12,7 @@ from prepare import (AUXILIARY, DEFAULT_MANIFEST, HOST, INSTANCE, ISSUER, NAMESP
 from scripts.local_operations import Operator, WorkflowError
 
 FILES = [ROOT / "deploy/compose/compose.yaml", ROOT / "deploy/compose/compose.local-release.yaml"]
-SERVICES = {"backend", "agent-server", "llm-provider-server", "console", "oidc-gateway", "nginx", "idp"}
+SERVICES = {"backend", "agent-server", "llm-provider-server", "middleware", "nginx", "idp"}
 DIGEST = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 FORBIDDEN = re.compile(r"local[-_.]?test|stock-ai-(?:api-)?test|__Host-stock-ai-test|placeholder|changeme|change-me|replace-me|example\.com", re.I)
 
@@ -33,8 +33,8 @@ def validate(config, values, images):
         raise WorkflowError("Release market application network must block external routing.")
     if "api.binance.com" not in config.get("services", {}).get("idp", {}).get("networks", {}).get("application", {}).get("aliases", []):
         raise WorkflowError("Release market hostname must resolve to its local fixture.")
-    if config.get("services", {}).get("agent-server", {}).get("environment", {}).get("AGENT_SERVER_BACKEND_URL") != "http://idp:18081":
-        raise WorkflowError("Immutable Agent must use the private scoped Backend adapter.")
+    if config.get("services", {}).get("agent-server", {}).get("environment", {}).get("AGENT_SERVER_BACKEND_URL") != "http://backend:7794":
+        raise WorkflowError("Immutable Agent must connect directly to the Backend.")
     if any(FORBIDDEN.search(value) or "${" in value for value in strings(config)):
         raise WorkflowError("Test identifiers, placeholders or unresolved variables detected.")
     if config.get("name") != INSTANCE or values.get("STOCK_AI_INSTANCE") != INSTANCE:
@@ -60,20 +60,18 @@ def validate(config, values, images):
         environment = service.get("environment", {})
         if name != "idp" and name != "nginx" and environment.get("STOCK_AI_ENVIRONMENT") != "Release":
             raise WorkflowError("Service environment identity is invalid.")
-        if name in ("backend", "console", "oidc-gateway"):
+        if name == "middleware":
             if environment.get("OIDC_ISSUER") != ISSUER or environment.get("OIDC_USER_SUBJECT") != "local-release-user":
                 raise WorkflowError("Release issuer or subject is invalid.")
-        if name in ("backend", "console") and environment.get("OIDC_AUDIENCE") != "stock-ai-api-release":
+        if name == "middleware" and environment.get("OIDC_AUDIENCE") != "stock-ai-api-release":
             raise WorkflowError("Release audience is invalid.")
-        expected_networks = {"edge"} if name in ("nginx", "oidc-gateway") else (
-            {"edge", "application"} if name in ("idp", "console") else {"application"})
+        expected_networks = {"edge"} if name == "nginx" else (
+            {"edge", "application"} if name in ("idp", "middleware") else {"application"})
         if set(service.get("networks", {})) != expected_networks:
             raise WorkflowError("Private service network boundary is invalid.")
-    gateway = services["oidc-gateway"]["environment"]
-    if services["backend"]["environment"].get("ALLOW_STATIC_USER_TOKEN") != "false" or values.get("ALLOW_STATIC_USER_TOKEN") != "false":
-        raise WorkflowError("Release static user-token authentication must be disabled.")
-    if services["oidc-gateway"].get("user") != f"65532:{values.get('LOCAL_RELEASE_GID')}":
-        raise WorkflowError("Gateway must use the private Release secret group.")
+    gateway = services["middleware"]["environment"]
+    if services["middleware"].get("user") != f"65532:{values.get('LOCAL_RELEASE_GID')}":
+        raise WorkflowError("Middleware must use the private Release secret group.")
     for key, value in {"OIDC_CLIENT_ID": NAMESPACE, "OIDC_COOKIE_NAME": "__Host-stock-ai-release-session",
                        "OIDC_REDIRECT_URI": f"https://{HOST}/oauth2/callback", "OIDC_POST_LOGOUT_URI": f"https://{HOST}/",
                        "OIDC_AUTHORIZATION_URL": ISSUER+"/authorize", "OIDC_TOKEN_URL": ISSUER+"/token",
@@ -132,12 +130,12 @@ def validate_material(config, values, runtime, deployment_root=ROOT):
     material._validate_tls_pair(certs / "fullchain.pem", certs / "privkey.pem", ("app.localrelease", "api.binance.com"))
     material._openssl_private_key(certs / "jwks-signing-key.pem")
     required = {
-        "backend": {"backend_user_token", "backend_account_token_key"},
+        "backend": {"backend_middleware_token", "backend_user_token", "backend_account_token_key"},
         "agent-server": {"agent_admin_token", "backend_user_token", "llm_runtime_token"},
         "llm-provider-server": {"llm_admin_token", "llm_runtime_token", "llm_master_key"},
-        "console": {"agent_admin_token", "llm_admin_token", "llm_runtime_token"},
-        "oidc-gateway": {"oidc_client_secret", "oidc_cookie_key"},
-        "idp": {"oidc_client_secret", "fixture_provider_secret", "backend_user_token"}, "nginx": set(),
+        "middleware": {"agent_admin_token", "llm_admin_token", "llm_runtime_token", "backend_middleware_token",
+                       "oidc_client_secret", "oidc_cookie_key"},
+        "idp": {"oidc_client_secret", "fixture_provider_secret"}, "nginx": set(),
     }
     for name, service in config["services"].items():
         targets = {mount.get("target") for mount in service.get("secrets", [])}

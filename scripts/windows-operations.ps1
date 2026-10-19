@@ -13,12 +13,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:Services = @('backend', 'llm-provider-server', 'agent-server', 'console')
+$script:Services = @('backend', 'llm-provider-server', 'agent-server', 'middleware')
 $script:ImageVariables = [ordered]@{
     backend = 'BACKEND_IMAGE'
     'llm-provider-server' = 'LLM_PROVIDER_SERVER_IMAGE'
     'agent-server' = 'AGENT_SERVER_IMAGE'
-    console = 'CONSOLE_IMAGE'
+    middleware = 'MIDDLEWARE_IMAGE'
 }
 $script:DigestRequiredEnvironments = @('Release')
 $script:ImmutableImageReferenceRegex = '^[^\s@]+@(?<digest>sha256:[0-9a-f]{64})$'
@@ -174,10 +174,10 @@ function Get-Promotion([string]$Path) {
     foreach ($result in $requiredResults) {
         if ($manifest.acceptance_results.$result -ne 'passed') { throw "Promotion acceptance result is missing or failed: $result." }
     }
-    $expected = @($script:Services | Sort-Object) -join ','
+    $expected = @($script:Services + @('nginx') | Sort-Object) -join ','
     $actual = @($manifest.images.PSObject.Properties.Name | Sort-Object) -join ','
-    if ($actual -ne $expected) { throw 'Promotion manifest must contain exactly the four application services.' }
-    $expectedTestImages = @('agent-server', 'backend', 'console', 'llm-provider-server', 'oidc-gateway')
+    if ($actual -ne $expected) { throw 'Promotion manifest must contain exactly the four application services and nginx.' }
+    $expectedTestImages = @('agent-server', 'backend', 'llm-provider-server', 'middleware', 'nginx')
     $actualTestImages = @($manifest.test_stack_images.PSObject.Properties.Name | Sort-Object) -join ','
     $expectedTestImageNames = @($expectedTestImages | Sort-Object) -join ','
     if ($actualTestImages -ne $expectedTestImageNames) { throw 'Promotion manifest must bind all five Test stack image digests.' }
@@ -194,13 +194,13 @@ function Get-Promotion([string]$Path) {
         }
         $promoted[$service] = $reference
     }
-    $gateway = $manifest.test_stack_images.'oidc-gateway'
-    if ($gateway -notmatch $script:ImmutableImageReferenceRegex) { throw 'OIDC Gateway Test image is not pinned to an immutable SHA256 digest.' }
-    $gatewayArtifacts = $manifest.artifacts.'oidc-gateway'
-    if ($gatewayArtifacts.build_digest -notmatch '^sha256:[0-9a-f]{64}$' -or !$gateway.EndsWith("@$($gatewayArtifacts.build_digest)", [StringComparison]::Ordinal)) { throw 'OIDC Gateway digest does not match the tested build digest.' }
+    $nginx = $manifest.test_stack_images.'nginx'
+    if ($nginx -notmatch $script:ImmutableImageReferenceRegex) { throw 'Nginx Test image is not pinned to an immutable SHA256 digest.' }
+    $nginxArtifacts = $manifest.artifacts.'nginx'
+    if ($nginxArtifacts.build_digest -notmatch '^sha256:[0-9a-f]{64}$' -or !$nginx.EndsWith("@$($nginxArtifacts.build_digest)", [StringComparison]::Ordinal)) { throw 'Nginx digest does not match the tested build digest.' }
     foreach ($artifact in @('sbom', 'scan', 'filesystem_inventory', 'provenance', 'acceptance')) {
-        $record = $gatewayArtifacts.$artifact
-        if (!$record.file -or $record.sha256 -notmatch '^[0-9a-f]{64}$') { throw "Promotion manifest has no checksummed $artifact for oidc-gateway." }
+        $record = $nginxArtifacts.$artifact
+        if (!$record.file -or $record.sha256 -notmatch '^[0-9a-f]{64}$') { throw "Promotion manifest has no checksummed $artifact for nginx." }
     }
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $sidecar = Join-Path (Split-Path -Parent $manifestPath) 'SHA256SUMS'
@@ -213,7 +213,7 @@ function Get-Promotion([string]$Path) {
         }
     }
     if (!$verified) { throw 'Promotion manifest does not match its SHA256SUMS checksum.' }
-    foreach ($service in @($script:Services) + @('oidc-gateway')) {
+    foreach ($service in @($script:Services) + @('nginx')) {
         foreach ($artifact in @('sbom', 'scan', 'filesystem_inventory', 'provenance', 'acceptance')) {
             $record = $manifest.artifacts.$service.$artifact
             if ([IO.Path]::GetFileName([string]$record.file) -ne [string]$record.file) { throw "Promotion artifact path is invalid for $service/$artifact." }
@@ -318,7 +318,7 @@ function Test-Preflight {
     if (!$namespace -or !$secretsDirectory -or !(Test-Path -LiteralPath $secretsDirectory -PathType Container)) {
         $issues.Add('Configured secrets directory or namespace is missing.')
     } else {
-        foreach ($secret in @('backend_user_token', 'backend_account_token_key', 'agent_admin_token', 'llm_admin_token', 'llm_runtime_token', 'llm_master_key')) {
+        foreach ($secret in @('backend_user_token', 'backend_middleware_token', 'backend_account_token_key', 'agent_admin_token', 'llm_admin_token', 'llm_runtime_token', 'llm_master_key', 'oidc_client_secret', 'oidc_cookie_key')) {
             if (!(Test-Path -LiteralPath (Join-Path $secretsDirectory "${namespace}_${secret}") -PathType Leaf)) {
                 $issues.Add("A required secret file is missing: ${namespace}_${secret}.")
             }
@@ -422,7 +422,7 @@ switch ($Action) {
         Write-Host "Sanitized status report: $destination"
     }
     'Stop' {
-        foreach ($service in @('console', 'agent-server', 'llm-provider-server', 'backend')) {
+        foreach ($service in @('middleware', 'agent-server', 'llm-provider-server', 'backend')) {
             $result = Invoke-Compose @('stop', '--timeout', '30', $service) -AllowFailure
             if ($result.ExitCode -ne 0) { throw "Graceful stop failed for $service." }
         }

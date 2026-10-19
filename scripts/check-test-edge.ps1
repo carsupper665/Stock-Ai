@@ -126,7 +126,7 @@ $httpLocation = [Uri]::new([Uri] "http://$AppHost/", [string] $http.Headers.Loca
 Add-Check 'HTTP redirects to HTTPS' ($http.StatusCode -eq 301 -and $httpLocation.Scheme -eq 'https' -and $httpLocation.Host -eq $AppHost) ([ordered]@{ status = $http.StatusCode; location_host = $httpLocation.Host; location_scheme = $httpLocation.Scheme })
 
 $app = Get-HttpResponse "https://$AppHost/"
-Add-Check 'HTTPS root requires login' ($app.StatusCode -eq 302 -and [string] $app.Headers.Location -eq '/oauth2/start') ([ordered]@{ status = $app.StatusCode; location = [string] $app.Headers.Location; tls_chain_and_hostname_validated = $true })
+Add-Check 'HTTPS root serves the public frontend' ($app.StatusCode -eq 200) ([ordered]@{ status = $app.StatusCode; tls_chain_and_hostname_validated = $true })
 $badHost = Get-HttpResponse "https://$AppHost/" @{ Host = 'attacker.invalid' }
 Add-Check 'unrecognized Host header is rejected' ($badHost.StatusCode -eq 421) ([ordered]@{ status = $badHost.StatusCode; supplied_host_recorded = $false })
 $health = Get-HttpResponse "https://$AppHost/healthz"
@@ -141,8 +141,8 @@ foreach ($path in @('/v1/health', '/agent/health', '/llm/healthz')) {
 
 $accountHeaders = @{ Authorization = 'Bearer deliberately-invalid-test-account-token' }
 $account = Get-HttpResponse "https://$AppHost/v1/account" $accountHeaders
-$accountReachedConsole = $account.StatusCode -eq 401 -and [string] $account.Headers['Content-Type'] -like 'application/json*'
-Add-Check 'Account bearer reaches Console Account validation' $accountReachedConsole ([ordered]@{ status = $account.StatusCode; content_type = [string] $account.Headers['Content-Type']; token_recorded = $false })
+$accountReachedBackend = $account.StatusCode -eq 401 -and [string] $account.Headers['Content-Type'] -like 'application/json*'
+Add-Check 'Account bearer reaches Backend Account validation' $accountReachedBackend ([ordered]@{ status = $account.StatusCode; content_type = [string] $account.Headers['Content-Type']; token_recorded = $false })
 
 foreach ($path in @('/agent/api/v1/sessions', '/llm/v1/providers')) {
     $response = Get-HttpResponse "https://$AppHost$path" $accountHeaders
@@ -161,10 +161,6 @@ $spoofHeaders = @{
 }
 $spoof = Get-HttpResponse "https://$AppHost/agent/api/v1/sessions" $spoofHeaders
 Add-Check 'spoofed identity and forwarding headers do not authenticate' ($spoof.StatusCode -eq 401) ([ordered]@{ status = $spoof.StatusCode; spoof_values_recorded = $false })
-$authRoute = Get-HttpResponse "https://$AppHost/oauth2/auth"
-Add-Check 'Gateway auth subrequest endpoint is private' ($authRoute.StatusCode -eq 404) ([ordered]@{ status = $authRoute.StatusCode })
-$internalRoute = Get-HttpResponse "https://$AppHost/_oauth2_auth"
-Add-Check 'Nginx internal auth location is private' ($internalRoute.StatusCode -eq 404) ([ordered]@{ status = $internalRoute.StatusCode })
 $requiredHeaders = @{
     'Strict-Transport-Security' = 'max-age=31536000'
     'Content-Security-Policy' = "default-src 'self'"

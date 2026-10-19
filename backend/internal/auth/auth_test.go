@@ -21,7 +21,7 @@ func newTestAuth(t *testing.T) (*Authenticator, *database.Store) {
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("建表: %v", err)
 	}
-	return New(Settings{UserName: "Bless", StaticUserToken: userToken, AllowStaticUserToken: true}, store), store
+	return New(Settings{UserName: "Bless", StaticUserToken: userToken}, store), store
 }
 
 func seedAccount(t *testing.T, store *database.Store, id, name, token, status string) {
@@ -86,6 +86,15 @@ func TestResolveDistinguishesMissingFromInvalid(t *testing.T) {
 	}
 	if _, err := a.Resolve(ctx, "at_does_not_exist"); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("不存在的 token 應回 ErrInvalidToken，得到 %v", err)
+	}
+}
+
+func TestResolveRejectsJWTShapedToken(t *testing.T) {
+	a, _ := newTestAuth(t)
+
+	// 不再驗 OIDC：JWT 形狀的 token 只會被當成不存在的 Account token。
+	if _, err := a.Resolve(context.Background(), "header.claims.signature"); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("JWT 形狀的 token 應回 ErrInvalidToken，得到 %v", err)
 	}
 }
 

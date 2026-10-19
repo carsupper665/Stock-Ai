@@ -266,7 +266,7 @@ func startTicket26Backend(t *testing.T) string {
 	command := exec.Command(binaryPath)
 	command.Dir = backendRoot
 	command.Env = ticket26Environment(map[string]string{
-		"USER_TOKEN": messageBackendToken, "ALLOW_STATIC_USER_TOKEN": "true", "USER_NAME": "Ticket 26 User", "PORT": fmt.Sprint(port),
+		"USER_TOKEN": messageBackendToken, "USER_NAME": "Ticket 26 User", "PORT": fmt.Sprint(port),
 		"DB_DRIVER": "sqlite", "DB_DSN": filepath.Join(t.TempDir(), "backend.db"), "LOG_DIR": filepath.Join(t.TempDir(), "logs"),
 		"LOG_MAX_LINES": "1000", "DEBUG": "false", "MATCHING_INTERVAL": "1s",
 	})

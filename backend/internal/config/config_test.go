@@ -23,7 +23,6 @@ func TestLoadReadsEnvFile(t *testing.T) {
 		"# 這行是註解",
 		"",
 		"USER_TOKEN=secret-token",
-		"ALLOW_STATIC_USER_TOKEN=true",
 		`USER_NAME="Bless"`,
 		"DB_DRIVER=sqlite",
 		"FEE_RATE_MAKER=0.001",
@@ -50,7 +49,6 @@ func TestLoadReadsEnvFile(t *testing.T) {
 
 func TestRealEnvBeatsEnvFile(t *testing.T) {
 	t.Setenv("USER_TOKEN", "from-environment")
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	path := writeEnv(t, "USER_TOKEN=from-file\n")
 
 	cfg, err := Load(path)
@@ -64,7 +62,6 @@ func TestRealEnvBeatsEnvFile(t *testing.T) {
 
 func TestMissingEnvFileIsNotAnError(t *testing.T) {
 	t.Setenv("USER_TOKEN", "token")
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 
 	if _, err := Load(filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
 		t.Fatalf(".env 不存在不該視為錯誤: %v", err)
@@ -73,7 +70,6 @@ func TestMissingEnvFileIsNotAnError(t *testing.T) {
 
 func TestMissingUserTokenIsRejected(t *testing.T) {
 	t.Setenv("USER_TOKEN", "")
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	path := writeEnv(t, "USER_NAME=Bless\n")
 
 	_, err := Load(path)
@@ -87,7 +83,6 @@ func TestMissingUserTokenIsRejected(t *testing.T) {
 
 func TestUnknownDriverIsRejected(t *testing.T) {
 	t.Setenv("USER_TOKEN", "token")
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	t.Setenv("DB_DRIVER", "mysql")
 
 	_, err := Load(filepath.Join(t.TempDir(), "none"))
@@ -108,7 +103,6 @@ func TestMalformedLineIsRejected(t *testing.T) {
 
 func TestNonNumericFeeRateIsRejected(t *testing.T) {
 	t.Setenv("USER_TOKEN", "token")
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
 	t.Setenv("FEE_RATE_TAKER", "abc")
 
 	_, err := Load(filepath.Join(t.TempDir(), "none"))
@@ -126,17 +120,16 @@ func TestProductionLoadsNamespaceScopedSecretFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "false")
+	setReleaseUserToken(t, directory)
 	t.Setenv("ACCOUNT_TOKEN_KEY_FILE", keyPath)
 	t.Setenv("ACCOUNT_TOKEN_KEY", "")
 	os.Unsetenv("ACCOUNT_TOKEN_KEY")
-	setReleaseOIDC(t)
 
 	cfg, err := Load(filepath.Join(directory, "missing.env"))
 	if err != nil {
 		t.Fatalf("Load production files: %v", err)
 	}
-	if cfg.UserToken != "" || string(cfg.AccountTokenKey) != keyBytes {
+	if cfg.UserToken != releaseUserToken || string(cfg.AccountTokenKey) != keyBytes {
 		t.Fatal("production secret files were not loaded")
 	}
 }
@@ -156,8 +149,7 @@ func TestProductionRejectsDirectMissingAndWrongNamespaceSecrets(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
-			t.Setenv("ALLOW_STATIC_USER_TOKEN", "false")
-			setReleaseOIDC(t)
+			setReleaseUserToken(t, directory)
 			if test.direct != "" {
 				t.Setenv("ACCOUNT_TOKEN_KEY", test.direct)
 			} else {
@@ -180,19 +172,35 @@ func TestProductionRejectsDirectMissingAndWrongNamespaceSecrets(t *testing.T) {
 	}
 }
 
-func setReleaseOIDC(t *testing.T) {
+const releaseUserToken = "Zk3vQ9xLp2WmT7nYb5RcHj8DsAe4UfGo"
+
+// setReleaseUserToken 在 directory 放一個 middleware 內部 token 的 secret 檔，
+// 並讓 USER_TOKEN_FILE 指向它。
+func setReleaseUserToken(t *testing.T, directory string) {
 	t.Helper()
-	t.Setenv("OIDC_ISSUER", "https://idp.example/realms/release")
-	t.Setenv("OIDC_AUDIENCE", "stock-ai-api-release")
-	t.Setenv("OIDC_USER_SUBJECT", "release-user-subject")
-	t.Setenv("OIDC_JWKS_URL", "https://idp.example/realms/release/jwks")
+	path := filepath.Join(directory, "stock-ai-release_backend_middleware_token")
+	if err := os.WriteFile(path, []byte(releaseUserToken+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.Unsetenv("USER_TOKEN")
+	t.Setenv("USER_TOKEN_FILE", path)
 }
 
-func TestReleaseRejectsStaticUserAuthentication(t *testing.T) {
+func TestReleaseRequiresUserTokenFromSecretFile(t *testing.T) {
 	t.Setenv("STOCK_AI_ENVIRONMENT", "Release")
-	t.Setenv("ALLOW_STATIC_USER_TOKEN", "true")
+	os.Unsetenv("USER_TOKEN_FILE")
+	t.Setenv("USER_TOKEN", releaseUserToken)
 	_, err := Load(filepath.Join(t.TempDir(), "missing.env"))
-	if err == nil || !strings.Contains(err.Error(), "forbidden in Release") {
-		t.Fatalf("Release must reject static USER authentication: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "USER_TOKEN_FILE is required") {
+		t.Fatalf("Release must read USER_TOKEN from a secret file: %v", err)
+	}
+}
+
+func TestUserTokenMustDifferFromAgentServiceToken(t *testing.T) {
+	t.Setenv("USER_TOKEN", "same-token")
+	t.Setenv("AGENT_SERVICE_TOKEN", "same-token")
+	_, err := Load(filepath.Join(t.TempDir(), "missing.env"))
+	if err == nil || !strings.Contains(err.Error(), "AGENT_SERVICE_TOKEN") {
+		t.Fatalf("USER_TOKEN equal to AGENT_SERVICE_TOKEN must be rejected: %v", err)
 	}
 }

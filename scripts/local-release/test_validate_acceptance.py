@@ -10,9 +10,9 @@ import validate_acceptance as gate
 
 def records():
     checksum = "a" * 64
-    names = ("backend", "agent-server", "llm-provider-server", "console", "oidc-gateway", "idp", "nginx")
+    names = ("backend", "agent-server", "llm-provider-server", "middleware", "nginx", "idp")
     images = {name: "fixture/" + name + "@sha256:" + checksum for name in names}
-    products = {name: image for name, image in images.items() if name not in ("nginx", "idp")}
+    products = {name: image for name, image in images.items() if name != "idp"}
     facts = {"history_file_count": 1, "history_sha256": checksum, "databases": {}}
     for service, tables in (("backend", ["accounts"]), ("llm-provider-server", ["provider_tokens"]), ("agent-server", ["sessions", "runs"])):
         facts["databases"][service] = {"integrity_check": "ok", "foreign_key_check": "ok", "schema_sha256": checksum,
@@ -22,19 +22,10 @@ def records():
     routes = ("/api/v3/ticker/price", "/api/v3/exchangeInfo", "/api/v3/klines")
     business = {key: True for key in gate.BUSINESS}
     business.update(status="passed", market_boundary={"application_network_internal": True, "binance_dns_alias": "local-idp-fixture",
-                    "backend_certificate_verification": "existing SSL_CERT_FILE; no bypass", "all_running_digests_match": True,
-                    "agent_private_backend_adapter": "http://idp:18081", "adapter_edge_interface_unreachable": True},
+                    "backend_certificate_verification": "existing SSL_CERT_FILE; no bypass", "all_running_digests_match": True},
                     market_provenance={"price": 100, "symbol": "BTCUSDT", "external_calls": 0, "ticker_info_ohlcv_public_api": True,
                         "before": {"fixture": "stock-ai-local-binance-v1", "external_calls": 0, "routes": {route: 0 for route in routes}},
                         "after": {"fixture": "stock-ai-local-binance-v1", "external_calls": 0, "routes": {route: 1 for route in routes}}})
-    adapter_routes = ("USER GET /v1/accounts/:id", "ACCOUNT GET /v1/market/price", "ACCOUNT POST /v1/orders")
-    business["private_backend_adapter"] = {"credential_exchange_scoped": True, "account_credentials_preserved": True,
-        **{key: {"fixture": "stock-ai-private-backend-oidc-adapter-v1", "external_calls": 0, "user_token_ttl_seconds": 45,
-                 "account_credentials_preserved": True, "upstream": "http://backend:7794",
-                 "privileged_routes": ["GET /v1/accounts/:id", "GET /v1/market/price"], "routes": {route: count for route in adapter_routes}}
-           for key, count in (("before", 0), ("after", 1))}}
-    business["backend_oidc_rejections"] = {"fixture": "stock-ai-backend-oidc-rejections-v1", "tokens_disclosed": False,
-        "external_calls": 0, "statuses": {name: 401 for name in ("anonymous", "static-user", "expired", "wrong-issuer", "wrong-audience", "wrong-subject")}}
     rehearsal = {"status": "passed", "all_records_and_history_match": True, "matching_keys_restored": True, "all_services_healthy": True}
     rollback = {"project": "stock-ai-local-release", "promotion_manifest_sha256": checksum, "promoted_images": products,
                 **{key: checksum for key in ("compose_inputs_sha256", "normalized_compose_sha256", "non_image_env_sha256")}}
@@ -50,7 +41,7 @@ def records():
     # A legitimate predeployment Release may be empty.
     migration["predeployment"]["history_file_count"] = 0
     runtime = {"schema": "stock-ai.local-release-runtime.v1", "status": "passed", "all_release_bind_sources_persistent": True,
-               "backend_static_user_token": "disabled", "promotion_manifest_sha256": checksum,
+               "promotion_manifest_sha256": checksum,
                "services": {name: {"image": image, "running": True, "health": "healthy"} for name, image in images.items()},
                "isolation": {kind: {"disjoint_from_test": True} for kind in ("networks", "volumes", "binds")},
                "published_ingress": [{"service": "nginx", "host_ip": "127.0.0.1", "host_port": "8443", "target": "8443/tcp"}]}
@@ -81,8 +72,6 @@ class EvidenceGateTest(unittest.TestCase):
             "private_material": lambda r: r["migration.json"].update(token="must-never-export"),
             "digest_substitution": lambda r: r["runtime.json"]["services"]["backend"].update(image="mutable:latest"),
             "rebuild": lambda r: r["acceptance.json"].update(product_images_rebuilt=True),
-            "adapter_not_exercised": lambda r: r["acceptance.json"]["business"]["private_backend_adapter"]["after"]["routes"].update({"ACCOUNT POST /v1/orders": 0}),
-            "direct_anonymous_allowed": lambda r: r["acceptance.json"]["business"]["backend_oidc_rejections"]["statuses"].update(anonymous=200),
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):

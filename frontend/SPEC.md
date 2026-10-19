@@ -11,9 +11,9 @@ USER（人）用的控制台。後端行為以 `backend/SPEC.md` 為準，本文
    設計依據是 `design_handoff_agent_console/README.md`（高保真交接稿）。
 4. 新增頁面 = 新增一個資料夾。`core/` 與其他頁面零修改。
 5. 預設所有路由都要登入。公開頁自己標 `meta.public`，目前只有登入頁。
-6. USER 登入固定走同源的 private OIDC Gateway；瀏覽器不接觸 access token、client secret 或 PKCE verifier。
+6. USER 登入固定走同源的 private middleware（唯一的登入／OIDC 層）；瀏覽器不接觸 access token、client secret 或 PKCE verifier。
 7. 三個服務（交易後端、Agent Server、LLM Provider Server）都沒有 CORS，Agent／LLM 的管理憑證也不能進瀏覽器：
-   同源代理驗證 HttpOnly Gateway session，再於私有邊界替換憑證（§8）。瀏覽器只持有 HttpOnly session cookie。
+   同源的 middleware 驗證 HttpOnly session，再於私有邊界替換憑證（§8）。瀏覽器只持有 HttpOnly session cookie。
 8. 規格沒定或 API 尚未提供的資料：畫面明說「尚未提供」、掛「待定 N」標籤，不假裝有值（交接稿「狀態不足時的顯示規則」）。
 
 ## 1. 選型
@@ -49,8 +49,8 @@ frontend/
     core/                   # 只做接線，不含業務
       pages.js              # 頁面包載入器：routes 與 nav（3 行）
       router.js             # 路由 + 唯一的 auth 守衛
-      session.js            # Gateway 顯示身分、到期計時與 /oauth2/me 恢復
-      auth.js               # login(input) 導向 Gateway
+      session.js            # middleware 顯示身分、到期計時與 /oauth2/me 恢復
+      auth.js               # login(input) 導向 middleware
       providers/oidc.js     # login、current user、POST logout navigation
       api.js                # cookie-based fetch、Account 代查、拆三種錯誤信封
       load.js               # useLoad：頁面載資料的唯一寫法；sync：殼的「更新於」與全域重新整理
@@ -128,10 +128,10 @@ export const nav = routes.filter((r) => r.meta?.nav).sort((a, b) => a.meta.nav -
 
 新增頁面的全部動作：建資料夾、寫 `index.js`、寫 `Page.vue`。重新整理就出現在選單。
 
-## 4. Auth：Gateway session
+## 4. Auth：middleware session
 
-登入由 server-side confidential OIDC Gateway 完成，細節與 edge contract 見
-`docs/deployment/oidc-gateway.md`。前端只有四個行為：
+登入由 server-side confidential OIDC middleware 完成，細節與 edge contract 見
+`docs/deployment/middleware.md`。Nginx 直接送前端靜態檔、不檢查登入；沒登入由前端自己導到登入頁。前端只有四個行為：
 
 1. 路由守衛首次進入受保護頁時呼叫 `GET /oauth2/me`，成功後只保存顯示名稱與到期時間。
 2. 登入按鈕整頁導向 `GET /oauth2/start?return=<local path>`；callback 不由 JavaScript 處理。
@@ -156,7 +156,7 @@ const base = import.meta.env.VITE_API_BASE ?? ''
 const codeOf = (d) => (typeof d.error === 'string' ? d.error : d.error?.code)
 const messageOf = (d) => d.message ?? d.msg ?? d.error?.message
 
-// 省略 token 時用 Gateway cookie；只有 Account 代查才明確傳 token。
+// 省略 token 時用 middleware session cookie；只有 Account 代查才明確傳 token。
 export async function api(method, path, body, token) {
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
@@ -178,7 +178,7 @@ export async function api(method, path, body, token) {
 - 失敗丟 `Error`，帶 `status`、`code`、`message`；三種信封在這裡拆成同一形狀，頁面直接顯示 `message`。
   後端沒開時代理回的是空的 502，`message` 會是 `502 Bad Gateway`，`code` 是 `undefined`。
 - 第四個參數 `token`：
-  - 省略 → Gateway session cookie（OIDC USER）。
+  - 省略 → middleware session cookie（OIDC USER）。
   - 帳號的 token → 代打（§10 D 組：帳號明細與 Session 概覽用它代查 `GET /v1/account`）。代打的 401 只丟錯，不登出 USER。
   - `null` → 不帶 Authorization，供公開 health/message 等要求使用。
 - `VITE_API_BASE` 預設空字串＝同源：開發走 vite proxy，正式走反向代理。
@@ -306,14 +306,14 @@ cd frontend && npm install && npm run dev                   # :5173
 
 | 瀏覽器打 | 轉到 | 注入 |
 |---|---|---|
-| `/oauth2/*` | OIDC Gateway `/oauth2/*` | 不注入；cookie 僅供 Gateway session 使用 |
-| `/v1/*` | 交易後端 `/v1/*` | 開發直連只適用公開或 Account-token request；OIDC USER 路徑由 Ticket 05 Console 完成 |
-| `/agent/*` | Agent Server `/*`（去掉 `/agent`） | `Authorization: Bearer $AGENT_SERVER_ADMIN_TOKEN` |
-| `/llm/v1/models` | LLM Server `/v1/models` | `Bearer $LLM_SERVER_RUNTIME_TOKEN`（模型目錄只認 runtime 憑證） |
-| `/llm/*` | LLM Server `/*`（去掉 `/llm`） | `Bearer $LLM_SERVER_ADMIN_TOKEN` |
+| `/oauth2/*` | middleware `/oauth2/*` | 不注入；cookie 僅供 middleware session 使用 |
+| `/v1/*` | middleware `/v1/*` | middleware 驗證 session 後帶 `backend_middleware_token` 轉給 Backend；瀏覽器自帶的不透明 Account token 原樣轉交 |
+| `/agent/*` | middleware `/agent/*`（由它去掉 `/agent` 轉給 Agent Server） | middleware 帶 Agent admin 憑證 |
+| `/llm/v1/models` | middleware（轉給 LLM Server `/v1/models`） | middleware 帶 LLM runtime 憑證（模型目錄只認 runtime 憑證） |
+| `/llm/*` | middleware（轉給 LLM Server，去掉 `/llm`） | middleware 帶 LLM admin 憑證；`POST /llm/v1/generate` 不對瀏覽器開放 |
 
-本機開發注入用 `proxyReq.setHeader`，會蓋掉瀏覽器送的 Authorization。Production
-一律由 Console 驗證 Gateway access token 與 subject 後才注入，且瀏覽器不得對
+本機開發的 vite 代理（`vite.config.js`）把以上四個前綴全部轉給 middleware，自己不注入任何憑證，也不持有服務憑證。
+Production 同樣由 middleware 驗證 session 後才注入，且瀏覽器不得對
 `/agent`、`/llm` 送 Authorization。為什麼要前綴：交易後端與 LLM Server 都用
 `/v1`，同源會撞（待定 11）。
 
@@ -322,17 +322,11 @@ cd frontend && npm install && npm run dev                   # :5173
 ```env
 VITE_API_BASE=                 # 空＝同源
 VITE_AUTH_PROVIDER=oidc
-OIDC_GATEWAY_URL=http://127.0.0.1:4180
-BACKEND_URL=http://localhost:7794            # 以下沒有 VITE_ 前綴，只有代理看得到
-AGENT_SERVER_URL=http://127.0.0.1:8080
-LLM_SERVER_URL=http://127.0.0.1:8090
-AGENT_SERVER_ADMIN_TOKEN=
-LLM_SERVER_ADMIN_TOKEN=
-LLM_SERVER_RUNTIME_TOKEN=
+MIDDLEWARE_URL=http://127.0.0.1:4180         # 沒有 VITE_ 前綴，只有 vite 代理看得到；服務憑證只在 middleware
 ```
 
-正式：`npm run build` 產出 `dist/`。反向代理照上表做同樣的去前綴與注入，其他路徑給 `dist/`，找不到檔案時回 `index.html`（history 模式必要）。
-正式反向代理的 authenticated Console boundary 與 `/agent/*`、`/llm/*` credential replacement 由 Ticket 05 實作；Nginx external enforcement 由 Ticket 09 實作。
+正式：`npm run build` 產出 `dist/`（打包在 nginx image 裡）。Nginx 把 `/oauth2`、`/v1`、`/agent`、`/llm` 轉給 middleware，其他路徑給 `dist/`，找不到檔案時回 `index.html`（history 模式必要）。
+Nginx 沒有 `auth_request`，也拿不到任何 token；`/agent/*`、`/llm/*` 的 credential replacement 全在 middleware。
 
 ## 9. 測試
 
@@ -342,7 +336,7 @@ LLM_SERVER_RUNTIME_TOKEN=
 | 檔案 | 驗什麼 |
 |---|---|
 | `pages.test.js` | 每個 `pages/*/index.js` 都有 `path`（以 `/` 開頭）、`name`、`component`；`name` 不重複；只有 `login` 是 `public`；每個 `component()` 都載得起來；`nav` 只收有 `nav` 的頁面且已排序 |
-| `router.test.js` | 用 `addRoute` 掛一個受保護的測試路由：沒有 Gateway identity 被送去 `login` 且保留 `query.redirect`；有 identity 進得去；`/login` 公開；未知路徑不 404 |
+| `router.test.js` | 用 `addRoute` 掛一個受保護的測試路由：沒有登入身分被送去 `login` 且保留 `query.redirect`；有 identity 進得去；`/login` 公開；未知路徑不 404 |
 | `api.test.js` | same-origin credential request、明確 Account bearer、JSON body、204、三種錯誤信封、session-bound 401 expiry、代打 401 與空 502（mock `fetch`） |
 | `oidc-browser.test.js` | 首次登入 navigation、`/oauth2/me` refresh、無 Web Storage token、client expiry、POST logout navigation |
 | `theme.test.js` | `src/**/*.{vue,css}` 除了 `theme.css` 沒有 `#hex`、`rgb(`、`hsl(`（`import.meta.glob` 讀原始碼掃） |
@@ -353,7 +347,7 @@ LLM_SERVER_RUNTIME_TOKEN=
 
 ### 10.1 共同約定
 
-- 認證：OIDC USER 由 Gateway session 在私有邊界換成 access-token bearer；瀏覽器不讀取該 token。Account Token 由後端產生，需要代查時由前端明確帶 `Authorization: Bearer <account-token>`。
+- 認證：OIDC USER 由 middleware session 在私有邊界換成內部 bearer（Backend 用 `backend_middleware_token`）；瀏覽器不讀取任何 token。Account Token 由後端產生，需要代查時由前端明確帶 `Authorization: Bearer <account-token>`。
 - 時間：UTC、RFC3339、結尾 `Z`。顯示時轉瀏覽器本地時間。
 - 數字：float64，後端已收斂到小數 8 位。前端只做顯示格式，不做金額運算。
 - 列表都包在複數 key 裡：`accounts`、`orders`、`positions`、`trades`、`messages`、`subscriptions`。
@@ -452,7 +446,7 @@ D 組是 AI agent 用的。USER 看得到每個帳號的 token，要手動介入
 | HTTP | `error` | 什麼時候 | 前端 |
 |---|---|---|---|
 | 400 | `invalid_request` | JSON 壞掉、欄位不合法、參數格式錯 | 顯示 `message` |
-| 401 | `unauthorized` | session 到期、沒帶、帶錯、帳號已停用 | Gateway session request → 回登入；明確 Account token request → 顯示 |
+| 401 | `unauthorized` | session 到期、沒帶、帶錯、帳號已停用 | middleware session request → 回登入；明確 Account token request → 顯示 |
 | 403 | `forbidden` | token 種類不對（USER 打 D 組、Account 打 B 組） | 顯示 |
 | 403 | `account_disabled` | 停用帳號想交易 | 顯示 |
 | 404 | `not_found` | id 不存在、部位已平 | 顯示，列表 `reload()` |
@@ -509,12 +503,11 @@ Provider：`id name type base_url default_model config enabled created_at update
 
 ## 11. 後端待補
 
-接 IDP 時才需要，現在不做：
+原本規劃的「Backend 驗 IDP 簽發的 JWT」已不採用：OIDC 只在 middleware 驗證，Backend 不驗 JWT、不連 IdP，
+只認 middleware 帶來的內部 USER token（`backend_middleware_token`）與不透明的 Account token（JWT 形狀一律拒絕）。
+`GET /v1/me` 不回 `subject`。其餘仍待補：
 
-1. `auth.Resolve` 多認一種 token：IDP 簽發的 JWT。用 JWKS 驗簽、比對 `iss`／`aud`／`sub`
-   （`.env` 加 `OIDC_ISSUER`、`OIDC_CLIENT_ID`、`OIDC_USER_SUB`），通過就是 USER 身分。
-   其他端點與前端都不用改，因為前端只是換了 Bearer 裡的字串。
-2. `GET /v1/me` → `{kind: "user" 或 "account", name}`（可選）。讓登入頁不用拿 `GET /v1/accounts` 探測 token 種類、
+1. `GET /v1/me` → `{kind: "user" 或 "account", name}`（可選）。讓登入頁不用拿 `GET /v1/accounts` 探測 token 種類、
    也能顯示 `USER_NAME`。
 
 ## 12. 實作步驟
@@ -525,6 +518,6 @@ Provider：`id name type base_url default_model config enabled created_at update
 | 2 全頁面 | 依交接稿做出六個頁面與殼，接上三個服務現有的 API；沒有 API 的區塊明說尚未提供 | 完成（本版） |
 | 3 補齊 | Event（27～31）與 Ledger／來源追溯（21～24）已接上；剩 Memory／usage／tool stats／history 端點上線後把 session-detail 的「尚未提供」換成真資料 | 部分完成，餘等後端（tickets 32～39） |
 | 4 手動介入 | 帳號明細加 D 組代打：平倉、撤單、改 SL／TP、代下單（T-17～T-21） | 未做 |
-| 5 OIDC | §4 + §11；反向代理把 `/agent`、`/llm` 擋在登入後 | 未做 |
+| 5 OIDC | §4；middleware 負責登入與 `/agent`、`/llm` 的登入後代理 | 完成 |
 
 之後（需要時才做，各自獨立）：頁面長相微調（只改 `theme.css`）；交接稿裡的「設計說明」頁不做（review 用，內容由本文 §0.8 與 REQUIREMENTS §5 取代）。

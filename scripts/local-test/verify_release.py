@@ -4,7 +4,7 @@ import hashlib
 import re
 
 
-RELEASE_SERVICES = ("backend", "agent-server", "llm-provider-server", "console")
+RELEASE_SERVICES = ("backend", "agent-server", "llm-provider-server", "middleware", "nginx")
 IMMUTABLE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 
 

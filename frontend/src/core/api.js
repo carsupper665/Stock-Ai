@@ -6,14 +6,14 @@ const base = import.meta.env.VITE_API_BASE ?? ''
 const codeOf = (d) => (typeof d.error === 'string' ? d.error : d.error?.code)
 const messageOf = (d) => d.message ?? d.msg ?? d.error?.message
 
-// In production the Gateway cookie authenticates the browser at the Console boundary.
+// In production the middleware session cookie authenticates the browser.
 // Explicit bearer values here are Account tokens; private-service credentials never enter the bundle.
 async function request(method, path, body, token, sessionBound) {
-  const consoleRoute = path.startsWith('/agent/') || path.startsWith('/llm/')
-  if (consoleRoute) {
-    // Private-service routes are authenticated only by the HttpOnly Gateway
+  const middlewareRoute = path.startsWith('/agent/') || path.startsWith('/llm/')
+  if (middlewareRoute) {
+    // Private-service routes are authenticated only by the HttpOnly middleware
     // session. Browser Bearers have Account-only semantics and must never be
-    // presented to Console's Agent/LLM boundary.
+    // presented to the middleware's Agent/LLM routes.
     token = null
     sessionBound = true
   }

@@ -37,7 +37,9 @@ func validConfig(environment string) Config {
 	suffix := strings.ToLower(environment)
 	clientID := "stock-ai-" + suffix
 	issuer := "https://issuer.example/realms/" + clientID
-	return Config{Environment: environment, Issuer: issuer, AuthorizationURL: issuer + "/authorize", TokenURL: issuer + "/token", JWKSURL: issuer + "/jwks", ClientID: clientID, ClientSecret: strings.Repeat("s", 40), TokenAuthMethod: "client_secret_basic", AccessTokenType: "at+jwt", Audience: "stock-ai-api-" + suffix, RedirectURI: "https://app.example/oauth2/callback", EndSessionURL: issuer + "/logout", PostLogoutURI: "https://app.example/", CookieName: "__Host-" + clientID + "-session", CookieKey: []byte("0123456789abcdef0123456789abcdef"), UserSubject: "user-123", SessionTTL: time.Hour, LoginTTL: 10 * time.Minute}
+	return Config{Environment: environment, Issuer: issuer, AuthorizationURL: issuer + "/authorize", TokenURL: issuer + "/token", JWKSURL: issuer + "/jwks", ClientID: clientID, ClientSecret: strings.Repeat("s", 40), TokenAuthMethod: "client_secret_basic", AccessTokenType: "at+jwt", Audience: "stock-ai-api-" + suffix, RedirectURI: "https://app.example/oauth2/callback", EndSessionURL: issuer + "/logout", PostLogoutURI: "https://app.example/", CookieName: "__Host-" + clientID + "-session", CookieKey: []byte("0123456789abcdef0123456789abcdef"), UserSubject: "user-123", SessionTTL: time.Hour, LoginTTL: 10 * time.Minute,
+		BackendURL: "http://backend.test", AgentURL: "http://agent.test", LLMURL: "http://llm.test",
+		AgentAdminToken: proxyAgentToken, LLMAdminToken: proxyAdminToken, LLMRuntimeToken: proxyRuntimeToken, BackendUserToken: proxyBackendToken}
 }
 
 func newFixture(t *testing.T) (*Server, *fakeIDP) {
@@ -249,18 +251,11 @@ func TestBrowserFirstLoginRefreshAndSessionFixation(t *testing.T) {
 			t.Fatalf("unsafe /me: %s", body)
 		}
 	}
-	req := httptest.NewRequest("GET", "https://private/oauth2/auth", nil)
-	req.AddCookie(cookie)
-	out := httptest.NewRecorder()
-	s.Handler().ServeHTTP(out, req)
-	if out.Code != 204 || out.Header().Get("X-Auth-Request-Access-Token") != f.access {
-		t.Fatalf("private auth failed: %d", out.Code)
-	}
 	tampered := *cookie
 	tampered.Value += "x"
-	req = httptest.NewRequest("GET", "https://app.example/oauth2/me", nil)
+	req := httptest.NewRequest("GET", "https://app.example/oauth2/me", nil)
 	req.AddCookie(&tampered)
-	out = httptest.NewRecorder()
+	out := httptest.NewRecorder()
 	s.Handler().ServeHTTP(out, req)
 	if out.Code != http.StatusUnauthorized {
 		t.Fatalf("tampered session cookie=%d", out.Code)

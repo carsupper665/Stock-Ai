@@ -1,171 +1,25 @@
 package main
 
 import (
-	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 )
 
-type fixtureTransport func(*http.Request) (*http.Response, error)
-
-func (fn fixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
-
-func adapterJWTValid(f *fixture, token string) bool {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return false
-	}
-	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return false
-	}
-	var header map[string]any
-	if json.Unmarshal(headerBytes, &header) != nil || header["alg"] != "RS256" || header["typ"] != "at+jwt" || header["kid"] != f.identity().KeyID {
-		return false
-	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return false
-	}
-	hash := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if rsa.VerifyPKCS1v15(&f.key.PublicKey, crypto.SHA256, hash[:], signature) != nil {
-		return false
-	}
-	body, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-	var claims map[string]any
-	if json.Unmarshal(body, &claims) != nil {
-		return false
-	}
-	expires, ok := claims["exp"].(float64)
-	return ok && expires > float64(time.Now().Unix()) && expires <= float64(time.Now().Unix()+45) &&
-		claims["iss"] == f.identity().Issuer && claims["aud"] == f.identity().Audience && claims["sub"] == f.identity().Subject
-}
-
-func TestPrivateBackendAdapterCredentialScopeAndHeaders(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &fixture{key: key, config: fixtureConfig{Issuer: "https://app.localrelease:8443/realms/stock-ai-release",
-		Audience: "stock-ai-api-release", Subject: "local-release-user", KeyID: "local-release-signing-key",
-		BackendAdapter: true, MarketFixture: true, BackendSecret: strings.Repeat("private-service-", 4)}}
-	calls := 0
-	f.backendClient = &http.Client{Transport: fixtureTransport(func(r *http.Request) (*http.Response, error) {
-		calls++
-		if r.URL.Host != "backend:7794" || r.Header.Get("Cookie") != "" || r.Header.Get("X-Auth-Request-Subject") != "" || r.Header.Get("Forwarded") != "" {
-			t.Fatal("adapter forwarded an unapproved target/header")
-		}
-		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		code := http.StatusUnauthorized
-		if adapterJWTValid(f, token) {
-			code = 200
-		}
-		if token == "at_account-only" && r.URL.Path == "/v1/orders" && r.Method == "POST" {
-			code = 201
-		}
-		return &http.Response{StatusCode: code, Header: http.Header{"Set-Cookie": {"must-not-forward"}}, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
-	})}
-	invoke := func(method, path, token string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest(method, path, nil)
-		if token != "" {
-			request.Header.Set("Authorization", "Bearer "+token)
-		}
-		request.Header.Set("Cookie", "unapproved")
-		request.Header.Set("X-Auth-Request-Subject", "unapproved")
-		request.Header.Set("Forwarded", "host=unapproved")
+func TestProviderHasNoBackendAdapterOrRejectionRoutes(t *testing.T) {
+	f := &fixture{config: fixtureConfig{Issuer: "https://app.localrelease:8443", MarketFixture: true}}
+	for _, path := range []string{"/__fixture/adapter", "/__fixture/backend-rejections"} {
 		response := httptest.NewRecorder()
-		f.adapterHandler().ServeHTTP(response, request)
-		if response.Header().Get("Set-Cookie") != "" {
-			t.Fatal("adapter exposed unapproved upstream header")
+		f.providerHandler().ServeHTTP(response, httptest.NewRequest("GET", path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s must not exist: got %d", path, response.Code)
 		}
-		return response
-	}
-	if invoke("GET", "/v1/accounts/acc_fixture", f.config.BackendSecret).Code != 200 {
-		t.Fatal("service account lookup did not mint valid scoped OIDC")
-	}
-	if invoke("GET", "/v1/market/price?market=crypto&symbol=BTCUSDT", f.config.BackendSecret).Code != 200 {
-		t.Fatal("price sampling did not mint valid scoped OIDC")
-	}
-	if invoke("POST", "/v1/orders", "at_account-only").Code != 201 {
-		t.Fatal("Account credential was not preserved")
-	}
-	for _, test := range []struct {
-		method, path, token string
-		status              int
-	}{
-		{"GET", "/v1/accounts/acc_fixture", "wrong-private-key", 403},
-		{"GET", "/v1/accounts/acc_fixture", "", 401},
-		{"GET", "/v1/market/price?symbol=BTCUSDT", "wrong-private-key", 401},
-		{"POST", "/v1/orders", f.config.BackendSecret, 403},
-		{"GET", "/v1/account", f.config.BackendSecret, 403},
-		{"GET", "/v1/accounts", f.config.BackendSecret, 403},
-		{"POST", "/v1/accounts/acc_fixture/token/reset", f.config.BackendSecret, 403},
-		{"DELETE", "/v1/orders/id", "at_account-only", 403},
-		{"GET", "/v1/accounts/acc_fixture%2f..%2fescape", f.config.BackendSecret, 403},
-		{"GET", "/v1/accounts/acc_fixture?redirect=http://escape", f.config.BackendSecret, 400},
-		{"GET", "http://escape/v1/accounts/acc_fixture", f.config.BackendSecret, 403},
-	} {
-		if got := invoke(test.method, test.path, test.token).Code; got != test.status {
-			t.Fatalf("route/method/credential gate: got %d want %d", got, test.status)
-		}
-	}
-	for _, change := range []string{"expired", "issuer", "audience", "subject"} {
-		claims := map[string]any{"iss": f.config.Issuer, "aud": f.config.Audience, "sub": f.config.Subject, "exp": time.Now().Unix() + 45}
-		switch change {
-		case "expired":
-			claims["exp"] = time.Now().Unix() - 1
-		case "issuer":
-			claims["iss"] = "wrong"
-		case "audience":
-			claims["aud"] = "wrong"
-		case "subject":
-			claims["sub"] = "wrong"
-		}
-		token, err := f.signToken("at+jwt", claims)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if invoke("GET", "/v1/accounts/acc_fixture", token).Code != 403 {
-			t.Fatal("unapproved token gained USER account privilege")
-		}
-		if invoke("GET", "/v1/market/price?symbol=BTCUSDT", token).Code != 401 {
-			t.Fatal("unapproved token bypassed Backend verification")
-		}
-	}
-	if calls < 3 {
-		t.Fatal("adapter never exercised fixed upstream")
-	}
-	negative := httptest.NewRecorder()
-	f.backendRejections(negative, httptest.NewRequest("GET", "/__fixture/backend-rejections", nil))
-	var rejected struct {
-		Statuses        map[string]int `json:"statuses"`
-		TokensDisclosed bool           `json:"tokens_disclosed"`
-	}
-	if err := json.Unmarshal(negative.Body.Bytes(), &rejected); err != nil || len(rejected.Statuses) != 6 || rejected.TokensDisclosed {
-		t.Fatal("Backend rejection probe did not retain sanitized statuses")
-	}
-	for _, code := range rejected.Statuses {
-		if code != 401 {
-			t.Fatal("invalid Backend identity accepted")
-		}
-	}
-	metrics := httptest.NewRecorder()
-	f.adapterCounters(metrics, httptest.NewRequest("GET", "/__fixture/adapter", nil))
-	if strings.Contains(metrics.Body.String(), f.config.BackendSecret) || strings.Contains(metrics.Body.String(), "at_account-only") || !strings.Contains(metrics.Body.String(), `"USER GET /v1/accounts/:id":1`) {
-		t.Fatal("unsafe/missing route provenance")
 	}
 }
 

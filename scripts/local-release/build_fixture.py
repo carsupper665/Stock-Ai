@@ -40,7 +40,7 @@ def build(builder):
     approval["idp"] = {"status": "tested", "image": image, "source_sha256": hashes,
                        "evidence": "scripts/local-test/fixture_test.go", "test_command": "go test -json ./... (scripts/local-test)",
                        "passed_tests": passed, "test_output_sha256": hashlib.sha256(tested.stdout.encode()).hexdigest(),
-                       "scope": "Auxiliary only: strict local TLS Binance market, private scoped service-to-OIDC adapter, OIDC, fake Provider; five product digests unchanged"}
+                       "scope": "Auxiliary only: strict local TLS Binance market, OIDC, fake Provider; five product digests unchanged"}
     AUXILIARY.write_text(json.dumps(approval, indent=2) + "\n")
     return {"image": image, "passed_tests": passed, "product_images_rebuilt": False}
 

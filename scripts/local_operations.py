@@ -28,20 +28,20 @@ except ModuleNotFoundError:  # Direct ``python scripts/local_operations.py`` exe
     from promotion_contract import REQUIRED_RESULTS
 
 
-CORE_SERVICES = ("backend", "llm-provider-server", "agent-server", "console")
-OPTIONAL_SERVICES = ("oidc-gateway", "nginx", "idp")
+CORE_SERVICES = ("backend", "llm-provider-server", "agent-server", "middleware")
+OPTIONAL_SERVICES = ("nginx", "idp")
 ALLOWED_SERVICES = set(CORE_SERVICES + OPTIONAL_SERVICES)
-STOP_ORDER = ("nginx", "console", "oidc-gateway", "agent-server", "llm-provider-server", "backend", "idp")
+STOP_ORDER = ("nginx", "middleware", "agent-server", "llm-provider-server", "backend", "idp")
 IMAGE_VARIABLES = {
     "backend": "BACKEND_IMAGE",
     "llm-provider-server": "LLM_PROVIDER_SERVER_IMAGE",
     "agent-server": "AGENT_SERVER_IMAGE",
-    "console": "CONSOLE_IMAGE",
-    "oidc-gateway": "OIDC_GATEWAY_IMAGE",
+    "middleware": "MIDDLEWARE_IMAGE",
+    "nginx": "NGINX_IMAGE",
 }
 PROMOTABLE_SERVICES = tuple(IMAGE_VARIABLES)
-PROMOTION_IMAGE_SERVICES = set(CORE_SERVICES)
-TEST_STACK_IMAGE_SERVICES = set(CORE_SERVICES) | {"oidc-gateway"}
+PROMOTION_IMAGE_SERVICES = set(IMAGE_VARIABLES)
+TEST_STACK_IMAGE_SERVICES = set(IMAGE_VARIABLES)
 REQUIRED_ACCEPTANCE_RESULTS = set(REQUIRED_RESULTS)
 PROMOTION_SCHEMA = "stock-ai.promotion-manifest.v1"
 DIGEST_RE = re.compile(r"^[^\s@]+@(?P<digest>sha256:[0-9a-f]{64})$")
@@ -276,13 +276,10 @@ class Operator:
                     try:
                         promoted, _ = self.promotion(promotion_manifest, config)
                         configured_images = self.image_map(config)
-                        configured = {name: configured_images[name] for name in CORE_SERVICES if name in configured_images}
-                        promoted_app_images = {name: promoted[name] for name in CORE_SERVICES if name in promoted}
-                        if configured != promoted_app_images:
+                        configured = {name: configured_images[name] for name in PROMOTABLE_SERVICES if name in configured_images}
+                        promoted_images = {name: promoted[name] for name in PROMOTABLE_SERVICES if name in promoted}
+                        if configured != promoted_images:
                             issues.append("Release application images differ from the checksummed promotion manifest.")
-                        if ("oidc-gateway" in configured_images
-                                and configured_images["oidc-gateway"] != promoted.get("oidc-gateway")):
-                            issues.append("Release OIDC Gateway image differs from the checksummed Test stack manifest.")
                     except (OSError, WorkflowError) as exc:
                         issues.append(str(exc))
             self._check_bind_sources(config, issues)
@@ -554,19 +551,19 @@ class Operator:
             raise WorkflowError("Promotion manifest acceptance_results must be a dictionary.")
         images = manifest.get("images")
         if not isinstance(images, dict) or set(images) != PROMOTION_IMAGE_SERVICES:
-            raise WorkflowError("Promotion manifest must contain exactly the four application images.")
+            raise WorkflowError("Promotion manifest must contain exactly the five images.")
         if any(not isinstance(ref, str) or not DIGEST_RE.fullmatch(ref) for ref in images.values()):
             raise WorkflowError("Every promoted image must use repository@sha256:<64 lowercase hex>.")
         test_images = manifest.get("test_stack_images")
         if not isinstance(test_images, dict) or set(test_images) != TEST_STACK_IMAGE_SERVICES:
-            raise WorkflowError("Promotion test_stack_images must contain the four app images and OIDC Gateway.")
+            raise WorkflowError("Promotion test_stack_images must contain the five images.")
         if any(not isinstance(ref, str) or not DIGEST_RE.fullmatch(ref) for ref in test_images.values()):
             raise WorkflowError("Every Test stack image must use an immutable SHA256 digest.")
         if any(test_images[name] != images[name] for name in PROMOTION_IMAGE_SERVICES):
             raise WorkflowError("Test stack images differ from certified application images.")
         artifacts = manifest.get("artifacts")
         if not isinstance(artifacts, dict) or set(artifacts) != TEST_STACK_IMAGE_SERVICES:
-            raise WorkflowError("Promotion artifacts must cover four application images and OIDC Gateway.")
+            raise WorkflowError("Promotion artifacts must cover the five images.")
         for service in TEST_STACK_IMAGE_SERVICES:
             artifact = artifacts[service]
             expected_digest = images.get(service, test_images[service])
@@ -604,9 +601,8 @@ class Operator:
         ):
             raise WorkflowError("Certification evidence must contain distinct checksummed refs for all required checks.")
         checksum = self._verify_manifest_files(manifest_path, manifest)
-        promoted = dict(images)
-        if "oidc-gateway" in config.get("services", {}):
-            promoted["oidc-gateway"] = test_images["oidc-gateway"]
+        promoted = {name: ref for name, ref in images.items()
+                    if name in CORE_SERVICES or name in config.get("services", {})}
         return promoted, checksum
 
     def change_images(self, images: dict[str, str]) -> None:

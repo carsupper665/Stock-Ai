@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from accept import sync_bundle
-from business import market_boundary, fixture_observation
+from business import market_boundary
 from deploy import preflight, project_containers, snapshot, rollback_metadata, utc, persistent
 from migrate import copy_volumes, store_facts, verified_archive, decrypt_credentials
 from prepare import DEFAULT_MANIFEST, approved_images
@@ -79,8 +79,6 @@ def security(runtime, directory, config):
     response, rejected_chain = replay.follow(callback)
     results["replayed_callback"] = {"first_login_status": 200, "replay_redirect_chain": rejected_chain,
                                     "private_api_statuses": denied(replay), "independent_transaction_cookie_copy": True}
-    results["backend_direct_rejections"] = fixture_observation(config, "backend-rejections")
-    require(set(results["backend_direct_rejections"]["statuses"].values()) == {401}, "Direct Backend matrix failed")
     actor = Browser(runtime, directory / "positive")
     results["positive_redirect_chain"] = login(actor)
     response = actor.request("/")
@@ -114,7 +112,7 @@ def surface(runtime, actor, config):
                 published.append({"service": service, "target": target, **binding})
     require(published == [{"service": "nginx", "target": "8443/tcp", "HostIp": "127.0.0.1", "HostPort": "8443"}], "Unexpected Release port publication")
     closed = []
-    for port in (4180, 7794, 8080, 8088, 8090, 18080, 18081):
+    for port in (4180, 7794, 8080, 8090, 18080):
         with socket.socket() as probe:
             probe.settimeout(1)
             require(probe.connect_ex(("127.0.0.1", port)) != 0, "Private service exposed on host")
@@ -205,7 +203,7 @@ def incidents(operator, config, runtime, actor, directory):
     return {"status": "passed", "backend_crash": crash, "backend_kill_restart_same_container": True, "backend_api_recovered": True,
             "identity_outage": {"fresh_login_status": chain[-1]["status"], "private_api_statuses": statuses, "login_recovered": True},
             "provider_outage": {"status": down_status, "generation_recovered": True,
-                "method": "pause/unpause shared fixture; collocated IdP, market and adapter also temporarily unavailable"}}, recovered
+                "method": "pause/unpause shared fixture; collocated IdP and market also temporarily unavailable"}}, recovered
 
 
 def restore(operator, config, runtime, directory, backup):
@@ -363,7 +361,7 @@ def execute(args):
                        "promotion_manifest_sha256": manifest_hash, "accepted_backup_sha256": final["sha256"],
                        "versions": {"docker_engine": engine["ServerVersion"], "nginx": (nginx_version.stdout + nginx_version.stderr).strip()},
                        "high_critical_count": 0, "all_seven_services_healthy": True,
-                       "scope": "WSL/Linux loopback; local identity, provider, Binance and scoped adapter fixtures",
+                       "scope": "WSL/Linux loopback; local identity, provider and Binance fixtures",
                        "non_gating": ["external IdP", "public DNS/TLS renewal", "Windows/reboot", "long-duration production soak"]})
         operator.write_evidence("summary.json", report)
         print("Local Release sign-off passed", flush=True)

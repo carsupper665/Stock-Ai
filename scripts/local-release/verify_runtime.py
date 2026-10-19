@@ -36,8 +36,6 @@ def verify(test_project):
             raise RuntimeError("Release service is not healthy")
         if entry["Config"]["Image"] != images[service]:
             raise RuntimeError("Running image differs from approval")
-        if service == "backend" and "ALLOW_STATIC_USER_TOKEN=false" not in entry["Config"]["Env"]:
-            raise RuntimeError("Running Backend static authentication is not disabled")
         for mount in entry["Mounts"]:
             if mount["Type"] == "bind":
                 persistent_runtime(Path(mount["Source"]))
@@ -65,8 +63,7 @@ def verify(test_project):
             "tested_at_utc": datetime.now(timezone.utc).isoformat(), "project": INSTANCE,
             "test_project": test_project, "promotion_manifest_sha256": checksum,
             "services": records, "published_ingress": published, "isolation": isolation,
-            "all_release_bind_sources_persistent": True,
-            "backend_static_user_token": "disabled"}
+            "all_release_bind_sources_persistent": True}
 
 
 if __name__ == "__main__":

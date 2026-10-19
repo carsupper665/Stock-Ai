@@ -1,8 +1,9 @@
 # Test edge and identity stack
 
-This overlay adds the Test OIDC Gateway and Nginx to the Ticket 08 application
-Compose project. Nginx alone publishes host ports 80 and 443; Console, the
-Gateway, Backend, Agent Server, and LLM Provider Server have no host ports.
+This overlay adds Nginx to the Ticket 08 application Compose project, whose
+middleware (the OIDC login and API proxy) already carries the Test OIDC
+settings. Nginx alone publishes host ports 80 and 443; the middleware, Backend,
+Agent Server, and LLM Provider Server have no host ports.
 The Test IdP is an independently administered Test-only realm/tenant on the
 stable HTTPS issuer URL. Use a dedicated Test IdP instance if that is how the
 Identity Owner provisions environments. Do not connect this deployment to
@@ -13,7 +14,7 @@ Release or production accounts, keys, sessions, clients, or secrets.
 Choose stable DNS names, for example app-test.example and idp-test.example;
 replace these examples with the approved Test names in the machine-local
 Compose env file. The issuer must remain the exact same HTTPS URL on TCP 443
-from browsers, the Gateway, Console, and Backend, for example
+from browsers and the middleware, for example
 https://idp-test.example/realms/stock-ai-test. Docker DNS, localhost, and
 host-specific aliases must never replace the issuer claim or JWKS URL.
 
@@ -36,28 +37,26 @@ not copy a private key into this repository.
 
 Nginx disables forwarding of inbound request headers at every upstream
 boundary, then sets a small allowlist with connection-derived forwarding
-values. It sends cookies only to the Gateway and its internal auth subrequest.
-The Console receives the verified Gateway access token in the trusted
-X-Auth-Request-Access-Token header, never in Authorization. The public
-/healthz and /assets/* paths do not invoke OIDC. Browser UI routes redirect
-unauthenticated users to login. API routes return 401 without a session. An
-explicit Authorization value on /v1 bypasses the Gateway session subrequest
-and reaches Console's independent Account-token validation; its opaque Account
-Bearer is preserved only for /v1. /agent/* and /llm/* reject any browser
-Authorization value with 403, then use the validated OIDC identity from the
-trusted Gateway headers. The public /oauth2/auth path is not exposed; only the
-Nginx internal auth subrequest can reach it.
+values. It has no `auth_request` and never sees an access token or internal
+credential; every upstream route goes to the middleware, which is the only login
+layer. The public /healthz and /assets/* paths and the frontend static files are
+served by Nginx directly without checking login; an unauthenticated frontend sends
+the browser to the login page itself. Nginx sends cookies and the browser
+Authorization value to the middleware only for /oauth2/*, /v1, /agent/*, and
+/llm/*. API routes return 401 without a session. An explicit opaque Account Bearer
+on /v1 is passed unchanged to Backend, which validates it independently.
+The middleware rejects any browser Authorization value on /agent/* and /llm/*
+with 403, then requires its own session. There is no /oauth2/auth route.
 
 ## Machine-local configuration
 
 Create an env file outside Git from deploy/compose/compose.env.example, then
-add the values below. Set OIDC_GATEWAY_IMAGE to the versioned image produced by
-the traceable image pipeline. Replace the NGINX digest placeholder with the
-approved official-image manifest digest. Both must identify reviewed images,
-not floating tags.
+add the values below. Set MIDDLEWARE_IMAGE and NGINX_IMAGE to the versioned
+images produced by the traceable image pipeline (the Nginx image carries the
+compiled frontend). Both must identify reviewed images, not floating tags.
 
-    OIDC_GATEWAY_IMAGE=stock-ai/oidc-gateway:0.7.0
-    NGINX_IMAGE=nginx:1.27-alpine@sha256:replace-with-reviewed-manifest-digest
+    MIDDLEWARE_IMAGE=stock-ai/middleware:0.7.0
+    NGINX_IMAGE=stock-ai/nginx:0.7.0
     TEST_APP_HOST=app-test.example
     TEST_BIND_ADDRESS=0.0.0.0
     TEST_TLS_DIR=C:/ProgramData/StockAI/Test/tls
@@ -82,8 +81,8 @@ deploy/compose/compose.test-edge.yaml together with the same local env file:
     docker compose --env-file C:\ProgramData\StockAI\Test\compose.env -f deploy/compose/compose.yaml -f deploy/compose/compose.test-edge.yaml config --quiet
     docker compose --env-file C:\ProgramData\StockAI\Test\compose.env -f deploy/compose/compose.yaml -f deploy/compose/compose.test-edge.yaml up -d
 
-The base compose file passes the same exact issuer and JWKS URL to the
-application's OIDC validators. Confirm the app hostname and redirect/logout
+The base compose file passes the exact issuer and JWKS URL to the middleware,
+the only OIDC validator. Confirm the app hostname and redirect/logout
 URIs exactly match the Test client registration before starting containers.
 
 ## Checks and evidence
@@ -94,10 +93,10 @@ Run static policy tests from the repository root:
 
 Before starting the stack, prove DNS, certificate trust, exact issuer
 discovery, and JWKS reachability from the private Compose network, not merely
-from the Windows host. The Gateway image runs `oidc-gateway preflight` with the
-same configuration and trust store as the running Gateway:
+from the Windows host. The middleware image runs `middleware preflight` with the
+same configuration and trust store as the running middleware:
 
-    docker compose --env-file C:\ProgramData\StockAI\Test\compose.env -f deploy/compose/compose.yaml -f deploy/compose/compose.test-edge.yaml run --rm --no-deps oidc-gateway preflight
+    docker compose --env-file C:\ProgramData\StockAI\Test\compose.env -f deploy/compose/compose.yaml -f deploy/compose/compose.test-edge.yaml run --rm --no-deps middleware preflight
 
 It fails on DNS/TLS/HTTP errors (and explains an incomplete IdP certificate
 chain), a discovery issuer or endpoint that differs from the configured URLs,
@@ -120,13 +119,13 @@ system certificate chain, then records only the peer certificate issuer and
 NotAfter timestamp. The script checks DNS, browser-trusted HTTPS,
 redirect/client/cookie configuration, response headers,
 anonymous assets and health, 401 behavior on anonymous API routes, Account
-Bearer routing to Console, rejection of Account Bearers on Agent/LLM routes,
+Bearer routing to Backend, rejection of Account Bearers on Agent/LLM routes,
 spoofed-header rejection, request-size and login-rate limits, IdP discovery and
 JWKS, expected public ports, known private ports, and all TCP ports with Nmap.
 It writes sanitized results
 before returning a failure status. Complete an interactive Test login and
 logout separately and record that outcome without retaining browser cookies.
-Explicitly probe Gateway and application ports such as 4180, 8088, 7794, 8080,
+Explicitly probe middleware and application ports such as 4180, 8088, 7794, 8080,
 and 8090 and confirm they are closed. The script's full TCP scan expects only
 ports 80 and 443 to be open at every resolved app address. Record timestamp, probe
 vantage, DNS answers, tested hostnames/ports, TLS issuer/expiry, status codes,

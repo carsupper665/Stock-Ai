@@ -1,18 +1,5 @@
 {
   "schema": "stock-ai.local-auxiliary-images.v1",
-  "nginx": {
-    "status": "tested",
-    "image": "127.0.0.1:5000/stock-ai/release-nginx@sha256:1d80f75d3e2990d5dc73f972d725b005d8390c4d2ccccf72d83533bc51001431",
-    "base_image": "nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94",
-    "dockerfile": "deploy/local-release/Dockerfile.nginx",
-    "evidence": "deploy/evidence/local-release/t16/scans/summary.json",
-    "scan_sha256": "bf56ff618b103628a9bf1f7dd6c1a8ae77ec84822f9c4af85249b77d91c8508e",
-    "patched_packages": {
-      "libexpat": "2.8.5-r0",
-      "pcre2": "10.49-r0",
-      "tiff": "4.7.2-r0"
-    }
-  },
   "idp": {
     "status": "tested",
     "image": "127.0.0.1:5000/stock-ai/local-identity-fixture@sha256:f642bdb97a92a89ae0e878c638b1e51506db70ce9875d83219b98e1921f9cdb1",

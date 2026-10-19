@@ -18,6 +18,8 @@ type Config struct {
 	ClientID, ClientSecret, RedirectURI, EndSessionURL, PostLogoutURI       string
 	CookieName, UserSubject                                                 string
 	TokenAuthMethod, AccessTokenType, Audience                              string
+	BackendURL, AgentURL, LLMURL                                            string
+	AgentAdminToken, LLMAdminToken, LLMRuntimeToken, BackendUserToken       string
 	CookieKey                                                               []byte
 	SessionTTL, LoginTTL                                                    time.Duration
 }
@@ -39,8 +41,20 @@ func LoadConfig() (Config, error) {
 	if err != nil || len(key) != 32 || base64.StdEncoding.EncodeToString(key) != keyText {
 		return Config{}, errors.New("OIDC_COOKIE_KEY_FILE must contain canonical base64 for exactly 32 bytes")
 	}
+	tokens := make(map[string]string)
+	for name, logical := range map[string]string{
+		"AGENT_SERVER_ADMIN_TOKEN": "agent_admin_token", "LLM_SERVER_ADMIN_TOKEN": "llm_admin_token",
+		"LLM_SERVER_RUNTIME_TOKEN": "llm_runtime_token", "BACKEND_USER_TOKEN": "backend_middleware_token",
+	} {
+		if tokens[name], err = readSecret(name, logical, environment, false); err != nil {
+			return Config{}, err
+		}
+	}
 	c := Config{
-		Environment: environment, ListenAddress: value("OIDC_GATEWAY_ADDR", ":4180"),
+		Environment: environment, ListenAddress: value("MIDDLEWARE_ADDR", ":4180"),
+		BackendURL: strings.TrimSpace(os.Getenv("BACKEND_URL")), AgentURL: strings.TrimSpace(os.Getenv("AGENT_SERVER_URL")), LLMURL: strings.TrimSpace(os.Getenv("LLM_SERVER_URL")),
+		AgentAdminToken: tokens["AGENT_SERVER_ADMIN_TOKEN"], LLMAdminToken: tokens["LLM_SERVER_ADMIN_TOKEN"],
+		LLMRuntimeToken: tokens["LLM_SERVER_RUNTIME_TOKEN"], BackendUserToken: tokens["BACKEND_USER_TOKEN"],
 		Issuer:           strings.TrimSpace(os.Getenv("OIDC_ISSUER")),
 		AuthorizationURL: strings.TrimSpace(os.Getenv("OIDC_AUTHORIZATION_URL")),
 		TokenURL:         strings.TrimSpace(os.Getenv("OIDC_TOKEN_URL")), JWKSURL: strings.TrimSpace(os.Getenv("OIDC_JWKS_URL")),
@@ -141,6 +155,17 @@ func (c Config) Validate() error {
 		u, err := url.Parse(c.EndSessionURL)
 		if err != nil || u.Scheme != issuer.Scheme || u.Host != issuer.Host || u.User != nil || u.Fragment != "" {
 			return errors.New("OIDC_END_SESSION_URL must use the issuer origin")
+		}
+	}
+	tokens := []string{c.AgentAdminToken, c.LLMAdminToken, c.LLMRuntimeToken, c.BackendUserToken}
+	for i, token := range tokens {
+		if token == "" {
+			return errors.New("middleware credentials are required")
+		}
+		for _, other := range tokens[:i] {
+			if token == other {
+				return errors.New("middleware credential roles must be distinct")
+			}
 		}
 	}
 	if c.SessionTTL <= 0 || c.SessionTTL > 24*time.Hour || c.LoginTTL <= 0 || c.LoginTTL > 15*time.Minute {

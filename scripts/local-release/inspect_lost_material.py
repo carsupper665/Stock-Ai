@@ -7,12 +7,12 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from prepare import ROOT
+from prepare import DEFAULT_MANIFEST, ROOT, approved_images
 from scripts import linux_recovery as recovery
 
 
 def inspect():
-    helper = json.loads((ROOT / "deploy/local-release/auxiliary-images.json").read_text())["nginx"]["image"]
+    helper = approved_images(DEFAULT_MANIFEST)[0]["nginx"]
     result = {}
     with tempfile.TemporaryDirectory(dir=ROOT / ".local-release") as temporary:
         base = Path(temporary)

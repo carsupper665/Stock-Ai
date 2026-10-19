@@ -75,7 +75,7 @@ def validate_records(records, images, manifest_sha):
     require(acceptance.get("schema") == "stock-ai.t15-acceptance.v1" and acceptance.get("status") == "passed" and acceptance.get("checkpoint") == "complete", "acceptance-complete")
     require(migration.get("schema") == "stock-ai.fixture-migration.v1" and migration.get("status") == "passed" and migration.get("business_acceptance") == "passed", "migration-business-complete")
     require(acceptance.get("product_images_rebuilt") is False, "immutable-products")
-    products = {name: image for name, image in images.items() if name not in ("idp", "nginx")}
+    products = {name: image for name, image in images.items() if name != "idp"}
     require(acceptance.get("product_images") == products and acceptance.get("auxiliary_image") == images["idp"], "approved-digests")
     stores(migration["source"])
     stores(migration["target"])
@@ -102,22 +102,6 @@ def validate_records(records, images, manifest_sha):
     require(boundary.get("application_network_internal") is True and boundary.get("binance_dns_alias") == "local-idp-fixture" and
             boundary.get("backend_certificate_verification") == "existing SSL_CERT_FILE; no bypass" and
             boundary.get("all_running_digests_match") is True, "actual-strict-local-market-boundary")
-    require(boundary.get("agent_private_backend_adapter") == "http://idp:18081" and
-            boundary.get("adapter_edge_interface_unreachable") is True, "private-agent-backend-adapter")
-    rejections = business.get("backend_oidc_rejections", {})
-    require(rejections.get("fixture") == "stock-ai-backend-oidc-rejections-v1" and rejections.get("tokens_disclosed") is False and
-            rejections.get("external_calls") == 0 and rejections.get("statuses") == {name: 401 for name in
-            ("anonymous", "static-user", "expired", "wrong-issuer", "wrong-audience", "wrong-subject")}, "actual-backend-oidc-rejections")
-    adapter = business.get("private_backend_adapter", {})
-    require(adapter.get("credential_exchange_scoped") is True and adapter.get("account_credentials_preserved") is True, "scoped-credential-exchange")
-    for key in ("before", "after"):
-        value = adapter.get(key, {})
-        require(value.get("fixture") == "stock-ai-private-backend-oidc-adapter-v1" and value.get("external_calls") == 0 and
-                value.get("user_token_ttl_seconds") == 45 and value.get("account_credentials_preserved") is True and
-                value.get("upstream") == "http://backend:7794" and value.get("privileged_routes") ==
-                ["GET /v1/accounts/:id", "GET /v1/market/price"], "private-adapter-provenance")
-    for route in ("USER GET /v1/accounts/:id", "ACCOUNT GET /v1/market/price", "ACCOUNT POST /v1/orders"):
-        require(adapter["after"].get("routes", {}).get(route, 0) > (adapter["before"].get("routes") or {}).get(route, 0), "private-adapter-route-counters")
     market = business.get("market_provenance", {})
     require(market.get("price") == 100 and market.get("symbol") == "BTCUSDT" and market.get("external_calls") == 0 and
             market.get("ticker_info_ohlcv_public_api") is True, "deterministic-market-responses")
@@ -126,7 +110,7 @@ def validate_records(records, images, manifest_sha):
     for route in ("/api/v3/ticker/price", "/api/v3/exchangeInfo", "/api/v3/klines"):
         require(market["after"].get("routes", {}).get(route, 0) > (market["before"].get("routes") or {}).get(route, 0), "actual-market-route-requests")
     require(runtime.get("schema") == "stock-ai.local-release-runtime.v1" and runtime.get("status") == "passed" and
-            runtime.get("all_release_bind_sources_persistent") is True and runtime.get("backend_static_user_token") == "disabled", "runtime-boundary")
+            runtime.get("all_release_bind_sources_persistent") is True, "runtime-boundary")
     require(set(runtime.get("services", {})) == set(images), "complete-runtime-service-set")
     for name, image in images.items():
         require(runtime["services"][name] == {"image": image, "running": True, "health": "healthy"}, "running-healthy-approved-digest")

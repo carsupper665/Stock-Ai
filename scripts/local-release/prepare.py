@@ -21,7 +21,7 @@ INSTANCE = "stock-ai-local-release"
 NAMESPACE = "stock-ai-release"
 HOST = "app.localrelease:8443"
 ISSUER = f"https://{HOST}/realms/{NAMESPACE}"
-SUFFIXES = ("backend_user_token", "backend_account_token_key", "agent_admin_token",
+SUFFIXES = ("backend_user_token", "backend_middleware_token", "backend_account_token_key", "agent_admin_token",
             "llm_admin_token", "llm_runtime_token", "llm_master_key", "oidc_client_secret",
             "oidc_cookie_key", "fixture_provider_secret")
 EXTERNAL_IDP_REQUIRED = ("RELEASE_APP_HOST", "OIDC_ISSUER", "OIDC_AUTHORIZATION_URL", "OIDC_TOKEN_URL", "OIDC_JWKS_URL",
@@ -43,15 +43,14 @@ def persistent_runtime(path):
 def approved_images(manifest):
     # Reuse the full operator contract, including all package artifact hashes.
     promoted, checksum = Operator.__new__(Operator).promotion(
-        manifest, {"services": {"oidc-gateway": {}}})
+        manifest, {"services": {"nginx": {}}})
     auxiliary = json.loads(AUXILIARY.read_text())
     if auxiliary.get("schema") != "stock-ai.local-auxiliary-images.v1":
         raise WorkflowError("Auxiliary image approval schema is invalid.")
-    for name in ("nginx", "idp"):
-        entry = auxiliary.get(name, {})
-        if entry.get("status") != "tested" or not isinstance(entry.get("image"), str) or not DIGEST_RE.fullmatch(entry["image"]):
-            raise WorkflowError("Auxiliary image approval is missing.")
-        promoted[name] = entry["image"]
+    entry = auxiliary.get("idp", {})
+    if entry.get("status") != "tested" or not isinstance(entry.get("image"), str) or not DIGEST_RE.fullmatch(entry["image"]):
+        raise WorkflowError("Auxiliary image approval is missing.")
+    promoted["idp"] = entry["image"]
     sources = auxiliary["idp"].get("source_sha256", {})
     if set(sources) != {"scripts/local-test/fixture.go", "scripts/local-test/Dockerfile", "scripts/local-test/go.mod"}:
         raise WorkflowError("Auxiliary fixture source approval is missing.")
@@ -69,8 +68,6 @@ def fixture_config():
         "client_secret_file": f"/run/secrets/{NAMESPACE}_oidc_client_secret",
         "provider_secret_file": f"/run/secrets/{NAMESPACE}_fixture_provider_secret",
         "market_fixture": True,
-        "backend_adapter": True,
-        "backend_secret_file": f"/run/secrets/{NAMESPACE}_backend_user_token",
     }
 
 
@@ -127,7 +124,7 @@ def install_external_material(idp, client_secret_file, certs, secrets, gid):
     install_private(certs / "oidc-ca.pem", bundle, gid)
     secret = Path(client_secret_file).read_bytes().strip()
     if len(secret) < 32:
-        raise WorkflowError("The OIDC Gateway requires an IdP client secret of at least 32 bytes")
+        raise WorkflowError("The Middleware requires an IdP client secret of at least 32 bytes")
     install_private(secrets / f"{NAMESPACE}_oidc_client_secret", secret + b"\n", gid)
 
 
@@ -156,7 +153,8 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None, idp=None, client_secret_fil
         "STOCK_AI_SECRET_NAMESPACE": NAMESPACE, "STOCK_AI_SECRETS_DIR": str(secrets.resolve()),
         "RELEASE_TLS_DIR": str(certs.resolve()), "LOCAL_RELEASE_GID": str(gid),
         "RELEASE_APP_HOST": HOST, "OIDC_ISSUER": ISSUER, "OIDC_AUDIENCE": "stock-ai-api-release",
-        "OIDC_USER_SUBJECT": "local-release-user", "ALLOW_STATIC_USER_TOKEN": "false",
+        "OIDC_USER_SUBJECT": "local-release-user", "OIDC_CLIENT_ID": NAMESPACE,
+        "OIDC_COOKIE_NAME": "__Host-stock-ai-release-session",
         "PROMOTION_MANIFEST_SHA256": checksum,
         "AUXILIARY_IMAGES_SHA256": hashlib.sha256(AUXILIARY.read_bytes()).hexdigest(),
     }
@@ -164,8 +162,8 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None, idp=None, client_secret_fil
                              ("JWKS", "jwks"), ("END_SESSION", "logout")):
         values[f"OIDC_{suffix}_URL"] = f"{ISSUER}/{endpoint}"
     image_variables = [("backend", "BACKEND_IMAGE"), ("agent-server", "AGENT_SERVER_IMAGE"),
-                       ("llm-provider-server", "LLM_PROVIDER_SERVER_IMAGE"), ("console", "CONSOLE_IMAGE"),
-                       ("oidc-gateway", "OIDC_GATEWAY_IMAGE"), ("nginx", "NGINX_IMAGE")]
+                       ("llm-provider-server", "LLM_PROVIDER_SERVER_IMAGE"), ("middleware", "MIDDLEWARE_IMAGE"),
+                       ("nginx", "NGINX_IMAGE")]
     if idp:
         values.update({key: value for key, value in idp.items() if key not in ("RELEASE_TLS_CERT", "RELEASE_TLS_KEY")})
         values["OIDC_CA_BUNDLE"] = str((certs / "oidc-ca.pem").resolve())
@@ -173,6 +171,8 @@ def prepare(manifest=DEFAULT_MANIFEST, runtime=None, idp=None, client_secret_fil
             values["CODEX_CA_CERTIFICATE"] = "/etc/ssl/certs/oidc-ca.pem"
     else:
         image_variables.append(("idp", "LOCAL_RELEASE_FIXTURE_IMAGE"))
+    values["OIDC_REDIRECT_URI"] = f"https://{values['RELEASE_APP_HOST']}/oauth2/callback"
+    values["OIDC_POST_LOGOUT_URI"] = f"https://{values['RELEASE_APP_HOST']}/"
     for service, variable in image_variables:
         values[variable] = images[service]
     install_private(runtime / "compose.env", "".join(f"{key}={value}\n" for key, value in values.items()).encode(), gid)

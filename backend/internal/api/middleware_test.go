@@ -98,13 +98,16 @@ func TestMeReturnsResolvedIdentity(t *testing.T) {
 	if _, present := body["account_id"]; present {
 		t.Fatalf("USER response disclosed an account identity: %v", body)
 	}
+	if _, present := body["subject"]; present {
+		t.Fatalf("USER response disclosed a subject: %v", body)
+	}
 
 	status, body = do(t, engine, http.MethodGet, "/v1/me", accountToken, nil)
 	if status != http.StatusOK || body["kind"] != "account" || body["account_id"] != id || body["user_name"] != "BTC-Agent-01" {
 		t.Fatalf("Account /v1/me response is wrong: status=%d body=%v", status, body)
 	}
 	if _, present := body["subject"]; present {
-		t.Fatalf("Account response disclosed an OIDC subject: %v", body)
+		t.Fatalf("Account response disclosed a subject: %v", body)
 	}
 
 	if status, _ := do(t, engine, http.MethodGet, "/v1/me", "", nil); status != http.StatusUnauthorized {

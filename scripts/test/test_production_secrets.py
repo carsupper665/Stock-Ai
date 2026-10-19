@@ -54,6 +54,7 @@ class ProductionSecretsTest(unittest.TestCase):
             manifest = json.loads((directory / "production-config.json").read_text())
             cases = {
                 "backend_user_token": b"change-me\n",
+                "backend_middleware_token": b"short\n",
                 "agent_admin_token": b"a" * 64 + b"\n",
                 "llm_admin_token": b"short\n",
                 "backend_account_token_key": b"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=\n",
@@ -87,6 +88,21 @@ class ProductionSecretsTest(unittest.TestCase):
             results, _ = MODULE.validate("Release", release, test)
             isolation = next(result for result in results if result.setting == "environment_isolation")
             self.assertFalse(isolation.valid)
+
+    def test_backend_middleware_token_is_generated_separate_from_agent_token(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = self.generate(Path(temporary), "Release")
+            manifest = json.loads((directory / "production-config.json").read_text())
+            self.assertEqual(manifest["secret_files"]["backend_middleware_token"], "stock-ai-release_backend_middleware_token")
+            results, values = MODULE.validate("Release", directory)
+            self.assertTrue(next(r for r in results if r.setting == "backend_middleware_token").valid)
+            self.assertNotEqual(values["backend_middleware_token"], values["backend_user_token"])
+            consumers = {
+                mount["service"]
+                for mount in manifest["container_mounts"]
+                if mount["secret"] == "backend_middleware_token"
+            }
+            self.assertEqual(consumers, {"backend", "middleware"})
 
     def test_master_key_is_validated_before_database_use(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -31,7 +31,6 @@ func TestBackendProcessGracefullyClosesSQLiteOnPlatformSignal(t *testing.T) {
 	prepareSignalProcess(cmd)
 	cmd.Dir = directory
 	cmd.Env = append(os.Environ(),
-		"ALLOW_STATIC_USER_TOKEN=true",
 		"USER_TOKEN=backend-process-user-token",
 		"ACCOUNT_TOKEN_KEY=",
 		"BACKEND_ADDR="+address,

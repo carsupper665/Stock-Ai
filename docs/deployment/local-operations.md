@@ -9,7 +9,9 @@ a gate fails. The workflow never launches the legacy mixed Windows/Linux
 distribution and rejects unreviewed Compose services, build directives, and
 host networking.
 
-The current Compose application has the four Ticket 08 services. When the
+The current Compose application has the four Ticket 08 services (Backend, Agent
+Server, LLM Provider Server, and the middleware); Nginx is added by the edge
+overlay. When the
 local Test or Release overlay is available, pass each Compose file with another
 `-f` option. Keep the two environments in separate directories with unique
 project names, env files, secrets, networks, volumes, and data. Put env files,
@@ -61,7 +63,7 @@ operator also prevents inherited shell variables from overriding values in
 that explicit env file.
 
 Host publication is restricted to Nginx. Backend, Agent Server, LLM Provider
-Server, Console, Gateway, and IdP must have no published host ports. Nginx must
+Server, the middleware, and IdP must have no published host ports. Nginx must
 bind to `127.0.0.1` or `::1`; wildcard and non-loopback addresses fail closed.
 The explicit local ingress contract is Test on loopback ports 80 and 443, and
 Release on loopback port 8443. Nginx ports outside that environment's contract
@@ -86,7 +88,7 @@ python3 "$ROOT/scripts/local_operations.py" start \
 Start runs `compose up -d --no-build`, then waits for every configured service
 to be running and healthy. On timeout it exits nonzero with the service state
 and the path to `diagnostics.json`. Stop sends a 30-second graceful stop in
-edge-to-core order (Nginx, Console, Gateway, Agent Server, LLM Provider Server,
+edge-to-core order (Nginx, middleware, Agent Server, LLM Provider Server,
 Backend, then local IdP where present), and confirms that no project container
 is still running. It does not remove volumes.
 
@@ -106,15 +108,14 @@ WSL/Linux scope.
 Update accepts only `stock-ai.promotion-manifest.v1` with `status: "promoted"`,
 `environment: "Test"`, a full Git revision, a configuration schema version,
 the declared SHA-256 sidecar trust, and every required passed acceptance result. Its
-`images` map contains exactly Backend, Agent Server, LLM Provider Server, and
-Console. `test_stack_images` and `artifacts` cover those services plus the OIDC
-Gateway, and every `build_digest` must match the corresponding immutable
+`images` map contains exactly the five images: Backend, Agent Server, LLM
+Provider Server, middleware, and Nginx. `test_stack_images` and `artifacts` cover
+the same five, and every `build_digest` must match the corresponding immutable
 reference. The verifier checks each SBOM, scan, filesystem inventory, build
 provenance, build acceptance, certification JSON, and eight per-result evidence
 files against both its manifest hash and its unique `SHA256SUMS` entry. Release
 preflight compares configured application image references exactly with the
-verified four-image `images` map and, when OIDC Gateway is present, matches it
-to the certified Test stack Gateway digest. The command snapshots the old and
+verified five-image `images` map. The command snapshots the old and
 new image maps, project, Compose input hash, normalized Compose config hash, non-image
 env hash, and promotion hash to a deterministic `rollback-<key>.json` file
 before changing image assignments. The normalized fingerprint removes only

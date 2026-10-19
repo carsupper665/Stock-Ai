@@ -51,12 +51,11 @@ func newTestServer(t *testing.T) (*gin.Engine, *database.Store) {
 	t.Cleanup(prices.Close)
 
 	cfg := &config.Config{
-		UserToken:            testUserToken,
-		AllowStaticUserToken: true,
-		UserName:             "Bless",
-		DBDriver:             "sqlite",
-		FeeRateMaker:         0.0005,
-		FeeRateTaker:         0.001,
+		UserToken:    testUserToken,
+		UserName:     "Bless",
+		DBDriver:     "sqlite",
+		FeeRateMaker: 0.0005,
+		FeeRateTaker: 0.001,
 	}
 	trader := trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker)
 	return New(cfg, store, prices, trader, log), store
