@@ -420,7 +420,8 @@ func (p *codexProcess) generate(ctx context.Context, model, effort string, reque
 			return providers.GenerateResponse{}, err
 		}
 	}
-	turn := map[string]any{"threadId": threadID, "input": input}
+	// Without an explicit summary request the app-server leaves reasoning summaries empty.
+	turn := map[string]any{"threadId": threadID, "input": input, "summary": "auto"}
 	if effort != "" {
 		turn["effort"] = effort
 	}
@@ -440,6 +441,7 @@ func (p *codexProcess) generate(ctx context.Context, model, effort string, reque
 func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, events chan rpcMessage, runtimeByWire map[string]string, historyIDs map[string]bool) (providers.GenerateResponse, error) {
 	var content *string
 	var usage *providers.Usage
+	reasoning := []string{}
 	calls := []providers.ToolCall{}
 	failure := ""
 	fatalError := false
@@ -472,13 +474,17 @@ func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, eve
 		case "item/completed":
 			var completed struct {
 				Item struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
+					Type    string   `json:"type"`
+					Text    string   `json:"text"`
+					Summary []string `json:"summary"`
 				} `json:"item"`
 			}
 			if json.Unmarshal(event.Params, &completed) == nil && completed.Item.Type == "agentMessage" {
 				text := completed.Item.Text
 				content = &text
+			}
+			if completed.Item.Type == "reasoning" {
+				reasoning = append(reasoning, completed.Item.Summary...)
 			}
 		case "thread/tokenUsage/updated":
 			usage = codexUsage(event.Params)
@@ -518,20 +524,25 @@ func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, eve
 			if completed.Turn.Status != "completed" && !(completed.Turn.Status == "interrupted" && len(calls) > 0) {
 				return providers.GenerateResponse{}, ErrWebHarnessResponse
 			}
-			return codexResponse(content, calls, usage, historyIDs)
+			return codexResponse(content, reasoning, calls, usage, historyIDs)
 		}
 	}
 }
 
-func codexResponse(content *string, calls []providers.ToolCall, usage *providers.Usage, historyIDs map[string]bool) (providers.GenerateResponse, error) {
+// Reasoning summaries and a message sent before a tool call are kept so the Run shows what the model is doing.
+func codexResponse(content *string, summaries []string, calls []providers.ToolCall, usage *providers.Usage, historyIDs map[string]bool) (providers.GenerateResponse, error) {
 	if usage != nil && (usage.InputTokens != nil && usage.CachedTokens != nil && *usage.CachedTokens > *usage.InputTokens) {
 		return providers.GenerateResponse{}, ErrWebHarnessResponse
+	}
+	var reasoning *string
+	if text := strings.TrimSpace(strings.Join(summaries, "\n\n")); text != "" {
+		reasoning = &text
 	}
 	if len(calls) == 0 {
 		if content == nil {
 			return providers.GenerateResponse{}, ErrWebHarnessResponse
 		}
-		return providers.GenerateResponse{Content: content, ToolCalls: calls, FinishReason: "stop", Usage: usage}, nil
+		return providers.GenerateResponse{Content: content, Reasoning: reasoning, ToolCalls: calls, FinishReason: "stop", Usage: usage}, nil
 	}
 	seen := make(map[string]bool, len(historyIDs)+len(calls))
 	for id := range historyIDs {
@@ -547,7 +558,7 @@ func codexResponse(content *string, calls []providers.ToolCall, usage *providers
 		_ = json.Unmarshal(call.Arguments, &object)
 		call.Arguments, _ = json.Marshal(object)
 	}
-	return providers.GenerateResponse{ToolCalls: calls, FinishReason: "tool_call", Usage: usage}, nil
+	return providers.GenerateResponse{Content: content, Reasoning: reasoning, ToolCalls: calls, FinishReason: "tool_call", Usage: usage}, nil
 }
 
 // codexUsage reads the thread total: the thread is fresh, so it covers every model call of this

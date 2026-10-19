@@ -46,6 +46,15 @@ it('groups each tool call under the decision that requested it, keeping argument
   expect(items[1].reasoning).toBe('Provider supplied reasoning')
 })
 
+it('shows Codex reasoning summaries without Markdown bold markers next to the message it sent before calling tools', () => {
+  const [decision] = conversation({ status: 'completed', progress: [
+    { type: 'model_call', iteration: 1, reasoning: '**Check the price**\n\nThen **size** the order.', content: 'Checking the price.', finish_reason: 'tool_call', ended_at: 'x',
+      tool_calls: [{ id: 'a', name: 'get_market_snapshot' }] },
+  ] })
+
+  expect(decision).toMatchObject({ reasoning: 'Check the price\n\nThen size the order.', content: 'Checking the price.' })
+})
+
 it('shows a failed model attempt by code only without leaking provider error details', () => {
   const [attempt] = conversation({ progress: [{
     type: 'model_call', iteration: 1, model_name: 'analysis-model', error: 'PROVIDER_UNAVAILABLE: upstream included secret-token', tool_calls: [],

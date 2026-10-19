@@ -2197,6 +2197,9 @@ read-only thread: leading system messages become `baseInstructions`, tools becom
 `dynamicTools`, earlier history is injected with `thread/inject_items`, and the turn
 input is the trailing user messages (empty after tool results). The first
 `item/tool/call` interrupts the turn and returns `finish_reason: "tool_call"`.
+Each turn sends `summary: "auto"` (without it the app-server returns empty reasoning
+summaries); the `reasoning` item summaries become `reasoning` (joined by blank lines)
+and the last `agentMessage` becomes `content`, with or without tool calls.
 Codex keeps no Gateway-side state and still ignores `conversation_id` and
 `continuation`; no resume scope was added.
 

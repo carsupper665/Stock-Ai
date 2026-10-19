@@ -103,6 +103,25 @@ func TestCodexAppServerContinuesFromInjectedToolResult(t *testing.T) {
 	}
 }
 
+// The Run shows what the model is doing: Codex reports it as reasoning summaries and short messages before tool calls.
+func TestCodexAppServerReturnsReasoningSummaryAndMessageWithToolCalls(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
+	tools := []providers.ToolSchema{{Name: "market.price", Description: "price", InputSchema: json.RawMessage(`{"type":"object"}`)}}
+	response, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "reasoning", 5*time.Second, userMessages("price?"), tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value2(response.Reasoning) != "**Check the price**\n\nThen size the order." || value2(response.Content) != "Checking the price." || len(response.ToolCalls) != 1 {
+		t.Fatalf("response = %+v reasoning=%q content=%q", response, value2(response.Reasoning), value2(response.Content))
+	}
+	response, err = codexComplete(t, context.Background(), server, "fixture-codex-key", "reasoning", 5*time.Second, userMessages("price?"), nil)
+	if err != nil || value2(response.Reasoning) != "**Check the price**\n\nThen size the order." || value2(response.Content) != "ok" {
+		t.Fatalf("response = %+v err=%v", response, err)
+	}
+}
+
 func TestCodexAppServerRejectsWrongVersionAndInvalidOutput(t *testing.T) {
 	for _, test := range []struct{ fixture, model, code string }{
 		{fixture: "codex-fixture-wrong-version.exe", model: "gpt-5.4", code: "HARNESS_VERSION_MISMATCH"},
@@ -325,8 +344,9 @@ func serveCodexFixture() int {
 			reply(message.ID, map[string]any{})
 		case "turn/start":
 			var params struct {
-				Input  []struct{ Text string }
-				Effort string `json:"effort"`
+				Input   []struct{ Text string }
+				Effort  string `json:"effort"`
+				Summary string `json:"summary"`
 			}
 			_ = json.Unmarshal(message.Params, &params)
 			thread.raw = append(thread.raw, message.Params...)
@@ -376,6 +396,22 @@ func serveCodexFixture() int {
 					"item": map[string]any{"type": "agentMessage", "text": "Unable to execute."}})
 				emit("turn/completed", map[string]any{"threadId": thread.id,
 					"turn": map[string]any{"id": "turn-" + thread.id, "status": "interrupted"}})
+			case "reasoning":
+				// Like the real app-server, summaries are empty unless the turn asks for them.
+				summary := []string{}
+				if params.Summary == "auto" {
+					summary = []string{"**Check the price**", "Then size the order."}
+				}
+				emit("item/completed", map[string]any{"threadId": thread.id,
+					"item": map[string]any{"type": "reasoning", "summary": summary, "content": []string{}}})
+				if len(thread.tools) == 0 {
+					completeWith(thread, "ok")
+					continue
+				}
+				emit("item/completed", map[string]any{"threadId": thread.id, "item": map[string]any{"type": "agentMessage", "text": "Checking the price."}})
+				_ = output.Encode(map[string]any{"id": 900, "method": "item/tool/call", "params": map[string]any{
+					"threadId": thread.id, "turnId": "turn-" + thread.id, "callId": "call-price", "tool": thread.tools[0].Name,
+					"arguments": map[string]string{"symbol": "BTCUSDT"}}})
 			case "hang":
 			case "invalid-output":
 				emit("turn/completed", map[string]any{"threadId": thread.id, "turn": map[string]any{"id": "turn-" + thread.id, "status": "completed"}})

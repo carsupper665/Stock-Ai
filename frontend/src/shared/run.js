@@ -54,7 +54,8 @@ function fields(value, label = '結果', output = []) {
 
 function explicitReasoning(entry) {
   const value = entry.reasoning ?? entry.reasoning_content
-  return typeof value === 'string' && value.trim() ? value : ''
+  // Codex reasoning summaries are Markdown with **bold** titles; the text is shown plain.
+  return typeof value === 'string' && value.trim() ? value.replace(/\*\*(.+?)\*\*/g, '$1') : ''
 }
 
 function finalEnvelope(content) {
