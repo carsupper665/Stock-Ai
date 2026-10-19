@@ -10,6 +10,9 @@ from pathlib import Path
 
 from prepare import AUXILIARY, ROOT
 
+REQUIRED_TESTS = {"TestLocalReleaseMarketRoutesAndProvenance", "TestReleaseProviderMarketOrderCompletionSequence",
+                  "TestProviderHasNoBackendAdapterOrRejectionRoutes"}
+
 
 def build(builder):
     source = ROOT / "scripts/local-test"
@@ -17,9 +20,7 @@ def build(builder):
                             capture_output=True, text=True, timeout=120)
     events = [json.loads(line) for line in tested.stdout.splitlines() if line.startswith("{")]
     passed = sorted(event["Test"] for event in events if event.get("Action") == "pass" and event.get("Test"))
-    required = {"TestLocalReleaseMarketRoutesAndProvenance", "TestReleaseProviderMarketOrderCompletionSequence",
-                "TestPrivateBackendAdapterCredentialScopeAndHeaders"}
-    if not required.issubset(passed):
+    if not REQUIRED_TESTS.issubset(passed):
         raise RuntimeError("Mandatory market fixture tests did not pass")
     hashes = {"scripts/local-test/" + name: hashlib.sha256((source / name).read_bytes()).hexdigest()
               for name in ("fixture.go", "Dockerfile", "go.mod")}
