@@ -53,8 +53,8 @@ async function save() {
       <label>上下文視窗（數字＋K 或 M）<input v-model="form.context_window" class="mono" placeholder="例如 48K、256K、1M" required /></label>
       <label>基礎 options（JSON）<textarea v-model="form.options" class="mono" rows="3" /></label>
       <label>Level 對應 options（JSON，選填）<textarea v-model="form.levels" class="mono" rows="3" /></label>
-      <p class="note">Level 可用 low／medium／high／max，例如 {"high":{"reasoning_effort":"high"}}；實際 options 由 Provider 決定。</p>
-      <p v-if="isCLI" class="note" data-tone="warn">CLI Harness 只收 reasoning_effort 一個 option（其餘一律退回）。Codex 可填 minimal／low／medium／high／xhigh；Claude Code 可填 low／medium／high／xhigh／max。</p>
+      <p class="note">Level 名稱自訂（英數字、_ . -），例如 {"xhigh":{"reasoning_effort":"xhigh"}}；值是否有效由 Provider 決定，可先用 Provider 頁的測試呼叫確認。</p>
+      <p v-if="isCLI" class="note" data-tone="warn">CLI Harness 只收 reasoning_effort 一個 option（其餘一律退回）。Claude Code 遇到不認得的值會改用預設、不會報錯。</p>
       <label class="row"><input v-model="form.enabled" type="checkbox" />啟用</label>
       <p class="note">儲存後立即生效並保留至重啟。API Token 在 Provider 內設定，不要放入 options。</p>
       <p v-if="error" role="alert" data-tone="neg">{{ error }}</p>

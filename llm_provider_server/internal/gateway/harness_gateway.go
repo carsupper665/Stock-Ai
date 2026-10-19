@@ -1,12 +1,10 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
 	"stock-ai/llm-provider-server/internal/providers"
@@ -123,8 +121,9 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 	var input struct {
-		Model  *string `json:"model"`
-		Prompt string  `json:"prompt"`
+		Model   *string                    `json:"model"`
+		Prompt  string                     `json:"prompt"`
+		Options map[string]json.RawMessage `json:"options"`
 	}
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, 400, "REQUEST_INVALID", err.Error())
@@ -137,11 +136,12 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request, id string)
 		writeError(w, 400, "REQUEST_INVALID", "Test prompt must not exceed 8192 bytes.")
 		return
 	}
-	body, _ := json.Marshal(providers.GenerateRequest{Provider: id, Model: input.Model, Messages: []providers.Message{{Role: "user", Content: &input.Prompt}}})
-	request := r.Clone(r.Context())
-	request.Body = io.NopCloser(bytes.NewReader(body))
-	request.ContentLength = int64(len(body))
-	request.Header.Set("Authorization", "Bearer "+s.runtimeToken)
-	request.Header.Set("Content-Type", "application/json")
-	s.generate(w, request)
+	if err := validateMappedOptions(input.Options); err != nil {
+		writeError(w, 400, "REQUEST_INVALID", "options: "+err.Error())
+		return
+	}
+	// Options let an operator try values before mapping them to a catalog level; without them
+	// the call resolves through the catalog like a Session would.
+	s.dispatchGenerate(w, r, providers.GenerateRequest{Provider: id, Model: input.Model,
+		Messages: []providers.Message{{Role: "user", Content: &input.Prompt}}, Options: input.Options}, len(input.Options) == 0)
 }

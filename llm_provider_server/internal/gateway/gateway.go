@@ -35,6 +35,9 @@ const (
 
 var tokenIDPattern = regexp.MustCompile(`^tok_[a-f0-9]{32}$`)
 
+// Level names are the operator's own labels; what each one sends is up to the Provider.
+var levelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+
 type Server struct {
 	db             *sql.DB
 	adminToken     string
@@ -259,6 +262,11 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
 		return
 	}
+	s.dispatchGenerate(w, r, request, true)
+}
+
+// With catalog false, request.Options go to the Provider as written; only the admin test call does that.
+func (s *Server) dispatchGenerate(w http.ResponseWriter, r *http.Request, request providers.GenerateRequest, catalog bool) {
 	if err := providers.ValidateGenerateRequest(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
 		return
@@ -290,10 +298,12 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	options, err := s.resolveModelOptions(provider.ID, *model, request.Options)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
-		return
+	options := request.Options
+	if catalog {
+		if options, err = s.resolveModelOptions(provider.ID, *model, request.Options); err != nil {
+			writeError(w, http.StatusBadRequest, "REQUEST_INVALID", err.Error())
+			return
+		}
 	}
 	if credentialUnavailable {
 		writeError(w, http.StatusServiceUnavailable, "TOKEN_UNAVAILABLE", "Provider credential is unavailable.")
@@ -343,7 +353,6 @@ func parseModelCatalog(value string) ([]modelMapping, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, errors.New("must contain only one JSON array")
 	}
-	allowedLevels := map[string]bool{"low": true, "medium": true, "high": true, "max": true}
 	byName := map[string]bool{}
 	byProviderModel := map[string]bool{}
 	models := make([]modelMapping, 0, len(*configured))
@@ -371,7 +380,7 @@ func parseModelCatalog(value string) ([]modelMapping, error) {
 			return nil, fmt.Errorf("model %q options: %w", entry.ModelName, err)
 		}
 		for level, options := range entry.Levels {
-			if !allowedLevels[level] {
+			if !levelNamePattern.MatchString(level) {
 				return nil, fmt.Errorf("model %q has invalid level %q", entry.ModelName, level)
 			}
 			if options == nil {

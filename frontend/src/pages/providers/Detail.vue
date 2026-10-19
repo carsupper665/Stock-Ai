@@ -14,10 +14,18 @@ const testError = ref('')
 const testResult = ref(null)
 const testModel = ref(props.provider.default_model ?? '')
 const testPrompt = ref('Reply with a short confirmation that this provider invocation works.')
+const testOptions = ref('')
+const optionsExample = computed(() => (isCLI.value ? '{"reasoning_effort":"xhigh"}' : '{"reasoning_effort":"high","temperature":0}'))
 async function invokeTest() {
   if (testing.value) return
-  testing.value = true; testError.value = ''; testResult.value = null
-  try { testResult.value = await testProvider(props.provider.id, { model: testModel.value || null, prompt: testPrompt.value }) }
+  testError.value = ''; testResult.value = null
+  const body = { model: testModel.value || null, prompt: testPrompt.value }
+  if (testOptions.value.trim()) {
+    try { body.options = JSON.parse(testOptions.value) } catch { body.options = null }
+    if (!body.options || Array.isArray(body.options) || typeof body.options !== 'object') { testError.value = 'options 必須是 JSON 物件'; return }
+  }
+  testing.value = true
+  try { testResult.value = await testProvider(props.provider.id, body) }
   catch (e) { testError.value = `${e.code ?? e.status}: ${e.message}` }
   finally { testing.value = false }
 }
@@ -133,6 +141,8 @@ async function removeToken(t) {
       <h2>測試呼叫</h2>
       <label>模型 ID<input v-model="testModel" placeholder="留空使用 default_model" /></label>
       <label>測試提示<textarea v-model="testPrompt" rows="2" maxlength="8192" /></label>
+      <label>options（JSON，選填）<textarea v-model="testOptions" class="mono" rows="2" :placeholder="optionsExample" /></label>
+      <p class="note">填了 options 會原樣送給 Provider，不套用模型目錄的設定，可用來確認哪些推理程度可用；留空則跟 Session 一樣套用模型目錄。</p>
       <button :disabled="testing || !provider.enabled" data-tone="acc" @click="invokeTest">{{ testing ? 'CLI／Provider 執行中…' : '發送一次測試請求' }}</button>
       <p class="note">實際呼叫模型，可能產生 API 費用或消耗訂閱額度；不會建立 Session 或執行交易工具。</p>
       <p v-if="testError" role="alert" data-tone="neg">{{ testError }}</p>

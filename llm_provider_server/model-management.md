@@ -26,7 +26,8 @@ Create/replace body:
 ```
 
 `model_name`, `provider_id`, `model` are required. Existing catalog name/level/
-reserved-option validation applies. Legal levels: low, medium, high, max; actual
+reserved-option validation applies. Level names are free labels (1–64 ASCII
+letters, numbers, `_`, `.`, `-`, starting with a letter or number); actual
 options depend on the provider. Omitted enabled defaults true; null is invalid.
 `context_window` is the optional model token window used only by the Agent
 Runtime's context compaction (never sent upstream); it must be a nonnegative
@@ -34,11 +35,19 @@ integer, and omitted or 0 means unset (the Agent then uses 128000).
 
 CLI Harness Providers (`codex`, `claude_code`) accept exactly one option,
 `reasoning_effort`, in `options` and in each level; any other key is 400
-`REQUEST_INVALID` at save time. Each CLI has its own scale, validated here
-because neither CLI rejects an unknown value: Codex takes minimal, low, medium,
-high, xhigh (sent as `-c model_reasoning_effort=...`), Claude Code takes low,
-medium, high, xhigh, max (sent as `--effort`). Everything else about the
-invocation stays Server-controlled.
+`REQUEST_INVALID` at save time. The value must be a 1–64 character string of
+ASCII letters, numbers, `_`, `.`, `-`, starting with a letter or number; which
+values work is up to the CLI, since each has its own scale and adds levels with
+new releases. Codex sends it as the turn's `effort` and the API rejects an
+unknown value; Claude Code sends it as `--effort` and falls back to its default
+on an unknown value without failing. Everything else about the invocation stays
+Server-controlled.
+
+To try values before mapping them, `POST /v1/providers/{id}/test` (admin) takes
+optional `model`, `prompt` and `options`. Nonempty `options` go to the Provider
+as written, skipping the catalog; reserved keys (including `model_level`) are 400
+`REQUEST_INVALID`. Without `options` the call resolves through the catalog like
+a Session request.
 Omitted/null options and levels normalize to empty objects. No query parameters.
 Unknown body fields, null root, invalid/ambiguous mapping: 400 `REQUEST_INVALID`.
 Missing Provider: 404 `PROVIDER_NOT_FOUND`. Storage failure: 500 `INTERNAL_ERROR`;

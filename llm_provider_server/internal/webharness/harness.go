@@ -14,8 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
-	"sort"
 	"stock-ai/llm-provider-server/internal/providers"
 	"strings"
 	"time"
@@ -583,15 +583,12 @@ func HarnessFileAvailable(file string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// Each CLI names its own effort scale, and neither rejects an unknown value: Codex passes it
-// to the API and Claude Code warns and silently uses its default. The Gateway validates instead,
-// so a typo cannot quietly downgrade every Run.
-var harnessEffortLevels = map[string]map[string]bool{
-	"codex":       {"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true},
-	"claude_code": {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
-}
+// Each CLI names its own effort scale and adds levels with new releases, so the Gateway checks
+// only the shape; the leading letter or digit keeps the value from reading as a CLI flag. Codex
+// passes it to the API, which rejects an unknown value; Claude Code warns and uses its default.
+var harnessEffortPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
-func HarnessEffort(kind string, options map[string]json.RawMessage) (string, error) {
+func HarnessEffort(options map[string]json.RawMessage) (string, error) {
 	for name := range options {
 		if name != "reasoning_effort" {
 			return "", errors.New("CLI Harness accepts only the reasoning_effort option; executable, authentication files and capabilities are Server-controlled")
@@ -602,19 +599,10 @@ func HarnessEffort(kind string, options map[string]json.RawMessage) (string, err
 		return "", nil
 	}
 	var effort string
-	if json.Unmarshal(raw, &effort) != nil || !harnessEffortLevels[kind][effort] {
-		return "", fmt.Errorf("reasoning_effort for %s must be one of %s", kind, strings.Join(sortedKeys(harnessEffortLevels[kind]), ", "))
+	if json.Unmarshal(raw, &effort) != nil || !harnessEffortPattern.MatchString(effort) {
+		return "", errors.New("reasoning_effort must be up to 64 letters, digits, '_', '.' or '-', starting with a letter or digit")
 	}
 	return effort, nil
-}
-
-func sortedKeys(values map[string]bool) []string {
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // HarnessPath resolves a relative path in .env against the working directory like
@@ -639,7 +627,7 @@ type HarnessSetup struct {
 // ResolveHarness checks the CLI Provider configuration before any process starts. A managed
 // Claude conversation may create its own login snapshot, so its login file need not exist yet.
 func ResolveHarness(kind string, config json.RawMessage, credential string, managedClaude bool, options map[string]json.RawMessage) (HarnessSetup, error) {
-	effort, err := HarnessEffort(kind, options)
+	effort, err := HarnessEffort(options)
 	if err != nil {
 		return HarnessSetup{}, providers.ProviderError{Status: 400, Code: "REQUEST_INVALID", Message: err.Error()}
 	}

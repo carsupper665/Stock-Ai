@@ -1380,9 +1380,9 @@ enumerate vendor APIs.
 `model` is the exact nonblank Provider model. A Provider/model pair may appear only
 once so level resolution is never ambiguous. Omitted `enabled` defaults to true;
 explicit null is invalid. `options` and `levels` omitted or null normalize to empty
-objects; every named level value must be an object. The only legal level
-names are `low`, `medium`, `high`, and `max`; each mapping supports exactly the
-subset it lists. Omitted Session/Generate level is valid and applies only base
+objects; every named level value must be an object. Level names are the
+operator's own labels: 1–64 ASCII letters, numbers, `_`, `.`, or `-`, beginning
+with a letter or number; each mapping supports exactly the levels it lists. Omitted Session/Generate level is valid and applies only base
 `options`. Duplicate names or Provider/model pairs, unknown fields, malformed JSON,
 illegal levels, null level-option objects, or reserved option keys fail startup with
 a credential-free `LLM_SERVER_MODEL_CATALOG` error.

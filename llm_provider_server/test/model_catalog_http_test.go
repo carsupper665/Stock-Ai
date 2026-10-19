@@ -279,7 +279,7 @@ func TestGatewayRejectsAmbiguousOrInvalidModelCatalogAtStartup(t *testing.T) {
 			{"model_name":"one","provider_id":"provider","model":"same"},
 			{"model_name":"two","provider_id":"provider","model":"same"}]`},
 		{name: "invalid level", catalog: `[
-			{"model_name":"one","provider_id":"provider","model":"model","levels":{"turbo":{}}}]`},
+			{"model_name":"one","provider_id":"provider","model":"model","levels":{"x high":{}}}]`},
 		{name: "null level options", catalog: `[
 			{"model_name":"one","provider_id":"provider","model":"model","levels":{"low":null}}]`},
 		{name: "reserved option", catalog: `[

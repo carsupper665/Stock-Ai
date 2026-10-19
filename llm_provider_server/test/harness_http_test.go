@@ -239,7 +239,7 @@ func TestHarnessRelativeExecutablePathResolvesAgainstWorkingDirectory(t *testing
 }
 
 // The CLI is Server-controlled, so reasoning_effort is the only option a Harness model may
-// carry, and each CLI has its own scale.
+// carry. Its value is left to the CLI, which gains new levels faster than this list could.
 func TestHarnessCatalogModelsAcceptOnlyValidReasoningEffort(t *testing.T) {
 	server := openTestServer(t, time.Second)
 	defer server.Close()
@@ -249,14 +249,14 @@ func TestHarnessCatalogModelsAcceptOnlyValidReasoningEffort(t *testing.T) {
 	}
 	for _, body := range []string{
 		`{"model_name":"cli-temp","provider_id":"cli","model":"m1","options":{"temperature":0}}`,
-		`{"model_name":"cli-bad","provider_id":"cli","model":"m2","options":{"reasoning_effort":"bogus"}}`,
-		`{"model_name":"cli-minimal","provider_id":"cli","model":"m3","options":{"reasoning_effort":"minimal"}}`,
-		`{"model_name":"cli-level","provider_id":"cli","model":"m4","levels":{"high":{"reasoning_effort":"turbo"}}}`,
+		`{"model_name":"cli-number","provider_id":"cli","model":"m2","options":{"reasoning_effort":3}}`,
+		`{"model_name":"cli-empty","provider_id":"cli","model":"m3","options":{"reasoning_effort":""}}`,
+		`{"model_name":"cli-flag","provider_id":"cli","model":"m4","levels":{"high":{"reasoning_effort":"--model"}}}`,
 	} {
 		assertError(t, request(t, server.Handler(), http.MethodPost, "/v1/model-catalog", adminToken, []byte(body)), 400, "REQUEST_INVALID")
 	}
 	accepted := request(t, server.Handler(), http.MethodPost, "/v1/model-catalog", adminToken,
-		[]byte(`{"model_name":"cli-effort","provider_id":"cli","model":"m5","levels":{"low":{"reasoning_effort":"low"},"max":{"reasoning_effort":"max"}}}`))
+		[]byte(`{"model_name":"cli-effort","provider_id":"cli","model":"m5","options":{"reasoning_effort":"ultra"},"levels":{"low":{"reasoning_effort":"low"},"xhigh":{"reasoning_effort":"xhigh"},"ultra":{"reasoning_effort":"ultra"}}}`))
 	if accepted.Code != 201 {
 		t.Fatal(accepted.Code, accepted.Body)
 	}
@@ -286,14 +286,14 @@ func TestHarnessModelLevelReachesTheCLI(t *testing.T) {
 				t.Fatal(response.Code, response.Body)
 			}
 			body, _ = json.Marshal(map[string]any{"model_name": "cli-effort", "provider_id": "cli", "model": "effort-report",
-				"levels": map[string]any{"high": map[string]string{"reasoning_effort": test.effort}}})
+				"levels": map[string]any{test.effort: map[string]string{"reasoning_effort": test.effort}}})
 			if response := request(t, server.Handler(), http.MethodPost, "/v1/model-catalog", adminToken, body); response.Code != 201 {
 				t.Fatal(response.Code, response.Body)
 			}
 			for _, expected := range []struct {
 				options, want string
 			}{
-				{`{"model_level":"high"}`, test.effort},
+				{`{"model_level":"` + test.effort + `"}`, test.effort},
 				{`{}`, "none"},
 			} {
 				generate := []byte(`{"provider":"cli","model":"effort-report","messages":[{"role":"user","content":"hi"}],"options":` + expected.options + `}`)
@@ -309,6 +309,44 @@ func TestHarnessModelLevelReachesTheCLI(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A test call with options sends them to the Provider as written, skipping the catalog, so an
+// operator can find out which values the Provider accepts before mapping them to a level.
+func TestProviderTestSendsCustomOptionsWithoutTheCatalog(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := openTestServer(t, 10*time.Second)
+	defer server.Close()
+	if response := request(t, server.Handler(), http.MethodPost, "/v1/providers", adminToken, []byte(`{"id":"cli","name":"Codex","type":"codex","base_url":"","default_model":"effort-report"}`)); response.Code != 201 {
+		t.Fatal(response.Code, response.Body)
+	}
+	if response := request(t, server.Handler(), http.MethodPost, "/v1/providers/cli/tokens", adminToken, []byte(`{"name":"fixture","token":"fixture-codex-key"}`)); response.Code != 201 {
+		t.Fatal(response.Code, response.Body)
+	}
+	if response := request(t, server.Handler(), http.MethodPost, "/v1/model-catalog", adminToken,
+		[]byte(`{"model_name":"cli-effort","provider_id":"cli","model":"effort-report","options":{"reasoning_effort":"low"}}`)); response.Code != 201 {
+		t.Fatal(response.Code, response.Body)
+	}
+	for _, test := range []struct{ body, want string }{
+		{`{"options":{"reasoning_effort":"ultra"}}`, "ultra"},
+		{`{"options":{}}`, "low"},
+		{`{}`, "low"},
+	} {
+		response := request(t, server.Handler(), http.MethodPost, "/v1/providers/cli/test", adminToken, []byte(test.body))
+		var result struct {
+			Content *string `json:"content"`
+		}
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Content == nil || *result.Content != test.want {
+			t.Fatalf("test %s = %d %s, want effort %q", test.body, response.Code, response.Body, test.want)
+		}
+	}
+	for _, body := range []string{
+		`{"options":{"model_level":"high"}}`,
+		`{"options":{"temperature":0}}`,
+		`{"options":[]}`,
+	} {
+		assertError(t, request(t, server.Handler(), http.MethodPost, "/v1/providers/cli/test", adminToken, []byte(body)), 400, "REQUEST_INVALID")
 	}
 }
 

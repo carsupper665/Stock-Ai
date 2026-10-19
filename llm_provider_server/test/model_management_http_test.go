@@ -50,7 +50,7 @@ func TestModelManagementPersistsAndGeneratesWithoutRestart(t *testing.T) {
 	if !strings.Contains(listed.Body.String(), "new-choice") {
 		t.Fatal("saved mapping lost", listed.Body)
 	}
-	invalid := []byte(`{"model_name":"new-choice","provider_id":"fixture","model":"new-model","levels":{"invalid":{}}}`)
+	invalid := []byte(`{"model_name":"new-choice","provider_id":"fixture","model":"new-model","levels":{"not valid":{}}}`)
 	assertError(t, request(t, server.Handler(), http.MethodPut, "/v1/model-catalog/new-choice", adminToken, invalid), http.StatusBadRequest, "REQUEST_INVALID")
 	removed := request(t, server.Handler(), http.MethodDelete, "/v1/model-catalog/new-choice", adminToken, nil)
 	if removed.Code != http.StatusNoContent {
