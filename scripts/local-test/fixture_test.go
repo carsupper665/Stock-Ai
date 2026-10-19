@@ -141,6 +141,36 @@ func TestReleaseProviderMarketOrderCompletionSequence(t *testing.T) {
 	}
 }
 
+// The Agent accepts only {status, output, summary} as a final answer.
+func TestProviderFinalAnswerUsesTheAgentFinalizationShape(t *testing.T) {
+	for _, market := range []bool{true, false} {
+		f := &fixture{config: fixtureConfig{Issuer: "https://app.localrelease:8443", MarketFixture: market, ProviderSecret: "private-fixture-only"}}
+		tool := map[string]any{"role": "tool", "content": "fixture tool result"}
+		body, _ := json.Marshal(map[string]any{"messages": []any{map[string]any{"role": "user", "content": "fixture"}, tool, tool},
+			"tools": []any{map[string]string{"name": "place_order"}}})
+		request := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(string(body)))
+		request.Header.Set("Authorization", "Bearer private-fixture-only")
+		response := httptest.NewRecorder()
+		f.complete(response, request)
+		var result struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || len(result.Choices) != 1 {
+			t.Fatalf("market=%t response %d %s", market, response.Code, response.Body)
+		}
+		decoder := json.NewDecoder(strings.NewReader(result.Choices[0].Message.Content))
+		decoder.DisallowUnknownFields()
+		var final struct{ Status, Output, Summary string }
+		if err := decoder.Decode(&final); err != nil || final.Output == "" || final.Summary == "" {
+			t.Fatalf("market=%t final answer %q: %v", market, result.Choices[0].Message.Content, err)
+		}
+	}
+}
+
 func TestReleaseIdentityIsolation(t *testing.T) {
 	f, oldServer := testFixture(t)
 	oldServer.Close()

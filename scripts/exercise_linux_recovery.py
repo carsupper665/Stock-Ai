@@ -668,8 +668,6 @@ def nginx_fixture_config() -> str:
         {
             "output": "recovery fixture complete",
             "summary": EXPECTED_SUMMARY,
-            "candidate_memories": [],
-            "expire_memories": [],
         },
         separators=(",", ":"),
     )

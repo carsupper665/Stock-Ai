@@ -1,0 +1,12 @@
+{
+  "details": {
+    "duration_seconds": 2.207,
+    "service": "backend",
+    "substitution_rejected": true
+  },
+  "finished_at_utc": "2026-10-19T13:13:22.903576+00:00",
+  "name": "release_manifest_substitution",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-19T13:13:20.696352+00:00",
+  "status": "passed"
+}

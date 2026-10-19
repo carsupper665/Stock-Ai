@@ -475,7 +475,7 @@ func (f *fixture) complete(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(request.Tools) == 0 || toolResults >= 2 {
 			writeJSON(w, http.StatusOK, map[string]any{"choices": []any{map[string]any{"index": 0, "message": map[string]any{
-				"role": "assistant", "content": `{"output":"Local market read and stopped order completed.","summary":"Deterministic Release fixture completed.","candidate_memories":[],"expire_memories":[]}`,
+				"role": "assistant", "content": `{"output":"Local market read and stopped order completed.","summary":"Deterministic Release fixture completed."}`,
 			}, "finish_reason": "stop"}}})
 			return
 		}
@@ -491,7 +491,7 @@ func (f *fixture) complete(w http.ResponseWriter, r *http.Request) {
 	for _, message := range request.Messages {
 		if message.Role == "tool" {
 			writeJSON(w, http.StatusOK, map[string]any{"choices": []any{map[string]any{"index": 0, "message": map[string]any{
-				"role": "assistant", "content": `{"output":"Local fixture placed the requested limit order.","summary":"Limit order completed by local Test fixture.","candidate_memories":[],"expire_memories":[]}`,
+				"role": "assistant", "content": `{"output":"Local fixture placed the requested limit order.","summary":"Limit order completed by local Test fixture."}`,
 			}, "finish_reason": "stop"}}})
 			return
 		}

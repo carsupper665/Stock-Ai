@@ -1,0 +1,98 @@
+{
+  "accepted_image_digests": {
+    "agent-server": "sha256:1527dfb3396a0865a4f66ff1555363b212d622fbfc54577364889032a86d2f0f",
+    "backend": "sha256:1822171c5354ce2542ce0b956e3f58a960a1fbcae1c52a75217f0f4573170bb3",
+    "llm-provider-server": "sha256:5face66a3dce9046730820d3e37bab94d33c9d9bd358d45d0fdc1c3d65a275b9",
+    "middleware": "sha256:7413252c17056a1c99be8035de102fce22d6f6bc4763f5137cabbfb2b8a82287",
+    "nginx": "sha256:8be00a93c3003a8ac4a4d7ba725023c0d906330688523f3ff92b81ee98348dd6"
+  },
+  "completed_at_utc": "2026-10-19T13:14:20.058004+00:00",
+  "configuration_schema_version": "stock-ai-compose-local.v1",
+  "evidence": {
+    "audience_mismatch": {
+      "file": "audience_mismatch.json",
+      "sha256": "a8b0ee562d09b331620f68096dc83589c820c7614ddd3cc97adc399f6f4bbf4e"
+    },
+    "docker_restart_failure": {
+      "file": "docker_restart_failure.json",
+      "sha256": "f338f419dc74deb547224d1629fb3836b4d8bdba27934f826a696e00a9524105"
+    },
+    "expired_session": {
+      "file": "expired_session.json",
+      "sha256": "322c0006f0e6b0ab3fbba77e2bec1f25b35d25e19809209e9f663bbb09e4afe0"
+    },
+    "fixture_outage": {
+      "file": "fixture_outage.json",
+      "sha256": "0aa157ea94b76d1efb42917bb9702715123969353d7f52ff65ef779add772deb"
+    },
+    "idp_denial": {
+      "file": "idp_denial.json",
+      "sha256": "7513e9a6e31cf56eae49bb93cf3161ba54988030358c003251ba3c94d32b009a"
+    },
+    "idp_restart": {
+      "file": "idp_restart.json",
+      "sha256": "a4397d24783a00f4235b0a53dd8b7dc702a223a8954ba3a86043d7e716f23c81"
+    },
+    "internal_service_restart": {
+      "file": "internal_service_restart.json",
+      "sha256": "8633f6a8059d43b1c29dbccb83fb0769339e3eb06972fb6688c1fbe902e87616"
+    },
+    "issuer_mismatch": {
+      "file": "issuer_mismatch.json",
+      "sha256": "f0c4d8aa26a1945fdf8c00048bf2b63853815709cd39fb070c58ab306d3b0b16"
+    },
+    "public_login_redirects": {
+      "file": "public_login_redirects.json",
+      "sha256": "d0f07215020d08f23e04d47517035d4981a726fb748de4d037342514af1ab01d"
+    },
+    "release_build_directive": {
+      "file": "release_build_directive.json",
+      "sha256": "c234bd13b4d6003877eb216d2e9bd4a22953d9124d7da516002b2a2be246a713"
+    },
+    "release_exact_digest": {
+      "file": "release_exact_digest.json",
+      "sha256": "3b654e7109d9be15a71819b8ff178cb8e546c1fb9d8e3dda679f373370d5b04e"
+    },
+    "release_manifest_substitution": {
+      "file": "release_manifest_substitution.json",
+      "sha256": "f09e9830b16fbcddf1930c11087b0e0cc8f458351344d9a8f38c45e7c4dd14c2"
+    },
+    "release_manifest_tamper": {
+      "file": "release_manifest_tamper.json",
+      "sha256": "11287ef0250649542a4135e217431f56ffca9959cee2ecb7f733596a8451502f"
+    },
+    "secured_product_flow": {
+      "file": "secured_product_flow.json",
+      "sha256": "3572598a576f5086dd497c6408260b03c495423a75ce26e4a886bb9fc98313ac"
+    },
+    "test_material_absence": {
+      "file": "test_material_absence.json",
+      "sha256": "c183753fdc99b395267d039fd0d3bb85a2e419e6c314e21382daa2d1e6e02a93"
+    },
+    "wrong_user": {
+      "file": "wrong_user.json",
+      "sha256": "0dba90e9e7914773f8939f6e28c1ed5b8f30e42252371945bddeb5e3bbbc8602"
+    }
+  },
+  "results": {
+    "audience_mismatch": "passed",
+    "docker_restart_failure": "passed",
+    "expired_session": "passed",
+    "fixture_outage": "passed",
+    "idp_denial": "passed",
+    "idp_restart": "passed",
+    "internal_service_restart": "passed",
+    "issuer_mismatch": "passed",
+    "public_login_redirects": "passed",
+    "release_build_directive": "passed",
+    "release_exact_digest": "passed",
+    "release_manifest_substitution": "passed",
+    "release_manifest_tamper": "passed",
+    "secured_product_flow": "failed",
+    "test_material_absence": "passed",
+    "wrong_user": "passed"
+  },
+  "revision": "4d36c421d3690c65ed36bf5810f73366ba335164",
+  "schema": "stock-ai.test-certification.v1",
+  "status": "failed"
+}

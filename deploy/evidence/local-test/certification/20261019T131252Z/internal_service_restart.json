@@ -1,0 +1,18 @@
+{
+  "details": {
+    "all_healthy": true,
+    "duration_seconds": 40.565,
+    "login_after_restart": true,
+    "restarted_services": [
+      "backend",
+      "llm-provider-server",
+      "agent-server",
+      "middleware"
+    ]
+  },
+  "finished_at_utc": "2026-10-19T13:14:10.833450+00:00",
+  "name": "internal_service_restart",
+  "schema": "stock-ai.local-acceptance-result.v1",
+  "started_at_utc": "2026-10-19T13:13:32.570320+00:00",
+  "status": "passed"
+}

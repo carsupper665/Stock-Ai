@@ -33,6 +33,12 @@ class RecoveryPolicyTest(unittest.TestCase):
         cls.evidence_bytes = EVIDENCE.read_bytes()
         cls.evidence = json.loads(cls.evidence_bytes)
 
+    def test_fixture_provider_final_answer_has_only_the_agent_finalization_fields(self):
+        config = exercise_module.nginx_fixture_config()
+        content = json.loads(re.search(r"return 200 '(.*)';", config).group(1).replace("\\'", "'").replace("\\\\", "\\"))
+        final = json.loads(content["choices"][0]["message"]["content"])
+        self.assertLessEqual(set(final), {"status", "output", "summary"})
+
     def test_backup_is_stopped_and_complete(self):
         for marker in (
             '"backend": "backend_state"',
