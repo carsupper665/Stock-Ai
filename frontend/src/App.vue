@@ -142,4 +142,17 @@ main {
     flex-direction: column;
   }
 }
+@media (max-width: 640px) {
+  .services {
+    flex-flow: row wrap;
+    gap: 4px 14px;
+  }
+  .services > .eyebrow,
+  .user > .mono {
+    display: none;
+  }
+  .service > .grow {
+    flex: none;
+  }
+}
 </style>

@@ -103,6 +103,15 @@ header h2 { white-space: nowrap; }
 header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px var(--pad); border-bottom: 1px solid var(--line); background: var(--surf); }
 main > article { flex: 1; min-width: 0; padding: var(--pad); display: flex; flex-direction: column; gap: 14px; }
 @media (max-width: 900px) { aside { border-right: 0; border-bottom: 1px solid var(--line); } nav { flex-direction: row; } }
+/* 手機：側欄壓成頂端一條，選單單列橫滑，不再把內容推到第二個畫面 */
+@media (max-width: 640px) {
+  aside { gap: 10px; padding: 10px 12px; }
+  aside > :last-child { padding-top: 8px; }
+  nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -12px; padding: 8px 12px 0; }
+  nav::-webkit-scrollbar { display: none; }
+  nav a { flex: none; border-left: 0; border-bottom: 2px solid transparent; border-radius: 5px 5px 0 0; }
+  nav a[aria-current='page'] { border-bottom-color: var(--acc); }
+}
 
 /* ---- 共用 class（SPEC §7 白名單；只在這裡定義） ---- */
 .card { color: var(--ink); background: var(--surf); border: 1px solid var(--line); border-radius: 7px; padding: 13px 14px; box-shadow: var(--shadow); min-width: 0; }
