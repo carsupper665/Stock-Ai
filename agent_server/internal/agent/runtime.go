@@ -432,6 +432,9 @@ func (r *AgentRuntime) latchPersistenceFaultLocked(err error) {
 		return
 	}
 	r.persistenceErr = errors.Join(r.persistenceErr, fmt.Errorf("agent persistence unavailable: %w", err))
+	if r.logger != nil {
+		r.logger.Printf("event=persistence_fault detail=%v", err)
+	}
 	for _, active := range r.active {
 		active.cancel()
 	}

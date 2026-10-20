@@ -20,6 +20,7 @@ import (
 
 func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger string, runID int64, active *activeRun) {
 	defer r.finishActive(session.ID, active)
+	r.logOperational("run_start", session.ID, runID, trigger)
 	contextBody := map[string]any{
 		"trigger": trigger, "session_name": session.Name, "account_id": session.AccountID,
 		"model_name": session.ModelName, "model_level": session.ModelLevel,
@@ -32,6 +33,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		return
 	}
 	if accountErr != nil {
+		r.logOperational("account_snapshot_error", session.ID, runID, dependencyReasonCode(accountErr))
 		contextBody["account_snapshot"] = map[string]any{"ok": false, "error": map[string]string{
 			"code": dependencyReasonCode(accountErr), "message": dependencyReason(accountErr),
 		}}
@@ -47,6 +49,11 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		if err != nil {
 			r.handleRunPersistenceError(session.ID, runID, err)
 			return
+		}
+		if raw, isResult := inbox.(json.RawMessage); isResult {
+			if code := toolErrorCode(raw); code != "" {
+				r.logOperational("inbox_error", session.ID, runID, code)
+			}
 		}
 		if inbox != nil {
 			contextBody["inbox"] = inbox
@@ -290,6 +297,9 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				return
 			}
 			result := r.executeTool(ctx, session, runID, call)
+			if code := toolErrorCode(result); code != "" {
+				r.logOperational("tool_error", session.ID, runID, call.Name+"."+code)
+			}
 			progress[len(progress)-1].Result = history.FilterToolResult(call.Name, result)
 			finishTraceTiming(&progress[len(progress)-1], toolStarted, time.Now())
 			updated, err = r.updateRunProgress(session.ID, runID, modelCalls, toolCalls, progress)

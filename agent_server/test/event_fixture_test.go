@@ -126,6 +126,7 @@ func openEventRuntime(t *testing.T, fixture *runtimeFixture, book *priceBook, da
 		GatewayURL: gateway.URL, GatewayRuntimeToken: gatewayToken,
 		DefaultPrompt: "default mission", DefaultMaxLoop: 4, DefaultMaxToolCall: 3,
 		RequestTimeout: time.Second, ToolTimeout: durationOr(fixture.toolTimeout, time.Second), StopTimeout: time.Second,
+		Logger: fixture.logger,
 	})
 	if err != nil {
 		t.Fatalf("OpenAgentRuntime() error = %v", err)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -200,6 +201,7 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 	if session.Status == "running" && session.CurrentRunID != 0 {
 		r.logOperational("run_terminal", sessionID, session.CurrentRunID, "interrupted.HARD_STOP")
 	}
+	r.logOperational("session_"+targetStatus, sessionID, session.CurrentRunID, "cleared_events="+strconv.Itoa(len(clearance.Events)))
 	active := r.active[sessionID]
 	if active != nil {
 		active.cancel()

@@ -44,7 +44,11 @@ func (r *AgentRuntime) executeEventTool(session Session, runID int64, call gatew
 }
 
 func (r *AgentRuntime) createEventForRun(record events.Record) json.RawMessage {
-	return r.eventToolTransaction(record.SessionID, record.CreatedRunID, events.CreateForRun(record))
+	result := r.eventToolTransaction(record.SessionID, record.CreatedRunID, events.CreateForRun(record))
+	if toolErrorCode(result) == "" {
+		r.logOperational("event_created", record.SessionID, record.CreatedRunID, record.Type+"."+record.ID)
+	}
+	return result
 }
 
 func (r *AgentRuntime) deleteEventForRun(sessionID string, runID int64, eventID string, now time.Time) json.RawMessage {
@@ -100,6 +104,7 @@ func (r *AgentRuntime) eventToolTransaction(sessionID string, runID int64, mutat
 		r.latchPersistenceFaultLocked(err)
 		return unavailable("unknown")
 	}
+	r.logEventOutcomesLocked(logID)
 	return result
 }
 
@@ -216,6 +221,7 @@ func (r *AgentRuntime) deleteEventByUser(ctx context.Context, sessionID, eventID
 	if err := stage.Finish(true); err != nil {
 		return r.mutationFailureLocked(ctx, nil, err)
 	}
+	r.logEventOutcomesLocked(logID)
 	return http.StatusOK, "", "", record.Event
 }
 
@@ -262,12 +268,13 @@ func (r *AgentRuntime) LocalEventTask(clock eventloop.Clock, interval time.Durat
 func (r *AgentRuntime) PriceEventTask(clock eventloop.Clock, interval time.Duration) server.BackgroundTask {
 	clock = eventClock(clock)
 	lastSamples := make(map[string]events.PriceSample)
+	sampleFailures := make(map[string]string)
 	return server.BackgroundTask{Name: "agent-events-price", Interval: interval, Run: func(ctx context.Context) error {
 		watched, err := r.watchedInstruments(ctx, clock.Now())
 		if err != nil {
 			return err
 		}
-		samples := r.samplePrices(ctx, clock, watched, lastSamples)
+		samples := r.samplePrices(ctx, clock, watched, lastSamples, sampleFailures)
 		if len(samples) == 0 {
 			return nil
 		}
@@ -310,6 +317,7 @@ func (r *AgentRuntime) dispatchEventRound(ctx context.Context, claim func(*sql.T
 	if err := stage.Finish(true); err != nil {
 		return r.roundFailureLocked(ctx, nil, err)
 	}
+	r.logEventOutcomesLocked(logID)
 	for _, launch := range launches {
 		r.launchRunLocked(launch)
 	}
@@ -335,6 +343,29 @@ func (r *AgentRuntime) admitFiredSessionsTx(tx *sql.Tx, claim func(*sql.Tx) ([]s
 		}
 	}
 	return launches, nil
+}
+
+// logEventOutcomesLocked logs each event_log row after afterID. Callers hold r.mu and have just
+// committed, so these are exactly the rows their transaction wrote.
+func (r *AgentRuntime) logEventOutcomesLocked(afterID int64) {
+	if r.logger == nil {
+		return
+	}
+	rows, err := r.db.Query(`SELECT session_id, created_run_id, event_id, type, outcome FROM event_log WHERE id > ? ORDER BY id`, afterID)
+	if err != nil {
+		r.logger.Printf("event=event_log_read_error detail=%v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sessionID, eventID, eventType, outcome string
+		var runID int64
+		if err := rows.Scan(&sessionID, &runID, &eventID, &eventType, &outcome); err != nil {
+			r.logger.Printf("event=event_log_read_error detail=%v", err)
+			return
+		}
+		r.logOperational("event_"+outcome, sessionID, runID, eventType+"."+eventID)
+	}
 }
 
 func (r *AgentRuntime) roundFailureLocked(ctx context.Context, tx *sql.Tx, err error) error {

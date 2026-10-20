@@ -14,6 +14,7 @@ import (
 	"fmt"
 	sqlite "github.com/glebarez/go-sqlite"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -244,7 +245,7 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "REQUEST_INVALID", "Endpoint does not exist.")
 	})
-	server.handler = server.trackRequests(mux)
+	server.handler = accessLog(server.trackRequests(mux))
 	return server, nil
 }
 
@@ -317,27 +318,27 @@ func (s *Server) dispatchGenerate(w http.ResponseWriter, r *http.Request, reques
 		providers.Model{Provider: provider.Type, ID: *model, BaseURL: provider.BaseURL, Config: provider.Config}, request,
 		providers.Options{APIKey: snapshot.Credential, Options: options, Client: s.httpClient})
 	if err != nil {
-		writeProviderError(w, err)
+		writeProviderError(w, provider, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
-func writeProviderError(w http.ResponseWriter, err error) {
+// writeProviderError logs only the Provider and error code: Provider prose may echo credentials
+// or prompts, and diagnostic model names are chosen by callers.
+func writeProviderError(w http.ResponseWriter, provider Provider, err error) {
+	status, code, message := http.StatusBadGateway, "PROVIDER_RESPONSE_INVALID", "Provider returned an invalid response."
 	var failure providers.ProviderError
-	if errors.As(err, &failure) {
-		writeError(w, failure.Status, failure.Code, failure.Message)
-		return
+	switch {
+	case errors.As(err, &failure):
+		status, code, message = failure.Status, failure.Code, failure.Message
+	case providers.IsTimeout(err):
+		status, code, message = http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out."
+	case errors.Is(err, context.Canceled):
+		status, code, message = http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request was cancelled."
 	}
-	if providers.IsTimeout(err) {
-		writeError(w, http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out.")
-		return
-	}
-	if errors.Is(err, context.Canceled) {
-		writeError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request was cancelled.")
-		return
-	}
-	writeError(w, http.StatusBadGateway, "PROVIDER_RESPONSE_INVALID", "Provider returned an invalid response.")
+	log.Printf("event=provider_error provider=%s type=%s status=%d detail=%s", provider.ID, provider.Type, status, code)
+	writeError(w, status, code, message)
 }
 
 func parseModelCatalog(value string) ([]modelMapping, error) {
@@ -479,6 +480,42 @@ func (s *Server) trackRequests(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(requestContext))
 	})
 }
+
+// accessLog records every request without its query string. Passing health probes run every few
+// seconds and carry no information, so only a failing one is logged.
+func accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		if r.URL.Path == "/healthz" && recorder.status < 300 {
+			return
+		}
+		log.Printf("event=http_request method=%s path=%s status=%d duration=%s",
+			r.Method, r.URL.Path, recorder.status, time.Since(start).Round(time.Microsecond))
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (s *statusRecorder) WriteHeader(status int) {
+	if !s.wroteHeader {
+		s.status = status
+		s.wroteHeader = true
+	}
+	s.ResponseWriter.WriteHeader(status)
+}
+
+func (s *statusRecorder) Write(body []byte) (int, error) {
+	s.wroteHeader = true
+	return s.ResponseWriter.Write(body)
+}
+
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *Server) BeginShutdown() {
 	s.requestMu.Lock()

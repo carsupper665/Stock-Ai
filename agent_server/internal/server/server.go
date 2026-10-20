@@ -57,7 +57,7 @@ func NewServer(loop *eventloop.EventLoop, tasks []BackgroundTask, resources []io
 
 	registered := make([]string, 0, len(tasks))
 	for _, task := range tasks {
-		if err := loop.RegisterEvent(task.Name, task.Run, task.Interval, -1); err != nil {
+		if err := loop.RegisterEvent(task.Name, logTaskErrors(task, logger), task.Interval, -1); err != nil {
 			for _, name := range registered {
 				_ = loop.DelEvent(name)
 			}
@@ -92,13 +92,74 @@ func NewServer(loop *eventloop.EventLoop, tasks []BackgroundTask, resources []io
 	})
 	return &Server{
 		loop:            loop,
-		http:            &http.Server{Handler: mux},
+		http:            &http.Server{Handler: accessLog(mux, logger)},
 		resources:       append([]io.Closer(nil), resources...),
 		logger:          logger,
 		shutdownTimeout: shutdownTimeout,
 		shutdownDone:    make(chan struct{}),
 	}, nil
 }
+
+// logTaskErrors logs a background task's failures, which EventLoop only keeps in memory. A
+// failure that repeats every round is logged once, until it clears or its message changes.
+// EventLoop never overlaps runs of one task, so last needs no lock.
+func logTaskErrors(task BackgroundTask, logger *log.Logger) eventloop.TaskFunc {
+	if logger == nil || task.Run == nil {
+		return task.Run
+	}
+	var last string
+	return func(ctx context.Context) error {
+		err := task.Run(ctx)
+		if err == nil {
+			last = ""
+			return nil
+		}
+		if err.Error() != last {
+			last = err.Error()
+			logger.Printf("event=background_task_error task=%s detail=%v", task.Name, err)
+		}
+		return err
+	}
+}
+
+// accessLog records every request without its query string. Successful health probes run every
+// few seconds and carry no information, so only a failing one is logged.
+func accessLog(next http.Handler, logger *log.Logger) http.Handler {
+	if logger == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		if r.URL.Path == "/health" && recorder.status < 300 {
+			return
+		}
+		logger.Printf("event=http_request method=%s path=%s status=%d duration=%s",
+			r.Method, r.URL.Path, recorder.status, time.Since(start).Round(time.Microsecond))
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (s *statusRecorder) WriteHeader(status int) {
+	if !s.wroteHeader {
+		s.status = status
+		s.wroteHeader = true
+	}
+	s.ResponseWriter.WriteHeader(status)
+}
+
+func (s *statusRecorder) Write(body []byte) (int, error) {
+	s.wroteHeader = true
+	return s.ResponseWriter.Write(body)
+}
+
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func WriteJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")

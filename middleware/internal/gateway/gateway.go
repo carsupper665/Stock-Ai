@@ -69,8 +69,45 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/", s.serveBackend)
 	mux.HandleFunc("/agent/", s.serveAgent)
 	mux.HandleFunc("/llm/", s.serveLLM)
-	return s.securityHeaders(mux)
+	return accessLog(s.securityHeaders(mux))
 }
+
+// accessLog records every request without its query string, which carries OIDC codes and
+// state. Passing health probes run every few seconds and carry no information, so only a
+// failing one is logged.
+func accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		if r.URL.Path == "/healthz" && recorder.status < 300 {
+			return
+		}
+		log.Printf("event=http_request method=%s path=%s status=%d duration=%s",
+			r.Method, r.URL.Path, recorder.status, time.Since(start).Round(time.Microsecond))
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (s *statusRecorder) WriteHeader(status int) {
+	if !s.wroteHeader {
+		s.status = status
+		s.wroteHeader = true
+	}
+	s.ResponseWriter.WriteHeader(status)
+}
+
+func (s *statusRecorder) Write(body []byte) (int, error) {
+	s.wroteHeader = true
+	return s.ResponseWriter.Write(body)
+}
+
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
@@ -230,10 +267,12 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	s.sessions[id] = session{Subject: claims.Subject, User: claims.PreferredUsername, Email: claims.Email, AccessToken: tokens.AccessToken, Expires: s.now().Add(ttl)}
 	s.mu.Unlock()
 	http.SetCookie(w, s.cookie(s.signID(id), int(ttl.Seconds())))
+	log.Printf("OIDC login succeeded: user=%q", claims.PreferredUsername)
 	http.Redirect(w, r, a.ReturnTo, http.StatusSeeOther)
 }
 
 func (s *Server) callbackFailure(w http.ResponseWriter, r *http.Request, code string) {
+	log.Printf("OIDC login rejected: %s", code)
 	http.Redirect(w, r, "/login?auth_error="+url.QueryEscape(code), http.StatusSeeOther)
 }
 
@@ -310,6 +349,9 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Origin") != expected {
 		s.fail(w, http.StatusForbidden, "invalid_origin")
 		return
+	}
+	if sess, ok := s.current(r); ok {
+		log.Printf("logout: user=%q", sess.User)
 	}
 	s.clearSession(w, r)
 	if s.cfg.EndSessionURL == "" {

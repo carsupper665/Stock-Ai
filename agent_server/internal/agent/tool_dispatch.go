@@ -53,3 +53,20 @@ func dependencyReasonCode(err error) string {
 	}
 	return "DEPENDENCY_UNAVAILABLE"
 }
+
+// toolErrorCode returns the code of a failed Tool result, or "" when the Tool succeeded.
+func toolErrorCode(result json.RawMessage) string {
+	var envelope struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(result, &envelope) != nil || envelope.OK {
+		return ""
+	}
+	if envelope.Error.Code == "" {
+		return "UNKNOWN"
+	}
+	return envelope.Error.Code
+}

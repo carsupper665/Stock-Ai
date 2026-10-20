@@ -17,7 +17,7 @@ func isHarnessType(kind string) bool { return kind == "codex" || kind == "claude
 func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provider Provider, credential, model string, request providers.GenerateRequest, options map[string]json.RawMessage) {
 	setup, err := webharness.ResolveHarness(provider.Type, provider.Config, credential, request.ConversationID != nil, options)
 	if err != nil {
-		writeProviderError(w, err)
+		writeProviderError(w, provider, err)
 		return
 	}
 	effort, authFile := setup.Effort, setup.AuthFile
@@ -58,7 +58,7 @@ func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provide
 			FallbackReason: response.FallbackReason, InvocationCount: response.InvocationCount})
 		return
 	}
-	writeProviderError(w, webharness.HarnessProviderError(provider.Type, err))
+	writeProviderError(w, provider, webharness.HarnessProviderError(provider.Type, err))
 }
 
 func normalizeHarnessMessages(messages []providers.Message) []webharness.WebHarnessMessage {

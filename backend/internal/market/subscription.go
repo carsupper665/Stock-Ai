@@ -17,6 +17,9 @@ func (r *Runtime) activateLocked(e *entry) {
 	e.state = StateActivating
 	e.lastErr = nil
 
+	if r.log != nil {
+		r.log.Infof(context.Background(), "%s %s 開始訂閱行情", e.market, e.symbol)
+	}
 	src := r.sources[e.market]
 	r.wg.Add(1)
 	go r.stream(ctx, e, src)

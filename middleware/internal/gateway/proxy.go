@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -24,13 +25,13 @@ type credentialContextKey struct{}
 func (s *Server) newProxies() error {
 	privateCredentials := []string{s.cfg.AgentAdminToken, s.cfg.LLMAdminToken, s.cfg.LLMRuntimeToken}
 	var err error
-	if s.backend, err = proxy(s.cfg.BackendURL, "", func(request *http.Request) string { return requestCredential(request) }, false, nil); err != nil {
+	if s.backend, err = proxy("backend", s.cfg.BackendURL, "", func(request *http.Request) string { return requestCredential(request) }, false, nil); err != nil {
 		return err
 	}
-	if s.agent, err = proxy(s.cfg.AgentURL, "/agent", func(*http.Request) string { return "Bearer " + s.cfg.AgentAdminToken }, true, privateCredentials); err != nil {
+	if s.agent, err = proxy("agent-server", s.cfg.AgentURL, "/agent", func(*http.Request) string { return "Bearer " + s.cfg.AgentAdminToken }, true, privateCredentials); err != nil {
 		return err
 	}
-	s.llm, err = proxy(s.cfg.LLMURL, "/llm", func(request *http.Request) string {
+	s.llm, err = proxy("llm-provider-server", s.cfg.LLMURL, "/llm", func(request *http.Request) string {
 		if request.URL.Path == "/llm/v1/models" && request.Method == http.MethodGet {
 			return "Bearer " + s.cfg.LLMRuntimeToken
 		}
@@ -203,7 +204,7 @@ func requestCredential(request *http.Request) string {
 	return value
 }
 
-func proxy(address, prefix string, credential func(*http.Request) string, private bool, secrets []string) (*httputil.ReverseProxy, error) {
+func proxy(name, address, prefix string, credential func(*http.Request) string, private bool, secrets []string) (*httputil.ReverseProxy, error) {
 	u, err := url.Parse(address)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("middleware upstream must be an HTTP(S) URL without credentials, query or fragment")
@@ -212,10 +213,12 @@ func proxy(address, prefix string, credential func(*http.Request) string, privat
 		ModifyResponse: func(response *http.Response) error {
 			if private {
 				if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+					log.Printf("upstream %s rejected the service credential: %s %s -> %d", name, response.Request.Method, response.Request.URL.Path, response.StatusCode)
 					replaceResponse(response, http.StatusBadGateway, `{"error":"upstream_authentication_failed","message":"Service credentials were rejected."}`)
 					return nil
 				}
 				if responseDisclosesCredential(response, secrets) {
+					log.Printf("upstream %s response failed the credential disclosure check and was withheld: %s %s", name, response.Request.Method, response.Request.URL.Path)
 					replaceResponse(response, http.StatusBadGateway, `{"error":"upstream_response_rejected","message":"Service returned an unsafe response."}`)
 					return nil
 				}
@@ -233,7 +236,8 @@ func proxy(address, prefix string, credential func(*http.Request) string, privat
 				request.Out.Header.Set("Authorization", value)
 			}
 		},
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, request *http.Request, err error) {
+			log.Printf("upstream %s unavailable: %s %s: %v", name, request.Method, request.URL.Path, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`{"error":"upstream_unavailable","message":"Service is unavailable."}`))
