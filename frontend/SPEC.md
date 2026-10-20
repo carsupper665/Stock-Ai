@@ -246,6 +246,8 @@ async function create(form) {
 
 輪詢（X-06，沒有 WebSocket）由頁面自己 `setInterval` + `onUnmounted` 清掉：running Session 的 `runs/current` 3 秒、行情 5 秒、殼的服務狀態燈 30 秒。非 running 不輪詢。
 
+Run 明細選中進行中的 Run 時，`Runs.vue` 另開一條 `EventSource`（`runs/{run_id}/stream`，靠 middleware 的 session cookie）收模型正在吐的字：`call` 換到新的模型呼叫、`delta` 追加文字、`end` 關掉並請頁面立刻重抓。這些字只顯示在還沒結束（沒有 `ended_at`）的 model_call 上，結束後以 progress 存下的內容為準；換選 Run、Run 結束或卸載都要 `close()`。輪詢失敗時頁面保留上一次的內容，只多一行錯誤，不卸載 Run 明細。
+
 殼的 `<RouterView :key="route.fullPath" />` 讓路由參數或 query 一變就整頁重建，`useLoad` 自然重跑：
 `/accounts/a` 換到 `/accounts/b`、`?status=open` 換到 `?status=filled`，頁面都不用自己 watch 路由。
 

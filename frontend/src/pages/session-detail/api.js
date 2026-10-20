@@ -12,6 +12,8 @@ export const getRun = (id, run) => agent('GET', `/sessions/${id}/runs/${run}`)
 export const retryRun = (id, run) => agent('POST', `/sessions/${id}/runs/${run}/retry`)
 export const currentRun = (id) => agent('GET', `/sessions/${id}/runs/current`)
 export const downloadHistory = (id, run) => apiFile(`/agent/api/v1/sessions/${encodeURIComponent(id)}/runs/${run}/history`, null)
+// 進行中 Run 的模型輸出走 SSE（EventSource 帶 middleware 的 session cookie，不能自訂 header）
+export const runStreamURL = (id, run) => `${import.meta.env.VITE_API_BASE ?? ''}/agent/api/v1/sessions/${encodeURIComponent(id)}/runs/${run}/stream`
 export const listMemories = (id) => agent('GET', `/sessions/${id}/memories`)
 export const getMemory = (id, memory) => agent('GET', `/sessions/${id}/memories/${encodeURIComponent(memory)}`)
 export const deleteMemory = (id, memory) => agent('DELETE', `/sessions/${id}/memories/${encodeURIComponent(memory)}`)

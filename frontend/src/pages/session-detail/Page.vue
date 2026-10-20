@@ -165,7 +165,7 @@ const cloning = ref(false)
       </div>
 
       <Overview v-if="tab === 'overview'" :session="s" :account="data.account" @changed="reload" @go-run="(run) => go({ tab: 'runs', run, page: undefined })" />
-      <Runs v-else-if="tab === 'runs'" :session="s" :runs="data.runs" :page="page" :initial="route.query.run" @page="(p) => go({ page: p, run: undefined })" @retried="reload" />
+      <Runs v-else-if="tab === 'runs'" :session="s" :runs="data.runs" :page="page" :initial="route.query.run" @page="(p) => go({ page: p, run: undefined })" @retried="reload" @ended="reload" />
       <Memories v-else-if="tab === 'memory'" :session="s" />
       <Monitor v-else :session="s" />
     </template>

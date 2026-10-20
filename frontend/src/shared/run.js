@@ -108,7 +108,9 @@ function compactionNotice(entry) {
 
 // One Run reads as a conversation: each model decision is a message, the tools it called are
 // collapsed under it, and retries, repairs and compactions are short notices between them.
-export function conversation(run) {
+// live.calls holds what a still-streaming model call has sent so far, keyed by its progress index;
+// once the call ends, the text stored in progress is what is shown.
+export function conversation(run, live) {
   const running = run?.status === 'running'
   const items = []
   const byCallID = new Map()
@@ -118,12 +120,14 @@ export function conversation(run) {
       const terminal = entry.attempt_type === 'terminal'
       const error = modelAttemptError(entry.error)
       const envelope = finalEnvelope(entry.content)
+      const streamed = entry.ended_at ? null : live?.calls?.[index]
+      const content = entry.content ?? streamed?.content
       const model = {
         key: index, kind: 'model', terminal,
         title: terminal ? '收尾' : `決策 ${entry.iteration}`,
         meta: [entry.model_name, entry.attempt > 1 ? `第 ${entry.attempt} 次嘗試` : null].filter(Boolean).join(' · '),
-        reasoning: explicitReasoning(entry),
-        content: envelope ? '' : typeof entry.content === 'string' ? entry.content.trim() : '',
+        reasoning: explicitReasoning(entry) || explicitReasoning(streamed ?? {}),
+        content: envelope ? '' : typeof content === 'string' ? content.trim() : '',
         envelope, error,
         thinking: running && !entry.ended_at && !error,
         tools: [],

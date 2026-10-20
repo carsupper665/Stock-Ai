@@ -1,13 +1,13 @@
 <script setup>
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import { downloadHistory, getRun, retryRun } from './api.js'
+import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { downloadHistory, getRun, retryRun, runStreamURL } from './api.js'
 
 import { duration, fmtClock, tone } from '../../shared/format.js'
 import { conversation, explainError } from '../../shared/run.js'
 import { say } from '../../shared/toast.js'
 
 const props = defineProps({ session: Object, runs: Array, page: Number, initial: String })
-const emit = defineEmits(['page', 'retried'])
+const emit = defineEmits(['page', 'retried', 'ended'])
 
 // 選中的 Run 只放本地狀態：放進 query 會讓整頁重建重抓（殼的 RouterView 以 fullPath 為 key）
 const selected = ref(Number(props.initial) || props.runs.at(-1)?.run_id)
@@ -25,15 +25,53 @@ watch([selected, () => props.runs], async () => {
   try { const result = await getRun(props.session.id, selected.value); if (request === selectionRequest) loadedRun.value = result }
   catch (e) { if (request === selectionRequest) runError.value = e.message }
 }, { immediate: true })
+// 進行中的 Run 用 SSE 收模型正在吐的字（Agent Server 只放在記憶體）；工具、狀態等結構照舊靠輪詢。
+// Run 結束時通知頁面立刻重抓，最終內容以 progress 為準。
+const live = reactive({ calls: {}, current: null })
+let stream = null
+let streamedRun = null
+function closeStream() {
+  stream?.close()
+  stream = null
+  streamedRun = null
+}
+watch(() => (run.value?.status === 'running' ? run.value.run_id : null), (runID) => {
+  if (runID === streamedRun) return
+  closeStream()
+  live.calls = {}
+  live.current = null
+  if (runID == null || typeof EventSource === 'undefined') return
+  streamedRun = runID
+  stream = new EventSource(runStreamURL(props.session.id, runID))
+  stream.addEventListener('call', (e) => {
+    const { index } = JSON.parse(e.data)
+    live.current = index
+    live.calls[index] = { content: '', reasoning: '' }
+  })
+  stream.addEventListener('delta', (e) => {
+    const delta = JSON.parse(e.data)
+    const call = live.calls[live.current]
+    if (!call) return
+    call.content += delta.content ?? ''
+    call.reasoning += delta.reasoning ?? ''
+  })
+  stream.addEventListener('end', () => {
+    closeStream()
+    emit('ended')
+  })
+}, { immediate: true })
+onUnmounted(closeStream)
 const err = computed(() => explainError(run.value?.error))
-const history = computed(() => conversation(run.value))
+const history = computed(() => conversation(run.value, live))
 // 有新內容時，本來停在底部才跟著捲；輪詢帶回同樣的內容不動捲動位置。
 // 「在不在底部」在 DOM 更新前當場量：展開／收合 <details> 不會觸發 scroll 事件，事先記的值會過期。
 const chat = ref(null)
 const contentKey = computed(() => {
   const progress = run.value?.progress ?? []
   const last = progress.at(-1)
-  return [run.value?.run_id, progress.length, last?.content?.length ?? 0, last?.reasoning?.length ?? 0, last?.ended_at ?? ''].join('|')
+  const streaming = live.calls[live.current]
+  return [run.value?.run_id, progress.length, last?.content?.length ?? 0, last?.reasoning?.length ?? 0, last?.ended_at ?? '',
+    streaming?.content.length ?? 0, streaming?.reasoning.length ?? 0].join('|')
 })
 let shownRun = null
 watch(contentKey, async () => {
@@ -45,6 +83,8 @@ watch(contentKey, async () => {
   if (atBottom && chat.value) chat.value.scrollTop = chat.value.scrollHeight
 }, { immediate: true })
 const firstLine = (text) => text.split('\n').find((line) => line.trim())?.trim() ?? ''
+// 串流中收合的思考過程顯示最新一行，看得出模型還在動
+const lastLine = (text) => text.split('\n').findLast((line) => line.trim())?.trim() ?? ''
 const icons = { ok: '✓', error: '✗', denied: '⊘' }
 const retrying = ref(false)
 const retryReason = computed(() => {
@@ -189,7 +229,7 @@ function matchedText(t) {
             <div class="who"><span class="avatar" aria-hidden="true">AI</span><b>{{ item.title }}</b><span data-tone="mute">{{ item.meta }}</span></div>
             <div v-if="item.error" class="callout" data-tone="neg"><span class="mono">{{ item.error.code }}</span> · {{ item.error.message }}</div>
             <details v-if="item.reasoning" class="reasoning">
-              <summary><span class="label">思考過程</span><span class="preview">{{ firstLine(item.reasoning) }}</span></summary>
+              <summary><span class="label">思考過程</span><span class="preview">{{ item.thinking ? lastLine(item.reasoning) : firstLine(item.reasoning) }}</span></summary>
               <div class="text">{{ item.reasoning }}</div>
             </details>
             <div v-if="item.content" class="text">{{ item.content }}</div>

@@ -56,7 +56,7 @@ Agent（LLM 虛擬帳號）不用前端，拿 Account Token 直接打 API（B §
 | X-03 | 時間全是 UTC／RFC3339。顯示本地時間；列表可用相對時間（「3 分鐘前」）、明細要完整時間（建議） | B §15；F §10.1 |
 | X-04 | 數字只格式化，不做金額運算 | F §10.1 |
 | X-05 | 錯誤：三個服務三種信封（見 §7），使用者只要看到給人看的訊息；可重試的（`market_unavailable`、`market_timeout`、`RATE_LIMITED`、`PROVIDER_TIMEOUT`）要能重試。middleware session request 收到 401 → 清除顯示身分並回登入頁 | F §5、§10.5；A §54；L §22 |
-| X-06 | 沒有 WebSocket／SSE，全部輪詢或手動重載。running 中的 Session 輪詢 `runs/current`；價格輪詢；其他頁面要有「重新整理」並顯示最後更新時間（建議） | A §46；F §6 |
+| X-06 | 沒有 WebSocket，其餘全部輪詢或手動重載。running 中的 Session 輪詢 `runs/current`；價格輪詢；其他頁面要有「重新整理」並顯示最後更新時間（建議）。唯一例外：Run 明細選中進行中的 Run 時，用 SSE（`runs/{run_id}/stream`）即時顯示模型正在吐的字，結構照舊靠輪詢 | A §46；F §6 |
 | X-07 | 追溯：重要資料都能回到 `session_id + run_id`。Ledger 條目 → Run；Memory → Run；Event → 建立它的 Run；Run → 完整歷史。任何地方出現 `run_id` 都可以點過去 | A §1、§53、§59 |
 | X-08 | 破壞性操作要確認，並把後果講清楚（下表） | — |
 | X-09 | 一鍵複製：Account Token、`session_id`、`run_id`、Provider id、Memory id（建議） | — |
