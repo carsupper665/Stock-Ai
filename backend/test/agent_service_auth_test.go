@@ -14,7 +14,7 @@ import (
 	"backend/internal/logging"
 )
 
-func TestAgentServiceTokenOnlyReadsAccountLookup(t *testing.T) {
+func TestAgentServiceTokenOnlyReadsAccountLookupAndPrice(t *testing.T) {
 	t.Setenv("USER_TOKEN", "middleware-internal-user-token")
 	t.Setenv("AGENT_SERVICE_TOKEN", "dedicated-agent-account-reader")
 	cfg, err := config.Load("")
@@ -52,6 +52,8 @@ func TestAgentServiceTokenOnlyReadsAccountLookup(t *testing.T) {
 		{"GET", "/v1/accounts/acc_service", "dedicated-agent-account-reader", 200},
 		{"GET", "/v1/accounts/acc_service", "wrong-token", 401},
 		{"GET", "/v1/accounts/acc_service", "", 401},
+		{"GET", "/v1/market/price?symbol=BTCUSDT", "dedicated-agent-account-reader", 200},
+		{"GET", "/v1/market/ohlcv?symbol=BTCUSDT&interval=1m", "dedicated-agent-account-reader", 401},
 		{"GET", "/v1/accounts", "dedicated-agent-account-reader", 401},
 		{"DELETE", "/v1/accounts/acc_service", "dedicated-agent-account-reader", 401},
 		{"POST", "/v1/orders", "dedicated-agent-account-reader", 401},
@@ -66,7 +68,7 @@ func TestAgentServiceTokenOnlyReadsAccountLookup(t *testing.T) {
 		if out.Code != tc.want {
 			t.Errorf("%s %s: got %d, want %d", tc.method, tc.path, out.Code, tc.want)
 		}
-		if out.Code == http.StatusOK {
+		if out.Code == http.StatusOK && tc.path == "/v1/accounts/acc_service" {
 			var account struct{ ID, Token string }
 			if json.Unmarshal(out.Body.Bytes(), &account) != nil || account.ID != "acc_service" || account.Token != "account-only-token" {
 				t.Fatal("Agent lookup did not return the bound Account runtime token")

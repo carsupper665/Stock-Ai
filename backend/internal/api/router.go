@@ -62,7 +62,7 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 	v1.GET("/health", s.health)
 	v1.GET("/me", s.requireAny(), s.me)
 
-	v1.GET("/accounts/:id", s.requireAccountReader(), s.getAccount)
+	v1.GET("/accounts/:id", s.allowAgentService(s.requireUser()), s.getAccount)
 
 	// 帳號管理：只有 USER Token
 	admin := v1.Group("/accounts", s.requireUser())
@@ -83,8 +83,8 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 	// 帳號自查：Account Token 查自己
 	v1.GET("/account", s.requireAny(), s.selfAccount)
 
-	// 行情：USER 與 Account 都可以讀
-	v1.GET("/market/price", s.requireAny(), s.marketPrice)
+	// 行情：USER 與 Account 都可以讀；價格也給 Agent Server 的價格事件讀
+	v1.GET("/market/price", s.allowAgentService(s.requireAny()), s.marketPrice)
 	v1.GET("/market/ohlcv", s.requireAny(), s.marketOHLCV)
 	v1.GET("/market/info", s.requireAny(), s.marketInfo)
 	// 訂閱狀態是營運資訊，只給 USER

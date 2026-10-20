@@ -30,15 +30,17 @@ func (s *Server) requireUser() gin.HandlerFunc {
 	}
 }
 
-// The Agent credential only permits reading one Account, including its runtime token.
-func (s *Server) requireAccountReader() gin.HandlerFunc {
+// allowAgentService lets the Agent credential through one route and leaves every other caller to
+// fallback. Agent Server only reads one Account, including its runtime token, and market prices
+// for its price Events.
+func (s *Server) allowAgentService(fallback gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := auth.BearerToken(c.GetHeader("Authorization"))
 		if strings.Count(token, ".") != 2 && s.cfg.AgentServiceToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.AgentServiceToken)) == 1 {
 			c.Next()
 			return
 		}
-		s.requireUser()(c)
+		fallback(c)
 	}
 }
 
