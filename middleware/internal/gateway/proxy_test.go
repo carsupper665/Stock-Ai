@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"io"
@@ -345,5 +346,69 @@ func TestOAuth2AuthEndpointIsRemoved(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound || response.Header().Get("X-Auth-Request-Access-Token") != "" {
 		t.Fatalf("/oauth2/auth=%d headers=%v", response.Code, response.Header())
+	}
+}
+
+func TestProxyForwardsTheRunStreamAsEachEventArrives(t *testing.T) {
+	release := make(chan struct{})
+	handler, cookie := proxyFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/sessions/s_1/runs/3/stream" {
+			t.Errorf("upstream path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Accel-Buffering", "no")
+		_, _ = w.Write([]byte("event: delta\ndata: {\"content\":\"first\"}\n\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = w.Write([]byte("event: end\ndata: {}\n\n"))
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/agent/api/v1/sessions/s_1/runs/3/stream", nil)
+	request.AddCookie(cookie)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" ||
+		response.Header.Get("X-Accel-Buffering") != "no" {
+		t.Fatalf("stream = %d %q %q", response.StatusCode, response.Header.Get("Content-Type"), response.Header.Get("X-Accel-Buffering"))
+	}
+	lines := bufio.NewReader(response.Body)
+	first := make(chan string, 1)
+	go func() { line, _ := lines.ReadString('\n'); first <- line }()
+	select {
+	case line := <-first:
+		if line != "event: delta\n" {
+			t.Fatalf("first line = %q", line)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first event was held back until the upstream finished")
+	}
+	close(release)
+	rest, _ := io.ReadAll(lines)
+	if !strings.HasSuffix(string(rest), "event: end\ndata: {}\n\n") {
+		t.Fatalf("rest of stream = %q", rest)
+	}
+
+	post := httptest.NewRequest(http.MethodPost, "/agent/api/v1/sessions/s_1/runs/3/stream", nil)
+	post.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, post)
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST stream = %d, want 405", recorder.Code)
 	}
 }

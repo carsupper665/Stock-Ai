@@ -116,7 +116,7 @@ func agentMethods(rawPath string) []string {
 		return []string{http.MethodGet, http.MethodDelete}
 	case len(parts) == 3 && parts[1] == "tools" && parts[2] == "stats":
 		return []string{http.MethodGet}
-	case len(parts) == 4 && parts[1] == "runs" && parts[3] == "history":
+	case len(parts) == 4 && parts[1] == "runs" && (parts[3] == "history" || parts[3] == "stream"):
 		return []string{http.MethodGet}
 	case len(parts) == 4 && parts[1] == "runs" && parts[3] == "retry":
 		return []string{http.MethodPost}
@@ -217,7 +217,7 @@ func proxy(name, address, prefix string, credential func(*http.Request) string, 
 					replaceResponse(response, http.StatusBadGateway, `{"error":"upstream_authentication_failed","message":"Service credentials were rejected."}`)
 					return nil
 				}
-				if responseDisclosesCredential(response, secrets) {
+				if !liveRunStream(response.Request.URL.Path) && responseDisclosesCredential(response, secrets) {
 					log.Printf("upstream %s response failed the credential disclosure check and was withheld: %s %s", name, response.Request.Method, response.Request.URL.Path)
 					replaceResponse(response, http.StatusBadGateway, `{"error":"upstream_response_rejected","message":"Service returned an unsafe response."}`)
 					return nil
@@ -243,6 +243,14 @@ func proxy(name, address, prefix string, credential func(*http.Request) string, 
 			_, _ = w.Write([]byte(`{"error":"upstream_unavailable","message":"Service is unavailable."}`))
 		},
 	}, nil
+}
+
+// liveRunStream is the Agent Server's Run stream (Server-Sent Events of model text). It is passed
+// through as it arrives: reading it whole for the disclosure check would hold every event until
+// the Run ends. Services are responsible for never putting a credential in a response.
+func liveRunStream(path string) bool {
+	parts := routeParts(path, "/api/v1/sessions")
+	return len(parts) == 4 && parts[1] == "runs" && parts[3] == "stream"
 }
 
 func stripBoundaryHeaders(header http.Header) {
