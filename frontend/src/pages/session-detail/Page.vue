@@ -92,9 +92,10 @@ const cloning = ref(false)
 
 <template>
   <article>
+    <!-- 輪詢失敗只加一行錯誤，上一次的內容留著：卸載會把選中的 Run、展開狀態和捲動位置全部重置 -->
     <p v-if="error" class="callout" data-tone="neg">{{ error.message }}</p>
-    <p v-else-if="loading && !data" class="note">載入中…</p>
-    <template v-else-if="s">
+    <p v-if="loading && !data" class="note">載入中…</p>
+    <template v-if="s">
       <div class="row head">
         <button @click="router.push({ name: 'sessions' })">← Session 總覽</button>
         <h1>{{ s.name }}</h1>

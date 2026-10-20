@@ -19,24 +19,30 @@ watch([selected, () => props.runs], async () => {
   const request = ++selectionRequest
   runError.value = ''
   if (!selected.value || props.runs.some((r) => r.run_id === selected.value)) { loadedRun.value = null; return }
-  if (loadedRun.value?.run_id === selected.value) return
-  loadedRun.value = null
+  // 不在這一頁的 Run 跑完就不再變；還在跑就跟著每次輪詢重抓，舊畫面留著直到新的到
+  if (loadedRun.value?.run_id === selected.value) { if (loadedRun.value.status !== 'running') return }
+  else loadedRun.value = null
   try { const result = await getRun(props.session.id, selected.value); if (request === selectionRequest) loadedRun.value = result }
   catch (e) { if (request === selectionRequest) runError.value = e.message }
 }, { immediate: true })
 const err = computed(() => explainError(run.value?.error))
 const history = computed(() => conversation(run.value))
-// 停在底部時跟著新內容捲動；往上翻閱時不打斷
+// 有新內容時，本來停在底部才跟著捲；輪詢帶回同樣的內容不動捲動位置。
+// 「在不在底部」在 DOM 更新前當場量：展開／收合 <details> 不會觸發 scroll 事件，事先記的值會過期。
 const chat = ref(null)
-let stick = true
-function onScroll() {
+const contentKey = computed(() => {
+  const progress = run.value?.progress ?? []
+  const last = progress.at(-1)
+  return [run.value?.run_id, progress.length, last?.content?.length ?? 0, last?.reasoning?.length ?? 0, last?.ended_at ?? ''].join('|')
+})
+let shownRun = null
+watch(contentKey, async () => {
   const el = chat.value
-  if (el) stick = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-}
-watch(selected, () => { stick = true })
-watch(history, async () => {
+  const switched = run.value?.run_id !== shownRun
+  shownRun = run.value?.run_id
+  const atBottom = switched || !el || el.scrollHeight - el.scrollTop - el.clientHeight < 80
   await nextTick()
-  if (stick && chat.value) chat.value.scrollTop = chat.value.scrollHeight
+  if (atBottom && chat.value) chat.value.scrollTop = chat.value.scrollHeight
 }, { immediate: true })
 const firstLine = (text) => text.split('\n').find((line) => line.trim())?.trim() ?? ''
 const icons = { ok: '✓', error: '✗', denied: '⊘' }
@@ -162,7 +168,7 @@ function matchedText(t) {
         <div v-if="err.hint" class="note">{{ err.hint }}</div>
       </div>
 
-      <div ref="chat" class="chat" @scroll="onScroll">
+      <div ref="chat" class="chat">
         <div class="wake">
           <span class="eyebrow">喚醒原因</span>
           <template v-if="triggersOf(run)">
@@ -309,8 +315,6 @@ function matchedText(t) {
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 60vh;
-  overflow: auto;
 }
 .reasoning {
   border-left: 2px solid var(--line2);
@@ -386,8 +390,6 @@ function matchedText(t) {
   flex-direction: column;
   gap: 8px;
   padding: 4px 12px 10px;
-  max-height: 46vh;
-  overflow: auto;
 }
 .notice {
   align-self: center;
