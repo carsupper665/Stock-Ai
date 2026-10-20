@@ -1592,9 +1592,25 @@ GET /api/v1/sessions/{session_id}/runs/current
 GET /api/v1/sessions/{session_id}/runs/{run_id}
 
 GET /api/v1/sessions/{session_id}/runs/{run_id}/history
+
+GET /api/v1/sessions/{session_id}/runs/{run_id}/stream
 ```
 
 `runs/current` 用於 Control Panel Polling。
+
+`runs/{run_id}/stream` 是 Server-Sent Events（`text/event-stream`，帶
+`X-Accel-Buffering: no`），只送模型呼叫進行中已經吐出的字，讓畫面即時顯示：
+
+```text
+event: call    data: {"index":7}          正在串流的 model_call 在 progress 的位置；新的呼叫開始就重來
+event: delta   data: {"content":"…","reasoning":"…"}   追加的文字，空的欄位省略
+event: end     data: {}                   這個 Run 已經不在跑（或從沒在跑）；之後不再有事件
+: ping                                    每 15 秒，讓代理不會把安靜的連線切斷
+```
+
+中途連上的人會先拿到目前呼叫的 `call` 和一則累積到現在的 `delta`。這些字只在記憶體裡，
+呼叫結束後以 progress 的最終內容為準；工具、狀態等結構照舊靠輪詢 Run。跟不上的連線會被直接
+關閉，瀏覽器重連後重新拿 snapshot。
 
 例如：
 
@@ -2038,7 +2054,7 @@ Runtime configuration is read at process startup:
 | `AGENT_SERVER_DEFAULT_PROMPT` | `You are an autonomous trading agent.` | Prompt used for omitted or empty Session prompt |
 | `AGENT_SERVER_DEFAULT_MAX_LOOP` | `20` | Positive default LLM-decision limit |
 | `AGENT_SERVER_DEFAULT_MAX_TOOL_CALL` | `40` | Positive default Tool-attempt limit |
-| `AGENT_SERVER_REQUEST_TIMEOUT` | `30s` | Positive timeout for each Gateway/catalog and control-plane dependency request |
+| `AGENT_SERVER_REQUEST_TIMEOUT` | `30s` | Positive timeout for each Gateway/catalog and control-plane dependency request. For Generate it bounds only silence: the request asks for the Gateway's NDJSON stream (`Accept: application/x-ndjson`), and every delta or ping line (the Gateway pings every 5 s) restarts the timer, so a model may think as long as the Gateway keeps answering. Keep it above 5 s |
 | `AGENT_SERVER_TOOL_TIMEOUT` | `10s` | Positive timeout for each Tool attempt |
 | `AGENT_SERVER_STOP_TIMEOUT` | `5s` | Positive wait for canceled Run work to leave |
 | `AGENT_SERVER_EVENT_SCAN_INTERVAL` | `1s` | Positive interval shared by the local and price Event resident tasks (§63.4) |
@@ -2268,6 +2284,9 @@ accepted Tool attempt, including errors.
 
 Generate transport failures, timeouts, rate limits, provider-unavailable responses,
 and malformed successful Gateway responses are retried in place at most three times.
+A streamed Generate's `error` line is classified exactly like the same status and code
+in a JSON error, and a stream that ends without its `done` or `error` line is a
+retryable malformed response.
 Cancellation, authentication failures, invalid requests, invalid Provider
 configuration, and missing Harness configuration are not retried. Each attempt has
 its own persisted model trace and contributes to `model_call_count`; known usage is

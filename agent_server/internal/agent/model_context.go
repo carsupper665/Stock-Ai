@@ -306,7 +306,7 @@ func (r *AgentRuntime) summarizeHistory(ctx context.Context, session Session, ru
 	instruction := compactionInstruction
 	messages := []gatewayMessage{{Role: "system", Content: &instruction}, {Role: "user", Content: &history}}
 	conversationID := session.ID + "/" + strconv.FormatInt(runID, 10) + "/compaction"
-	response, _, _, err := r.generate(ctx, model, session.ModelLevel, conversationID, messages, false, nil)
+	response, _, _, err := r.generate(ctx, model, session.ModelLevel, conversationID, messages, false, nil, nil)
 	if err != nil {
 		return "", response, err
 	}

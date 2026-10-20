@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -187,7 +190,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			attemptOffset = finalizationAttempts
 		}
 		response, attempts, ok := r.callModel(ctx, session, runID, iteration, attemptType, &messages, toolsEnabled,
-			attemptLimit, attemptOffset, &progress, &modelCalls, toolCalls, continuation)
+			attemptLimit, attemptOffset, &progress, &modelCalls, toolCalls, continuation, &active.live)
 		if !ok {
 			return
 		}
@@ -323,7 +326,7 @@ func terminalFinalizationPrompt(reason string) string {
 
 func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int64, iteration int, attemptType string,
 	messages *[]gatewayMessage, toolsEnabled bool, attemptLimit, attemptOffset int, progress *[]traceEntry,
-	modelCalls *int, toolCalls int, continuationState *continuationState,
+	modelCalls *int, toolCalls int, continuationState *continuationState, live *liveOutput,
 ) (gatewayResponse, int, bool) {
 	if ctx.Err() != nil {
 		return gatewayResponse{}, 0, false
@@ -416,7 +419,9 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 		if attempt == 1 {
 			continuation = continuationFor(continuationState, projection.Messages)
 		}
-		response, requestBytes, dispatched, generateErr := r.generate(ctx, model, session.ModelLevel, session.ID+"/"+strconv.FormatInt(runID, 10), projection.Messages, toolsEnabled, continuation)
+		live.begin(len(*progress) - 1)
+		response, requestBytes, dispatched, generateErr := r.generate(ctx, model, session.ModelLevel, session.ID+"/"+strconv.FormatInt(runID, 10), projection.Messages, toolsEnabled, continuation, live.append)
+		live.end()
 		entry := &(*progress)[len(*progress)-1]
 		entry.RequestBytes = requestBytes
 		if !dispatched {
@@ -499,7 +504,11 @@ func retryableGenerateError(err error) bool {
 	return errors.As(err, &generateErr) && generateErr.retryable
 }
 
-func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *string, conversationID string, messages []gatewayMessage, toolsEnabled bool, continuation *gatewayContinuation) (gatewayResponse, int, bool, error) {
+// generate sends one Generate and reads the Gateway's NDJSON stream. RequestTimeout bounds only
+// silence: the Gateway pings every few seconds while the model works, so a model that thinks for
+// minutes still succeeds, while a Gateway that goes quiet fails like any other timeout. onDelta,
+// when set, receives the streamed text. A Gateway that answers with one JSON object is read as before.
+func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *string, conversationID string, messages []gatewayMessage, toolsEnabled bool, continuation *gatewayContinuation, onDelta func(content, reasoning string)) (gatewayResponse, int, bool, error) {
 	options := map[string]any{}
 	if level != nil {
 		options["model_level"] = *level
@@ -529,25 +538,34 @@ func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *
 	if len(encoded) > maxGatewayRequestBytes {
 		return gatewayResponse{}, len(encoded), false, &gatewayGenerateError{message: "CONTEXT_LIMIT_EXCEEDED: Gateway request exceeds 1 MiB"}
 	}
-	callContext, cancel := context.WithTimeout(ctx, r.config.RequestTimeout)
-	defer cancel()
+	callContext, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	idle := time.AfterFunc(r.config.RequestTimeout, func() { cancel(context.DeadlineExceeded) })
+	defer idle.Stop()
+	// interrupted reports a canceled or silent call; only silence, not a stopped Run, is retried.
+	interrupted := func() error {
+		cause := context.Cause(callContext)
+		return &gatewayGenerateError{
+			message:   "request canceled or timed out: " + cause.Error(),
+			retryable: ctx.Err() == nil && errors.Is(cause, context.DeadlineExceeded),
+		}
+	}
 	request, err := http.NewRequestWithContext(callContext, http.MethodPost, strings.TrimRight(r.config.GatewayURL, "/")+"/v1/generate", bytes.NewReader(encoded))
 	if err != nil {
 		return gatewayResponse{}, len(encoded), false, &gatewayGenerateError{message: "unable to create Gateway request"}
 	}
 	request.Header.Set("Authorization", "Bearer "+r.config.GatewayRuntimeToken)
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/x-ndjson")
 	response, err := r.httpClient.Do(request)
 	if err != nil {
 		if callContext.Err() != nil {
-			return gatewayResponse{}, len(encoded), true, &gatewayGenerateError{
-				message:   "request canceled or timed out: " + callContext.Err().Error(),
-				retryable: ctx.Err() == nil && errors.Is(callContext.Err(), context.DeadlineExceeded),
-			}
+			return gatewayResponse{}, len(encoded), true, interrupted()
 		}
 		return gatewayResponse{}, len(encoded), true, &gatewayGenerateError{message: "Gateway request failed", retryable: true}
 	}
 	defer response.Body.Close()
+	idle.Reset(r.config.RequestTimeout)
 	if response.StatusCode != http.StatusOK {
 		var failure struct {
 			Error struct {
@@ -556,27 +574,105 @@ func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *
 			} `json:"error"`
 		}
 		_ = decodeDependencyJSON(response.Body, &failure)
-		retryable := response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500
-		switch failure.Error.Code {
-		case "AUTHENTICATION_FAILED", "REQUEST_INVALID", "PROVIDER_INVALID_CONFIG", "HARNESS_NOT_CONFIGURED", "HARNESS_LOGIN_REQUIRED", "HARNESS_VERSION_MISMATCH":
-			retryable = false
-		case "PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT", "RATE_LIMITED":
-			retryable = true
-		}
-		if failure.Error.Code == "" {
-			return gatewayResponse{}, len(encoded), true, &gatewayGenerateError{message: fmt.Sprintf("Gateway returned HTTP %d", response.StatusCode), retryable: retryable}
-		}
-		return gatewayResponse{}, len(encoded), true, &gatewayGenerateError{message: fmt.Sprintf("%s: %s", failure.Error.Code, failure.Error.Message), retryable: retryable}
+		return gatewayResponse{}, len(encoded), true, gatewayFailure(response.StatusCode, failure.Error.Code, failure.Error.Message)
 	}
 	var result gatewayResponse
-	if err := decodeDependencyJSON(response.Body, &result); err != nil {
-		return gatewayResponse{}, len(encoded), true, &gatewayGenerateError{message: "Gateway returned an invalid response", retryable: true}
+	if mediaType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type")); mediaType == "application/x-ndjson" {
+		result, err = readGenerateStream(response.Body, func() { idle.Reset(r.config.RequestTimeout) }, onDelta)
+		if err != nil && callContext.Err() != nil {
+			return gatewayResponse{}, len(encoded), true, interrupted()
+		}
+	} else if decodeDependencyJSON(response.Body, &result) != nil {
+		if callContext.Err() != nil {
+			return gatewayResponse{}, len(encoded), true, interrupted()
+		}
+		err = &gatewayGenerateError{message: "Gateway returned an invalid response", retryable: true}
+	}
+	if err != nil {
+		return gatewayResponse{}, len(encoded), true, err
 	}
 	if result.FinishReason == "" || !validGatewayUsage(result.Usage) || !validGatewayDiagnostics(result.NumTurns, result.TotalCostUSD) ||
 		!validContinuationDiagnostics(result.SessionMode, result.FallbackReason, result.InvocationCount) {
 		return result, len(encoded), true, &gatewayGenerateError{message: "Gateway returned an invalid response", retryable: true}
 	}
 	return result, len(encoded), true, nil
+}
+
+// gatewayFailure classifies a Gateway error, whether it came as an HTTP status or as the error
+// line of a stream.
+func gatewayFailure(status int, code, message string) error {
+	retryable := status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+	switch code {
+	case "AUTHENTICATION_FAILED", "REQUEST_INVALID", "PROVIDER_INVALID_CONFIG", "HARNESS_NOT_CONFIGURED", "HARNESS_LOGIN_REQUIRED", "HARNESS_VERSION_MISMATCH":
+		retryable = false
+	case "PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT", "RATE_LIMITED":
+		retryable = true
+	}
+	if code == "" {
+		return &gatewayGenerateError{message: fmt.Sprintf("Gateway returned HTTP %d", status), retryable: retryable}
+	}
+	return &gatewayGenerateError{message: fmt.Sprintf("%s: %s", code, message), retryable: retryable}
+}
+
+// maxGatewayStreamLine bounds one stream line; the done line carries the whole response.
+const maxGatewayStreamLine = 2 << 20
+
+// readGenerateStream reads delta and ping lines until the done or error line. alive is called
+// for every line, which is what keeps the idle timer from firing.
+func readGenerateStream(body io.Reader, alive func(), onDelta func(content, reasoning string)) (gatewayResponse, error) {
+	lines := bufio.NewReaderSize(body, 64<<10)
+	invalid := &gatewayGenerateError{message: "Gateway returned an invalid response", retryable: true}
+	for {
+		line, err := lines.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			long := append([]byte(nil), line...)
+			for errors.Is(err, bufio.ErrBufferFull) {
+				if len(long) > maxGatewayStreamLine {
+					return gatewayResponse{}, invalid
+				}
+				line, err = lines.ReadSlice('\n')
+				long = append(long, line...)
+			}
+			line = long
+		}
+		if len(bytes.TrimSpace(line)) != 0 {
+			alive()
+			var event struct {
+				Type      string          `json:"type"`
+				Content   string          `json:"content"`
+				Reasoning string          `json:"reasoning"`
+				Status    int             `json:"status"`
+				Response  json.RawMessage `json:"response"`
+				Error     struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(line, &event) != nil {
+				return gatewayResponse{}, invalid
+			}
+			switch event.Type {
+			case "delta":
+				if onDelta != nil {
+					onDelta(event.Content, event.Reasoning)
+				}
+			case "done":
+				var result gatewayResponse
+				if json.Unmarshal(event.Response, &result) != nil {
+					return gatewayResponse{}, invalid
+				}
+				return result, nil
+			case "error":
+				return gatewayResponse{}, gatewayFailure(event.Status, event.Error.Code, event.Error.Message)
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return gatewayResponse{}, &gatewayGenerateError{message: "Gateway stream ended before the response", retryable: true}
+		}
+		if err != nil {
+			return gatewayResponse{}, &gatewayGenerateError{message: "Gateway stream failed", retryable: true}
+		}
+	}
 }
 
 func validGatewayDiagnostics(numTurns *int, totalCostUSD *float64) bool {
@@ -682,6 +778,7 @@ func (r *AgentRuntime) handleRunPersistenceError(sessionID string, runID int64, 
 }
 
 func (r *AgentRuntime) finishActive(sessionID string, active *activeRun) {
+	active.live.close()
 	r.mu.Lock()
 	if r.active[sessionID] == active {
 		delete(r.active, sessionID)

@@ -68,6 +68,7 @@ type activeRun struct {
 	runID  int64
 	cancel context.CancelFunc
 	done   chan struct{}
+	live   liveOutput
 }
 
 type Session struct {

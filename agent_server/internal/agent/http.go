@@ -99,6 +99,10 @@ func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 		r.serveRunHistory(w, request, parts[0], parts[2])
 		return
 	}
+	if len(parts) == 4 && parts[1] == "runs" && parts[3] == "stream" {
+		r.streamRun(w, request, parts[0], parts[2])
+		return
+	}
 	if len(parts) == 4 && parts[1] == "runs" && parts[3] == "retry" {
 		if request.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
