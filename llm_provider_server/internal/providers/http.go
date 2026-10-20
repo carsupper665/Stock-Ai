@@ -1,14 +1,17 @@
 package providers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -22,20 +25,44 @@ type providerCall struct {
 	body    []byte
 }
 
-// postJSON performs the single non-streaming upstream request. Transport, credential and
-// rate-limit failures are shared by every REST Api; any other status is left to the Api.
-func postJSON(ctx context.Context, client *http.Client, call providerCall) (*http.Response, error) {
+// errProviderIdle is the cancellation cause when the Provider sends nothing for the idle timeout.
+var errProviderIdle = idleTimeoutError{}
+
+type idleTimeoutError struct{}
+
+func (idleTimeoutError) Error() string { return "Provider sent nothing within the idle timeout" }
+func (idleTimeoutError) Timeout() bool { return true }
+
+// postJSON performs the single upstream request. It fails only when the Provider stays silent for
+// options.IdleTimeout, before its headers or between two reads of the body, so a model that keeps
+// streaming may take as long as it needs. Transport, credential and rate-limit failures are shared
+// by every REST Api; any other status is left to the Api.
+func postJSON(ctx context.Context, options Options, call providerCall) (*http.Response, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	var idle *time.Timer
+	if options.IdleTimeout > 0 {
+		idle = time.AfterFunc(options.IdleTimeout, func() { cancel(errProviderIdle) })
+	}
+	release := func() {
+		if idle != nil {
+			idle.Stop()
+		}
+		cancel(nil)
+	}
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, call.url, bytes.NewReader(call.body))
 	if err != nil {
+		release()
 		return nil, ProviderError{http.StatusInternalServerError, "INTERNAL_ERROR", "Unable to create provider request."}
 	}
 	upstream.Header.Set("Content-Type", "application/json")
 	for name, value := range call.headers {
 		upstream.Header.Set(name, value)
 	}
-	response, err := client.Do(upstream)
+	response, err := options.Client.Do(upstream)
 	if err != nil {
-		if IsTimeout(err) {
+		timedOut := IsTimeout(err) || errors.Is(context.Cause(ctx), errProviderIdle)
+		release()
+		if timedOut {
 			return nil, ProviderError{http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out."}
 		}
 		return nil, ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed."}
@@ -43,12 +70,133 @@ func postJSON(ctx context.Context, client *http.Client, call providerCall) (*htt
 	switch response.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		response.Body.Close()
+		release()
 		return nil, ProviderError{http.StatusBadGateway, "AUTHENTICATION_FAILED", "Provider rejected its configured credential."}
 	case http.StatusTooManyRequests:
 		response.Body.Close()
+		release()
 		return nil, ProviderError{http.StatusTooManyRequests, "RATE_LIMITED", "Provider rate limit was reached."}
 	}
+	if idle != nil {
+		idle.Reset(options.IdleTimeout)
+	}
+	response.Body = &idleBody{ReadCloser: response.Body, ctx: ctx, idle: idle, timeout: options.IdleTimeout, release: release}
 	return response, nil
+}
+
+// idleBody restarts the idle timer whenever bytes arrive and reports the idle cancellation as a timeout.
+type idleBody struct {
+	io.ReadCloser
+	ctx     context.Context
+	idle    *time.Timer
+	timeout time.Duration
+	release func()
+}
+
+func (body *idleBody) Read(buffer []byte) (int, error) {
+	n, err := body.ReadCloser.Read(buffer)
+	if n > 0 && body.idle != nil {
+		body.idle.Reset(body.timeout)
+	}
+	if err != nil && err != io.EOF && errors.Is(context.Cause(body.ctx), errProviderIdle) {
+		err = errProviderIdle
+	}
+	return n, err
+}
+
+func (body *idleBody) Close() error {
+	err := body.ReadCloser.Close()
+	body.release()
+	return err
+}
+
+// readResponseBody returns one JSON response body. A Provider that answers with an event stream has
+// its events assembled into the body its non-streaming API would have returned, so every Api keeps a
+// single validation path; a Provider that ignores the stream request is read as before.
+func readResponseBody(upstream *http.Response, assemble func(io.Reader) ([]byte, error)) ([]byte, error) {
+	mediaType, _, _ := mime.ParseMediaType(upstream.Header.Get("Content-Type"))
+	if mediaType == "text/event-stream" {
+		return assemble(upstream.Body)
+	}
+	return readProviderBody(upstream.Body)
+}
+
+// errStreamFailed is an error event inside a 200 event stream; its prose is never forwarded.
+var errStreamFailed = ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider stream reported an error."}
+
+// readServerSentEvents calls handle with each event's name and data until the stream ends or
+// handle reports that it is done. One event, like a whole response, is bounded by 1 MiB.
+func readServerSentEvents(reader io.Reader, handle func(event string, data []byte) (bool, error)) error {
+	lines := bufio.NewReaderSize(reader, 64<<10)
+	var event string
+	var data bytes.Buffer
+	hasData := false
+	for {
+		line, err := lines.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			long := append([]byte(nil), line...)
+			for errors.Is(err, bufio.ErrBufferFull) {
+				if len(long) > maxResponseBody {
+					return errors.New("provider stream event exceeds 1 MiB")
+				}
+				line, err = lines.ReadSlice('\n')
+				long = append(long, line...)
+			}
+			line = long
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		text := bytes.TrimRight(line, "\r\n")
+		switch {
+		case len(text) == 0:
+			if hasData {
+				done, handleErr := handle(event, data.Bytes())
+				if handleErr != nil || done {
+					return handleErr
+				}
+			}
+			event, hasData = "", false
+			data.Reset()
+		case text[0] == ':':
+		default:
+			field, value, _ := bytes.Cut(text, []byte(":"))
+			value = bytes.TrimPrefix(value, []byte(" "))
+			switch string(field) {
+			case "event":
+				event = string(value)
+			case "data":
+				if hasData {
+					data.WriteByte('\n')
+				}
+				if data.Len()+len(value) > maxResponseBody {
+					return errors.New("provider stream event exceeds 1 MiB")
+				}
+				data.Write(value)
+				hasData = true
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			if hasData {
+				_, handleErr := handle(event, data.Bytes())
+				return handleErr
+			}
+			return nil
+		}
+	}
+}
+
+// streamText bounds the text an assembled stream may accumulate, like a whole response body.
+type streamText struct{ size int }
+
+func (text *streamText) add(values ...string) error {
+	for _, value := range values {
+		text.size += len(value)
+	}
+	if text.size > maxResponseBody {
+		return errors.New("provider response exceeds 1 MiB")
+	}
+	return nil
 }
 
 func upstreamStatusFailure(upstream *http.Response) error {

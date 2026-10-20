@@ -40,24 +40,25 @@ var tokenIDPattern = regexp.MustCompile(`^tok_[a-f0-9]{32}$`)
 var levelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 type Server struct {
-	db             *sql.DB
-	adminToken     string
-	runtimeToken   string
-	masterKey      []byte
-	modelCatalog   []modelMapping
-	catalogMu      sync.RWMutex
-	httpClient     *http.Client
-	handler        http.Handler
-	requestContext context.Context
-	cancelRequests context.CancelFunc
-	requestMu      sync.Mutex
-	requestWG      sync.WaitGroup
-	stopping       bool
-	closeOnce      sync.Once
-	closeErr       error
-	claudeSessions *webharness.ClaudeSessions
-	codex          *webharness.CodexAppServer
-	apis           map[string]providers.Api
+	db              *sql.DB
+	adminToken      string
+	runtimeToken    string
+	masterKey       []byte
+	modelCatalog    []modelMapping
+	catalogMu       sync.RWMutex
+	httpClient      *http.Client
+	providerTimeout time.Duration
+	handler         http.Handler
+	requestContext  context.Context
+	cancelRequests  context.CancelFunc
+	requestMu       sync.Mutex
+	requestWG       sync.WaitGroup
+	stopping        bool
+	closeOnce       sync.Once
+	closeErr        error
+	claudeSessions  *webharness.ClaudeSessions
+	codex           *webharness.CodexAppServer
+	apis            map[string]providers.Api
 }
 
 type providerRequestSnapshot struct {
@@ -216,12 +217,14 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 		requestContext: requestContext, cancelRequests: cancelRequests,
 		claudeSessions: webharness.NewClaudeSessions(webharness.HarnessPath("LLM_SERVER_CLAUDE_EXECUTABLE"), harnessSessionTTL),
 		codex:          webharness.NewCodexAppServer(),
+		// Provider calls stream, so the client has no total deadline: providerTimeout bounds how
+		// long a Provider may stay silent (Options.IdleTimeout).
 		httpClient: &http.Client{
-			Timeout: providerTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		},
+		providerTimeout: providerTimeout,
 	}
 	// Provider type → wire protocol Api, as in pi-ai; claude_code keeps its CLI session path.
 	server.apis = map[string]providers.Api{
@@ -310,35 +313,23 @@ func (s *Server) dispatchGenerate(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusServiceUnavailable, "TOKEN_UNAVAILABLE", "Provider credential is unavailable.")
 		return
 	}
+	// Everything the request itself can get wrong is answered above; from here a streaming caller
+	// gets 200 at once and any Provider failure as the stream's error line.
+	reply := newGenerateReply(w, r)
+	defer reply.end()
 	if provider.Type == "claude_code" {
-		s.generateHarness(w, r, provider, snapshot.Credential, *model, request, options)
+		s.generateHarness(reply, r, provider, snapshot.Credential, *model, request, options)
 		return
 	}
 	response, err := s.apis[provider.Type].Complete(r.Context(),
 		providers.Model{Provider: provider.Type, ID: *model, BaseURL: provider.BaseURL, Config: provider.Config}, request,
-		providers.Options{APIKey: snapshot.Credential, Options: options, Client: s.httpClient})
+		providers.Options{APIKey: snapshot.Credential, Options: options, Client: s.httpClient,
+			IdleTimeout: s.providerTimeout, OnDelta: reply.delta()})
 	if err != nil {
-		writeProviderError(w, provider, err)
+		reply.fail(provider, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-// writeProviderError logs only the Provider and error code: Provider prose may echo credentials
-// or prompts, and diagnostic model names are chosen by callers.
-func writeProviderError(w http.ResponseWriter, provider Provider, err error) {
-	status, code, message := http.StatusBadGateway, "PROVIDER_RESPONSE_INVALID", "Provider returned an invalid response."
-	var failure providers.ProviderError
-	switch {
-	case errors.As(err, &failure):
-		status, code, message = failure.Status, failure.Code, failure.Message
-	case providers.IsTimeout(err):
-		status, code, message = http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out."
-	case errors.Is(err, context.Canceled):
-		status, code, message = http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request was cancelled."
-	}
-	log.Printf("event=provider_error provider=%s type=%s status=%d detail=%s", provider.ID, provider.Type, status, code)
-	writeError(w, status, code, message)
+	reply.succeed(response)
 }
 
 func parseModelCatalog(value string) ([]modelMapping, error) {

@@ -24,7 +24,7 @@ var AnthropicOptionNames = map[string]bool{
 	"top_k": true, "top_p": true,
 }
 
-// AnthropicMessages is pi-ai's anthropic-messages Api: one non-streaming Messages API call with an x-api-key credential.
+// AnthropicMessages is pi-ai's anthropic-messages Api: one streamed Messages API call with an x-api-key credential.
 type AnthropicMessages struct{}
 
 func (api AnthropicMessages) Complete(ctx context.Context, model Model, request GenerateRequest, options Options) (GenerateResponse, error) {
@@ -37,12 +37,12 @@ func (api AnthropicMessages) Complete(ctx context.Context, model Model, request 
 		return GenerateResponse{}, errCredentialRequired
 	}
 	call.headers["x-api-key"] = options.APIKey
-	response, err := postJSON(ctx, options.Client, call)
+	response, err := postJSON(ctx, options, call)
 	if err != nil {
 		return GenerateResponse{}, err
 	}
 	defer response.Body.Close()
-	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages))
+	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages), options)
 }
 
 func (api AnthropicMessages) buildParams(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (providerCall, error) {
@@ -67,6 +67,7 @@ func (api AnthropicMessages) buildParams(baseURL, model string, request Generate
 	for key, value := range options {
 		body[key] = value
 	}
+	body["stream"] = true
 	if choice, exists := options["tool_choice"]; exists {
 		normalizedChoice, err := anthropicToolChoice(choice, request.Tools, WireByRuntime)
 		if err != nil {
@@ -167,7 +168,7 @@ func anthropicToolChoice(choice json.RawMessage, tools []ToolSchema, WireByRunti
 	return normalized, nil
 }
 
-func (api AnthropicMessages) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
+func (api AnthropicMessages) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool, options Options) (GenerateResponse, error) {
 	switch upstream.StatusCode {
 	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
 		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "Anthropic rejected the generated request."}
@@ -186,7 +187,7 @@ func (api AnthropicMessages) parseResponse(upstream *http.Response, RuntimeByWir
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 		return GenerateResponse{}, upstreamStatusFailure(upstream)
 	}
-	body, err := readProviderBody(upstream.Body)
+	body, err := readResponseBody(upstream, func(reader io.Reader) ([]byte, error) { return assembleAnthropicStream(reader, options) })
 	if err != nil {
 		return GenerateResponse{}, err
 	}
@@ -311,4 +312,112 @@ func anthropicModelNotFound(body []byte) bool {
 		return false
 	}
 	return response.Error.Type == "not_found_error" && strings.HasPrefix(response.Error.Message, "model:")
+}
+
+// assembleAnthropicStream folds Messages API stream events into the message body: message_start
+// supplies the envelope, content blocks collect their deltas by index, and message_delta supplies
+// the stop reason and the final usage.
+func assembleAnthropicStream(reader io.Reader, options Options) ([]byte, error) {
+	type streamedBlock struct {
+		fields                           map[string]any
+		text, thinking, signature, input strings.Builder
+	}
+	var message map[string]json.RawMessage
+	var blocks []*streamedBlock
+	usage := map[string]json.RawMessage{}
+	var size streamText
+	stopped := false
+	err := readServerSentEvents(reader, func(_ string, data []byte) (bool, error) {
+		var event struct {
+			Type         string                     `json:"type"`
+			Index        int                        `json:"index"`
+			Message      map[string]json.RawMessage `json:"message"`
+			ContentBlock map[string]any             `json:"content_block"`
+			Delta        struct {
+				Type        string          `json:"type"`
+				Text        string          `json:"text"`
+				Thinking    string          `json:"thinking"`
+				Signature   string          `json:"signature"`
+				PartialJSON string          `json:"partial_json"`
+				StopReason  json.RawMessage `json:"stop_reason"`
+			} `json:"delta"`
+			Usage map[string]json.RawMessage `json:"usage"`
+		}
+		if json.Unmarshal(data, &event) != nil {
+			return false, errors.New("invalid Anthropic stream")
+		}
+		switch event.Type {
+		case "message_start":
+			message = event.Message
+			if raw, exists := message["usage"]; exists {
+				_ = json.Unmarshal(raw, &usage)
+			}
+		case "content_block_start":
+			if event.Index != len(blocks) || event.ContentBlock == nil {
+				return false, errors.New("invalid Anthropic stream")
+			}
+			blocks = append(blocks, &streamedBlock{fields: event.ContentBlock})
+		case "content_block_delta":
+			if event.Index < 0 || event.Index >= len(blocks) {
+				return false, errors.New("invalid Anthropic stream")
+			}
+			block := blocks[event.Index]
+			switch event.Delta.Type {
+			case "text_delta":
+				block.text.WriteString(event.Delta.Text)
+				options.delta(event.Delta.Text, "")
+			case "thinking_delta":
+				block.thinking.WriteString(event.Delta.Thinking)
+				options.delta("", event.Delta.Thinking)
+			case "signature_delta":
+				block.signature.WriteString(event.Delta.Signature)
+			case "input_json_delta":
+				block.input.WriteString(event.Delta.PartialJSON)
+			}
+			if err := size.add(event.Delta.Text, event.Delta.Thinking, event.Delta.Signature, event.Delta.PartialJSON); err != nil {
+				return false, err
+			}
+		case "message_delta":
+			if message != nil && len(event.Delta.StopReason) != 0 {
+				message["stop_reason"] = event.Delta.StopReason
+			}
+			for name, value := range event.Usage {
+				usage[name] = value
+			}
+		case "message_stop":
+			stopped = true
+			return true, nil
+		case "error":
+			return false, errStreamFailed
+		}
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if message == nil || !stopped {
+		return nil, errors.New("invalid Anthropic stream")
+	}
+	assembled := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		for field, value := range map[string]*strings.Builder{"text": &block.text, "thinking": &block.thinking, "signature": &block.signature} {
+			if value.Len() != 0 {
+				started, _ := block.fields[field].(string)
+				block.fields[field] = started + value.String()
+			}
+		}
+		if block.input.Len() != 0 {
+			block.fields["input"] = json.RawMessage(block.input.String())
+		}
+		assembled = append(assembled, block.fields)
+	}
+	content, err := json.Marshal(assembled)
+	if err != nil {
+		return nil, errors.New("invalid Anthropic stream")
+	}
+	message["content"] = content
+	if len(usage) != 0 {
+		message["usage"], _ = json.Marshal(usage)
+	}
+	return json.Marshal(message)
 }

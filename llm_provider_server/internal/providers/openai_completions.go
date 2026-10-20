@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// OpenAICompletions is pi-ai's openai-completions Api: one non-streaming /chat/completions call.
+// OpenAICompletions is pi-ai's openai-completions Api: one streamed /chat/completions call.
 // OpenAI selects the native OpenAI rules (option allowlist, required credential, model-not-found);
 // otherwise any OpenAI-compatible Provider, which may run without a credential.
 type OpenAICompletions struct{ OpenAI bool }
@@ -27,12 +27,12 @@ func (api OpenAICompletions) Complete(ctx context.Context, model Model, request 
 	} else if api.OpenAI {
 		return GenerateResponse{}, errCredentialRequired
 	}
-	response, err := postJSON(ctx, options.Client, call)
+	response, err := postJSON(ctx, options, call)
 	if err != nil {
 		return GenerateResponse{}, err
 	}
 	defer response.Body.Close()
-	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages))
+	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages), options)
 }
 
 func (api OpenAICompletions) buildParams(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (providerCall, error) {
@@ -49,11 +49,13 @@ func (api OpenAICompletions) buildParams(baseURL, model string, request Generate
 		upstreamRequest["tools"] = compatibleTools(request.Tools, WireByRuntime)
 	}
 	for key, value := range options {
-		if key == "model" || key == "messages" || key == "tools" {
-			return providerCall{}, errors.New("options cannot replace model, messages, or tools.")
+		if key == "model" || key == "messages" || key == "tools" || key == "stream" || key == "stream_options" {
+			return providerCall{}, errors.New("options cannot replace model, messages, tools, stream, or stream_options.")
 		}
 		upstreamRequest[key] = value
 	}
+	upstreamRequest["stream"] = true
+	upstreamRequest["stream_options"] = map[string]bool{"include_usage": true}
 	body, err := json.Marshal(upstreamRequest)
 	if err != nil {
 		return providerCall{}, errors.New("Options contain an invalid value.")
@@ -162,7 +164,7 @@ func isOpenAIModelNotFound(reader io.Reader) (bool, error) {
 	return response.Error.Code == "model_not_found" || response.Error.Param == "model", nil
 }
 
-func (api OpenAICompletions) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
+func (api OpenAICompletions) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool, options Options) (GenerateResponse, error) {
 	openAI := api.OpenAI
 	if openAI && (upstream.StatusCode == http.StatusBadRequest || upstream.StatusCode == http.StatusNotFound) {
 		modelNotFound, err := isOpenAIModelNotFound(upstream.Body)
@@ -182,7 +184,7 @@ func (api OpenAICompletions) parseResponse(upstream *http.Response, RuntimeByWir
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 		return GenerateResponse{}, upstreamStatusFailure(upstream)
 	}
-	body, err := readProviderBody(upstream.Body)
+	body, err := readResponseBody(upstream, func(reader io.Reader) ([]byte, error) { return assembleOpenAIStream(reader, options) })
 	if err != nil {
 		return GenerateResponse{}, err
 	}
@@ -289,4 +291,141 @@ func (api OpenAICompletions) parseResponse(upstream *http.Response, RuntimeByWir
 		}
 	}
 	return normalized, nil
+}
+
+// assembleOpenAIStream folds chat.completion.chunk events into the chat.completion body: text and
+// reasoning are concatenated, tool calls are joined by index, and the last reported usage is kept.
+func assembleOpenAIStream(reader io.Reader, options Options) ([]byte, error) {
+	type streamedCall struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Function struct {
+			Name      string  `json:"name"`
+			Arguments *string `json:"arguments"`
+		} `json:"function"`
+	}
+	var role, finishReason string
+	var content, reasoning, refusal *strings.Builder
+	var calls []*streamedCall
+	var usage json.RawMessage
+	var size streamText
+	appendText := func(target **strings.Builder, value *string) {
+		if value == nil {
+			return
+		}
+		if *target == nil {
+			*target = &strings.Builder{}
+		}
+		(*target).WriteString(*value)
+	}
+	err := readServerSentEvents(reader, func(_ string, data []byte) (bool, error) {
+		if string(data) == "[DONE]" {
+			return true, nil
+		}
+		var chunk struct {
+			Choices []struct {
+				Index int `json:"index"`
+				Delta struct {
+					Role             string  `json:"role"`
+					Content          *string `json:"content"`
+					Reasoning        *string `json:"reasoning"`
+					ReasoningContent *string `json:"reasoning_content"`
+					Refusal          *string `json:"refusal"`
+					ToolCalls        []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string  `json:"name"`
+							Arguments *string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+			Usage json.RawMessage `json:"usage"`
+			Error json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal(data, &chunk) != nil {
+			return false, errors.New("invalid compatible stream")
+		}
+		if len(chunk.Error) != 0 && !IsJSONNull(chunk.Error) {
+			return false, errStreamFailed
+		}
+		if len(chunk.Usage) != 0 && !IsJSONNull(chunk.Usage) {
+			usage = chunk.Usage
+		}
+		for _, choice := range chunk.Choices {
+			if choice.Index != 0 {
+				continue
+			}
+			delta := choice.Delta
+			if delta.Role != "" {
+				role = delta.Role
+			}
+			appendText(&content, delta.Content)
+			appendText(&reasoning, delta.ReasoningContent)
+			appendText(&reasoning, delta.Reasoning)
+			appendText(&refusal, delta.Refusal)
+			text, thought := "", ""
+			if delta.Content != nil {
+				text = *delta.Content
+			}
+			for _, value := range []*string{delta.ReasoningContent, delta.Reasoning} {
+				if value != nil {
+					thought += *value
+				}
+			}
+			if err := size.add(text, thought); err != nil {
+				return false, err
+			}
+			for _, fragment := range delta.ToolCalls {
+				if fragment.Index < 0 || fragment.Index > len(calls) {
+					return false, errors.New("invalid compatible stream")
+				}
+				if fragment.Index == len(calls) {
+					calls = append(calls, &streamedCall{Type: "function"})
+				}
+				call := calls[fragment.Index]
+				if fragment.ID != "" {
+					call.ID = fragment.ID
+				}
+				if fragment.Type != "" {
+					call.Type = fragment.Type
+				}
+				if fragment.Function.Name != "" && call.Function.Name == "" {
+					call.Function.Name = fragment.Function.Name
+				}
+				if fragment.Function.Arguments != nil {
+					joined := *fragment.Function.Arguments
+					if call.Function.Arguments != nil {
+						joined = *call.Function.Arguments + joined
+					}
+					call.Function.Arguments = &joined
+					if err := size.add(*fragment.Function.Arguments); err != nil {
+						return false, err
+					}
+				}
+			}
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				finishReason = *choice.FinishReason
+			}
+			options.delta(text, thought)
+		}
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	message := map[string]any{"role": role, "tool_calls": calls}
+	for name, value := range map[string]*strings.Builder{"content": content, "reasoning_content": reasoning, "refusal": refusal} {
+		if value != nil {
+			message[name] = value.String()
+		}
+	}
+	assembled := map[string]any{"choices": []any{map[string]any{"message": message, "finish_reason": finishReason}}}
+	if usage != nil {
+		assembled["usage"] = usage
+	}
+	return json.Marshal(assembled)
 }

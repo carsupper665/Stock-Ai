@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 )
 
 // Api is one wire protocol, following pi-ai's packages/ai layering: it builds the vendor request,
@@ -21,11 +22,21 @@ type Model struct {
 	Config   json.RawMessage
 }
 
-// Options carries the request's Provider credential, resolved model options and the timeout-bound HTTP client.
+// Options carries the request's Provider credential, resolved model options and the HTTP client.
+// The call fails only when the Provider sends nothing for IdleTimeout: before its headers or between
+// two chunks of the stream. OnDelta, when set, receives the text as it streams in.
 type Options struct {
-	APIKey  string
-	Options map[string]json.RawMessage
-	Client  *http.Client
+	APIKey      string
+	Options     map[string]json.RawMessage
+	Client      *http.Client
+	IdleTimeout time.Duration
+	OnDelta     func(content, reasoning string)
+}
+
+func (options Options) delta(content, reasoning string) {
+	if options.OnDelta != nil && (content != "" || reasoning != "") {
+		options.OnDelta(content, reasoning)
+	}
 }
 
 var errCredentialRequired = ProviderError{http.StatusServiceUnavailable, "TOKEN_UNAVAILABLE", "This Provider type requires a Provider credential."}

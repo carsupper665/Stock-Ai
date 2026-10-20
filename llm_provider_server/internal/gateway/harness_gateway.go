@@ -14,10 +14,11 @@ import (
 func isHarnessType(kind string) bool { return kind == "codex" || kind == "claude_code" }
 
 // generateHarness runs claude_code through its CLI, with per-conversation transport sessions (spec §37).
-func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provider Provider, credential, model string, request providers.GenerateRequest, options map[string]json.RawMessage) {
+// The CLI is not streamed: providerTimeout still bounds the whole invocation.
+func (s *Server) generateHarness(reply *generateReply, r *http.Request, provider Provider, credential, model string, request providers.GenerateRequest, options map[string]json.RawMessage) {
 	setup, err := webharness.ResolveHarness(provider.Type, provider.Config, credential, request.ConversationID != nil, options)
 	if err != nil {
-		writeProviderError(w, provider, err)
+		reply.fail(provider, err)
 		return
 	}
 	effort, authFile := setup.Effort, setup.AuthFile
@@ -25,7 +26,7 @@ func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provide
 	for _, tool := range request.Tools {
 		normalized.Tools = append(normalized.Tools, webharness.WebHarnessTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.httpClient.Timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), s.providerTimeout)
 	defer cancel()
 	var response webharness.WebHarnessResponse
 	var continuation *webharness.Continuation
@@ -37,7 +38,7 @@ func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provide
 		loginSnapshot, err = webharness.ReadHarnessLogin(authFile)
 		if err != nil {
 			log.Printf("web_harness event=error harness=claude_code category=authentication")
-			writeError(w, 502, "AUTHENTICATION_FAILED", "CLI authentication failed. Refresh the Server login or Provider API Token.")
+			reply.fail(provider, providers.ProviderError{Status: 502, Code: "AUTHENTICATION_FAILED", Message: "CLI authentication failed. Refresh the Server login or Provider API Token."})
 			return
 		}
 	}
@@ -52,13 +53,13 @@ func (s *Server) generateHarness(w http.ResponseWriter, r *http.Request, provide
 		for _, call := range response.ToolCalls {
 			calls = append(calls, providers.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
 		}
-		writeJSON(w, http.StatusOK, providers.GenerateResponse{Content: response.Content, Reasoning: response.Reasoning,
+		reply.succeed(providers.GenerateResponse{Content: response.Content, Reasoning: response.Reasoning,
 			ToolCalls: calls, FinishReason: response.FinishReason, Usage: harnessUsage(response.Usage),
 			NumTurns: response.NumTurns, TotalCostUSD: response.TotalCostUSD, SessionMode: response.SessionMode,
 			FallbackReason: response.FallbackReason, InvocationCount: response.InvocationCount})
 		return
 	}
-	writeProviderError(w, provider, webharness.HarnessProviderError(provider.Type, err))
+	reply.fail(provider, webharness.HarnessProviderError(provider.Type, err))
 }
 
 func normalizeHarnessMessages(messages []providers.Message) []webharness.WebHarnessMessage {

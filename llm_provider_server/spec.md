@@ -219,6 +219,31 @@ The LLM API Server must not execute the returned tool call.
 
 The Go Agent Runtime executes it.
 
+### Streamed reply
+
+A caller that sends `Accept: application/x-ndjson` gets the same Generate as a
+stream of JSON lines. Everything the request itself can get wrong (authentication,
+validation, unknown or disabled Provider, missing model, unavailable credential)
+is still answered before the stream as the ordinary JSON error. Once the Provider
+call starts, the reply is `200` with `Content-Type: application/x-ndjson`, and
+each line is one of:
+
+```json
+{"type":"delta","content":"partial text","reasoning":"partial reasoning"}
+{"type":"ping"}
+{"type":"done","response":{"content":"…","tool_calls":[],"finish_reason":"stop","usage":null}}
+{"type":"error","status":504,"error":{"code":"PROVIDER_TIMEOUT","message":"Provider request timed out."}}
+```
+
+`delta` carries text as the Provider streams it; either field is omitted when
+empty, and the text is for display only. `ping` is written every 5 seconds
+whatever the Provider is doing, so the caller can time out a silent Gateway
+without timing out a model that thinks for a long time. The stream ends with
+exactly one `done` line, whose `response` is the JSON response above, or one
+`error` line, whose `status` and `error` are what the JSON reply would have
+returned. A caller without that `Accept` value, such as the admin Provider test,
+gets the single JSON response as before.
+
 ## 6. Core Models
 
 ```python
@@ -505,9 +530,12 @@ type Api interface {
 | `codex` | `webharness.CodexAppServer` (`codex app-server`) |
 | `claude_code` | CLI harness with per-Run sessions (§37), outside the registry |
 
-`Complete` is the only required V1 runtime method. pi-ai's streaming events, OAuth
-flows, cost tables and thought-signature replay are not adopted: `/v1/generate`
-returns one JSON response.
+`Complete` is the only required V1 runtime method. Every REST Api and the codex
+app-server stream from the Provider: the stream is assembled into the response the
+non-streaming API would have returned and validated by the same rules, and its text
+is passed on as `delta` lines when the caller asked for them (§5). pi-ai's typed
+streaming events, OAuth flows, cost tables and thought-signature replay are not
+adopted.
 
 Do not add:
 
@@ -884,7 +912,7 @@ go run ./cmd/llm-provider-server
 | `LLM_SERVER_MODEL_CATALOG` | empty JSON catalog | Startup-only model mapping array defined in §32.1 |
 | `LLM_SERVER_DB_PATH` | `llm-provider.db` | SQLite Provider database path |
 | `LLM_SERVER_ADDR` | `127.0.0.1:8090` | HTTP listen address |
-| `LLM_SERVER_PROVIDER_TIMEOUT` | `30s` | Positive Go duration covering one external request |
+| `LLM_SERVER_PROVIDER_TIMEOUT` | `30s` | Positive Go duration a Provider may stay silent during one Generate: before its response headers or between two reads of its stream. A Provider that keeps streaming is not cut off. The claude_code CLI, which does not stream, still uses it for the whole invocation |
 
 Startup fails before listening if either token is empty, the tokens are equal, the
 timeout is invalid/non-positive, or the database/listener cannot be initialized.
@@ -979,7 +1007,7 @@ Content-Type: application/json
 required. Ticket 03 accepts `system`, `user`, and `assistant` messages with string
 content. `tools` must be omitted, null, or empty until ticket 08. `options` defaults
 to an empty object and its members are copied to the compatible request, except
-that it cannot replace `model`, `messages`, or `tools`.
+that it cannot replace `model`, `messages`, `tools`, `stream`, or `stream_options`.
 
 The Gateway sends one unauthenticated POST to:
 
@@ -987,7 +1015,13 @@ The Gateway sends one unauthenticated POST to:
 {base_url without trailing slash}/chat/completions
 ```
 
-with the resolved `model`, messages, and options. It does not retry, follow HTTP
+with the resolved `model`, messages, and options, plus `"stream": true` and
+`"stream_options": {"include_usage": true}`. A `text/event-stream` reply is
+assembled into the `chat.completion` body: `delta.content`, `delta.reasoning_content`
+or `delta.reasoning`, and `delta.refusal` are concatenated, tool call fragments are
+joined by `index` (arguments concatenated, `type` defaulting to `function`), and the
+last `finish_reason` and reported `usage` are kept until `data: [DONE]`. A server
+that ignores `stream` and answers with JSON is read as before. It does not retry, follow HTTP
 redirects, or execute tools. Redirect responses, including HTTP 307 and 308, are
 treated as unsuccessful Provider statuses; the redirect target is never contacted.
 A valid text response requires a first choice containing string
@@ -1018,7 +1052,7 @@ Generate error mapping:
 | No requested or default model | 400 | `MODEL_NOT_FOUND` |
 | Unknown Provider | 404 | `PROVIDER_NOT_FOUND` |
 | Disabled Provider | 409 | `PROVIDER_DISABLED` |
-| External timeout while connecting, waiting for headers, or reading the body | 504 | `PROVIDER_TIMEOUT` |
+| Provider silent for `LLM_SERVER_PROVIDER_TIMEOUT` while connecting, before its headers, or between two reads of its body | 504 | `PROVIDER_TIMEOUT` |
 | Connection failure, redirect, or other non-2xx status | 502 | `PROVIDER_UNAVAILABLE` |
 | Malformed, incomplete, oversized, negative-usage, or tool-call response | 502 | `PROVIDER_RESPONSE_INVALID` |
 | Local database failure | 500 | `INTERNAL_ERROR` |
@@ -1594,7 +1628,8 @@ only the OpenAI-specific boundaries below.
 
 ### 34.1 Protocol, Provider, and Credential
 
-The native Provider uses OpenAI's non-streaming Chat Completions REST API:
+The native Provider uses OpenAI's streaming Chat Completions REST API (§28.4 describes
+how the stream is assembled):
 
 ```http
 POST {base_url without trailing slash}/chat/completions
@@ -1663,9 +1698,9 @@ alias contract.
 
 `stream`, `stream_options`, `n`, `modalities`, `audio`, legacy
 `functions`/`function_call`, `web_search_options`, and unknown options return
-HTTP `400` `REQUEST_INVALID` before OpenAI I/O. `model`, `messages`, and `tools`
-remain Gateway-owned. Thus each call expects one non-streaming choice and the
-Gateway never executes a Tool.
+HTTP `400` `REQUEST_INVALID` before OpenAI I/O. `model`, `messages`, `tools`,
+`stream`, and `stream_options` remain Gateway-owned. Thus each call expects one
+choice, assembled from its stream, and the Gateway never executes a Tool.
 
 ### 34.3 Response, Finish Reason, and Usage
 
@@ -1703,7 +1738,8 @@ Gateway calculates no missing value, and cached tokens remain an input subset.
 | OpenAI `429` | 429 | `RATE_LIMITED` |
 | OpenAI `400`/`404` with `error.code:"model_not_found"` or `error.param:"model"` | 400 | `MODEL_NOT_FOUND` |
 | Other OpenAI `400` | 400 | `REQUEST_INVALID` |
-| Connect/header/body deadline | 504 | `PROVIDER_TIMEOUT` |
+| Silent for `LLM_SERVER_PROVIDER_TIMEOUT` before headers or between stream reads | 504 | `PROVIDER_TIMEOUT` |
+| `error` object inside the stream | 502 | `PROVIDER_UNAVAILABLE` |
 | Caller cancellation, if writable | 502 | `PROVIDER_UNAVAILABLE` |
 | Other non-2xx, connection failure, or redirect | 502 | `PROVIDER_UNAVAILABLE` |
 | Invalid/trailing/oversized success body | 502 | `PROVIDER_RESPONSE_INVALID` |
@@ -1750,7 +1786,13 @@ behavior, and the 1 MiB body limit are unchanged.
 
 ### 35.1 Protocol, Provider, and Credential
 
-The native Provider uses Anthropic's non-streaming Messages REST API:
+The native Provider uses Anthropic's Messages REST API with `"stream": true`. The
+`message_start` event supplies the message, `content_block_start` and
+`content_block_delta` build each block by index (`text_delta`, `thinking_delta`,
+`signature_delta`, and `input_json_delta` for `tool_use` input), and
+`message_delta` supplies `stop_reason` and the final usage. The assembled message
+is validated as the non-streaming response below. A `message_stop` is required;
+an `error` event is `502` `PROVIDER_UNAVAILABLE`:
 
 ```http
 POST {base_url without trailing slash}/messages
@@ -1786,8 +1828,8 @@ Model override/default and the single §32 catalog remain unchanged; `model_leve
 is consumed locally. The Messages API requires `max_tokens`, which the normalized
 Generate request does not carry: when neither the catalog base/level options nor
 the request options provide `max_tokens`, the Gateway sends `16000`. A provided
-`max_tokens` is forwarded unchanged. Long outputs are bounded by the shared
-`LLM_SERVER_PROVIDER_TIMEOUT`, not by this ceiling.
+`max_tokens` is forwarded unchanged. Long outputs are not cut off by time while
+Anthropic keeps streaming; `LLM_SERVER_PROVIDER_TIMEOUT` bounds only silence.
 
 Every `system` message, regardless of position, becomes one entry of the top-level
 `system` array (`{"type":"text","text":...}`) in submission order; the array is
@@ -1891,7 +1933,8 @@ Anthropic errors use `{"type":"error","error":{"type","message"}}`.
 | Anthropic `429 rate_limit_error` | 429 | `RATE_LIMITED` |
 | Anthropic `404 not_found_error` whose message starts with `model:` | 400 | `MODEL_NOT_FOUND` |
 | Anthropic `400 invalid_request_error`, `413 request_too_large` | 400 | `REQUEST_INVALID` |
-| Connect/header/body deadline | 504 | `PROVIDER_TIMEOUT` |
+| Silent for `LLM_SERVER_PROVIDER_TIMEOUT` before headers or between stream reads | 504 | `PROVIDER_TIMEOUT` |
+| `error` object inside the stream | 502 | `PROVIDER_UNAVAILABLE` |
 | Caller cancellation, if writable | 502 | `PROVIDER_UNAVAILABLE` |
 | Other `404`, `402`, `500 api_error`, `529 overloaded_error`, other non-2xx, connection failure, or redirect | 502 | `PROVIDER_UNAVAILABLE` |
 | Invalid/trailing/oversized success body | 502 | `PROVIDER_RESPONSE_INVALID` |
@@ -1943,11 +1986,14 @@ state, Tool execution, or credential store.
 
 ### 36.1 Protocol, Authentication, and Model Scope
 
-The adapter uses the non-streaming Gemini `generateContent` REST method at the
-pinned `v1beta` base URL:
+The adapter uses the Gemini `streamGenerateContent` REST method with `alt=sse` at
+the pinned `v1beta` base URL. Each event is a `GenerateContentResponse`; candidates
+collect their parts by `index`, and the last finish reason, prompt feedback, and
+usage are kept, so the assembled response is validated as one `generateContent`
+reply:
 
 ```http
-POST {base_url without trailing slash}/models/gemini-2.5-flash-lite:generateContent
+POST {base_url without trailing slash}/models/gemini-2.5-flash-lite:streamGenerateContent?alt=sse
 Content-Type: application/json
 x-goog-api-key: <selected Provider Token>
 ```
@@ -2021,7 +2067,8 @@ They are placed under `generationConfig`; Gemini validates value types, ranges, 
 model-specific combinations. `stream`, `candidateCount`, `responseMimeType`,
 `responseSchema`, `thinkingConfig`, `toolConfig`, built-in tools, cached content,
 media options, and every unknown key are rejected as HTTP `400` `REQUEST_INVALID`
-before I/O. One non-streaming candidate is the fixed normalized response shape.
+before I/O. One candidate, assembled from the stream, is the fixed normalized
+response shape.
 For a catalog mapping, §32 still consumes `model_level` locally and merges the
 mapping's base and selected-level options before this allowlist is applied. The
 caller cannot mix direct options with `model_level`.
@@ -2076,7 +2123,8 @@ the unsupported-state failure described in §36.1, not silently omitted.
 | Gemini `400` | 400 | `REQUEST_INVALID` |
 | Gemini `401`/`403` | 502 | `AUTHENTICATION_FAILED` |
 | Gemini `429` | 429 | `RATE_LIMITED` |
-| Connect/header/body deadline | 504 | `PROVIDER_TIMEOUT` |
+| Silent for `LLM_SERVER_PROVIDER_TIMEOUT` before headers or between stream reads | 504 | `PROVIDER_TIMEOUT` |
+| `error` object inside the stream | 502 | `PROVIDER_UNAVAILABLE` |
 | Caller cancellation, if writable | 502 | `PROVIDER_UNAVAILABLE` |
 | Other non-2xx, connection failure, or redirect | 502 | `PROVIDER_UNAVAILABLE` |
 | Invalid/unsupported success response | 502 | `PROVIDER_RESPONSE_INVALID` |
@@ -2200,7 +2248,12 @@ input is the trailing user messages (empty after tool results). The first
 Each turn sends `summary: "auto"` (without it the app-server returns empty reasoning
 summaries); the `reasoning` item summaries become `reasoning` (joined by blank lines)
 and the last `agentMessage` becomes `content`, with or without tool calls.
-Codex keeps no Gateway-side state and still ignores `conversation_id` and
+`item/agentMessage/delta` and `item/reasoning/summaryTextDelta` are passed on as
+`delta` lines (§5) on their own lossy channel, so they can never crowd out the
+events that decide the turn. Starting the app-server and opening the turn must
+each answer within `LLM_SERVER_PROVIDER_TIMEOUT`; the turn itself fails with
+`PROVIDER_TIMEOUT` only when the app-server sends nothing about the thread for
+that long. Codex keeps no Gateway-side state and still ignores `conversation_id` and
 `continuation`; no resume scope was added.
 
 Offline fixtures cover the app-server launch flags, isolated environment, JSON-RPC

@@ -18,8 +18,8 @@ func TestGeminiTextUsesV1BetaSystemOptionsAuthenticationAndNullableUsage(t *test
 	var providerRequests atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		providerRequests.Add(1)
-		if r.Method != http.MethodPost || r.URL.Path != "/v1beta/models/"+geminiTestModel+":generateContent" {
-			t.Errorf("Gemini request = %s %s", r.Method, r.URL.Path)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1beta/models/"+geminiTestModel+":streamGenerateContent" || r.URL.RawQuery != "alt=sse" {
+			t.Errorf("Gemini request = %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
 		}
 		if got := r.Header.Get("x-goog-api-key"); got != "gemini-fixture-key" {
 			t.Errorf("Gemini x-goog-api-key = %q", got)

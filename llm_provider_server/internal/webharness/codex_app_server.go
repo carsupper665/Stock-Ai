@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"stock-ai/llm-provider-server/internal/providers"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,14 +64,16 @@ func (c *CodexAppServer) Complete(ctx context.Context, model providers.Model, re
 	if err != nil {
 		return providers.GenerateResponse{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, options.Client.Timeout)
-	defer cancel()
-	process, err := c.acquire(ctx, setup)
+	// Starting the app-server and opening the turn must each answer within the idle timeout; the
+	// turn itself then runs as long as the app-server keeps sending notifications.
+	acquireContext, cancel := idleBound(ctx, options.IdleTimeout)
+	process, err := c.acquire(acquireContext, setup)
+	cancel()
 	if err != nil {
 		return providers.GenerateResponse{}, HarnessProviderError("codex", err)
 	}
 	defer c.release(process)
-	response, err := process.generate(ctx, model.ID, setup.Effort, request)
+	response, err := process.generate(ctx, model.ID, setup.Effort, request, options)
 	if err != nil {
 		return providers.GenerateResponse{}, HarnessProviderError("codex", err)
 	}
@@ -140,7 +143,7 @@ type codexProcess struct {
 	mu       sync.Mutex
 	nextID   int64
 	pending  map[int64]chan rpcMessage
-	threads  map[string]chan rpcMessage
+	threads  map[string]*codexThread
 	failure  error
 	active   int
 	lastUsed time.Time
@@ -175,7 +178,7 @@ func startCodexProcess(ctx, base context.Context, setup HarnessSetup, login []by
 	}
 	processContext, stop := context.WithCancel(base)
 	p := &codexProcess{home: home, stdin: stdin, stop: stop, exited: make(chan struct{}), pending: map[int64]chan rpcMessage{},
-		threads: map[string]chan rpcMessage{}, lastUsed: time.Now()}
+		threads: map[string]*codexThread{}, lastUsed: time.Now()}
 	command.Stdout = &rpcLineWriter{process: p}
 	command.Stderr = io.Discard
 	go func() {
@@ -313,9 +316,26 @@ func jsonInt(value int64) []byte {
 	return encoded
 }
 
-// Only events that decide a Generate are routed to its thread; deltas and status chatter are dropped.
+// Events that decide a Generate are routed to its thread without loss. Text deltas only feed the
+// live display, so they travel on their own channel and are dropped when the reader lags; every
+// notification for the thread, status chatter included, shows the turn is still alive.
 var codexThreadEvents = map[string]bool{
 	"item/tool/call": true, "item/completed": true, "thread/tokenUsage/updated": true, "turn/completed": true, "error": true,
+}
+
+var codexDeltaEvents = map[string]bool{"item/agentMessage/delta": true, "item/reasoning/summaryTextDelta": true}
+
+type codexThread struct {
+	events chan rpcMessage
+	deltas chan rpcMessage
+	alive  chan struct{}
+}
+
+func idleBound(ctx context.Context, idle time.Duration) (context.Context, context.CancelFunc) {
+	if idle <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, idle)
 }
 
 func (p *codexProcess) dispatch(line []byte) {
@@ -342,14 +362,28 @@ func (p *codexProcess) dispatch(line []byte) {
 	}
 	_ = json.Unmarshal(message.Params, &scope)
 	p.mu.Lock()
-	events := p.threads[scope.ThreadID]
+	thread := p.threads[scope.ThreadID]
 	p.mu.Unlock()
-	if events != nil && codexThreadEvents[message.Method] {
+	if thread != nil && message.Method != "" {
 		select {
-		case events <- message:
-		default: // A Generate that already returned stops draining; never block the reader for it.
+		case thread.alive <- struct{}{}:
+		default:
 		}
-		return
+		// A Generate that already returned stops draining; never block the reader for it.
+		switch {
+		case codexThreadEvents[message.Method]:
+			select {
+			case thread.events <- message:
+			default:
+			}
+			return
+		case codexDeltaEvents[message.Method]:
+			select {
+			case thread.deltas <- message:
+			default:
+			}
+			return
+		}
 	}
 	if len(message.ID) != 0 {
 		// approvalPolicy=never and the disabled features leave no other Server request the Gateway can answer.
@@ -384,7 +418,7 @@ func (w *rpcLineWriter) Write(value []byte) (int, error) {
 	return written, nil
 }
 
-func (p *codexProcess) generate(ctx context.Context, model, effort string, request providers.GenerateRequest) (providers.GenerateResponse, error) {
+func (p *codexProcess) generate(ctx context.Context, model, effort string, request providers.GenerateRequest, options providers.Options) (providers.GenerateResponse, error) {
 	aliases := providers.NewToolAliases(request)
 	instructions, history, input := codexHistory(request.Messages, aliases.WireByRuntime)
 	tools := make([]map[string]any, 0, len(request.Tools))
@@ -401,13 +435,15 @@ func (p *codexProcess) generate(ctx context.Context, model, effort string, reque
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	if err := p.call(ctx, "thread/start", thread, &started); err != nil {
+	setup, cancel := idleBound(ctx, options.IdleTimeout)
+	defer cancel()
+	if err := p.call(setup, "thread/start", thread, &started); err != nil {
 		return providers.GenerateResponse{}, err
 	}
 	threadID := started.Thread.ID
-	events := make(chan rpcMessage, 256)
+	channels := &codexThread{events: make(chan rpcMessage, 256), deltas: make(chan rpcMessage, 256), alive: make(chan struct{}, 1)}
 	p.mu.Lock()
-	p.threads[threadID] = events
+	p.threads[threadID] = channels
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
@@ -416,7 +452,7 @@ func (p *codexProcess) generate(ctx context.Context, model, effort string, reque
 		p.notify("thread/unsubscribe", map[string]string{"threadId": threadID})
 	}()
 	if len(history) != 0 {
-		if err := p.call(ctx, "thread/inject_items", map[string]any{"threadId": threadID, "items": history}, nil); err != nil {
+		if err := p.call(setup, "thread/inject_items", map[string]any{"threadId": threadID, "items": history}, nil); err != nil {
 			return providers.GenerateResponse{}, err
 		}
 	}
@@ -430,15 +466,16 @@ func (p *codexProcess) generate(ctx context.Context, model, effort string, reque
 			ID string `json:"id"`
 		} `json:"turn"`
 	}
-	if err := p.call(ctx, "turn/start", turn, &startedTurn); err != nil {
+	if err := p.call(setup, "turn/start", turn, &startedTurn); err != nil {
 		return providers.GenerateResponse{}, err
 	}
-	return p.collect(ctx, threadID, startedTurn.Turn.ID, events, aliases.RuntimeByWire, providers.HistoricalToolCallIDs(request.Messages))
+	return p.collect(ctx, threadID, startedTurn.Turn.ID, channels, options, aliases.RuntimeByWire, providers.HistoricalToolCallIDs(request.Messages))
 }
 
 // collect reads the turn until it completes. The first tool call interrupts it: the caller runs
-// the tool and sends a new Generate with the result.
-func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, events chan rpcMessage, runtimeByWire map[string]string, historyIDs map[string]bool) (providers.GenerateResponse, error) {
+// the tool and sends a new Generate with the result. The turn times out only when the app-server
+// sends nothing about it for the idle timeout.
+func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, thread *codexThread, options providers.Options, runtimeByWire map[string]string, historyIDs map[string]bool) (providers.GenerateResponse, error) {
 	var content *string
 	var usage *providers.Usage
 	reasoning := []string{}
@@ -446,10 +483,48 @@ func (p *codexProcess) collect(ctx context.Context, threadID, turnID string, eve
 	failure := ""
 	fatalError := false
 	interrupt := map[string]string{"threadId": threadID, "turnId": turnID}
+	var idle <-chan time.Time
+	touch := func() {}
+	if options.IdleTimeout > 0 {
+		timer := time.NewTimer(options.IdleTimeout)
+		defer timer.Stop()
+		idle = timer.C
+		touch = func() { timer.Reset(options.IdleTimeout) }
+	}
+	deltaParts := ""
 	for {
 		var event rpcMessage
 		select {
-		case event = <-events:
+		case event = <-thread.events:
+			touch()
+		case delta := <-thread.deltas:
+			touch()
+			var text struct {
+				Delta        string `json:"delta"`
+				ItemID       string `json:"itemId"`
+				SummaryIndex int64  `json:"summaryIndex"`
+			}
+			if json.Unmarshal(delta.Params, &text) != nil || options.OnDelta == nil {
+				continue
+			}
+			if delta.Method == "item/agentMessage/delta" {
+				options.OnDelta(text.Delta, "")
+				continue
+			}
+			// Summary parts are joined with a blank line, as codexResponse joins them.
+			part := text.ItemID + "/" + strconv.FormatInt(text.SummaryIndex, 10)
+			if deltaParts != "" && part != deltaParts {
+				text.Delta = "\n\n" + text.Delta
+			}
+			deltaParts = part
+			options.OnDelta("", text.Delta)
+			continue
+		case <-thread.alive:
+			touch()
+			continue
+		case <-idle:
+			p.notify("turn/interrupt", interrupt)
+			return providers.GenerateResponse{}, context.DeadlineExceeded
 		case <-ctx.Done():
 			p.notify("turn/interrupt", interrupt)
 			return providers.GenerateResponse{}, ctx.Err()

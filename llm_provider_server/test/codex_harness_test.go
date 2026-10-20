@@ -36,7 +36,7 @@ func codexComplete(t *testing.T, ctx context.Context, server *webharness.CodexAp
 	t.Helper()
 	return server.Complete(ctx, providers.Model{Provider: "codex", ID: model, Config: json.RawMessage(`{"auth_mode":"api_key"}`)},
 		providers.GenerateRequest{Provider: "codex", Messages: messages, Tools: tools},
-		providers.Options{APIKey: key, Client: &http.Client{Timeout: timeout}})
+		providers.Options{APIKey: key, Client: &http.Client{}, IdleTimeout: timeout})
 }
 
 func userMessages(content string) []providers.Message {
@@ -136,6 +136,31 @@ func TestCodexAppServerRejectsWrongVersionAndInvalidOutput(t *testing.T) {
 				t.Fatalf("error = %v, want %s", err, test.code)
 			}
 		})
+	}
+}
+
+func TestCodexAppServerStreamsDeltasAndRunsPastTheIdleTimeout(t *testing.T) {
+	t.Setenv("LLM_SERVER_CODEX_EXECUTABLE", copyHarnessFixture(t, "codex-fixture.exe"))
+	server := webharness.NewCodexAppServer()
+	defer server.Close()
+	// Start the app-server first: this test is about the turn, and a race build starts slowly.
+	if _, err := codexComplete(t, context.Background(), server, "fixture-codex-key", "pid-report", 15*time.Second, userMessages("warm up"), nil); err != nil {
+		t.Fatal(err)
+	}
+	var content, reasoning strings.Builder
+	started := time.Now()
+	response, err := server.Complete(context.Background(), providers.Model{Provider: "codex", ID: "slow-stream", Config: json.RawMessage(`{"auth_mode":"api_key"}`)},
+		providers.GenerateRequest{Provider: "codex", Messages: userMessages("hello")},
+		providers.Options{APIKey: "fixture-codex-key", Client: &http.Client{}, IdleTimeout: 400 * time.Millisecond,
+			OnDelta: func(text, thought string) { content.WriteString(text); reasoning.WriteString(thought) }})
+	if err != nil {
+		t.Fatalf("slow stream failed after %s: %v", time.Since(started), err)
+	}
+	if time.Since(started) < 800*time.Millisecond || value2(response.Content) != "slow answer" {
+		t.Fatalf("response = %q after %s", value2(response.Content), time.Since(started))
+	}
+	if content.String() != "slow answer" || reasoning.String() != "p0s0 p0s1 p0s2 \n\np1s0 p1s1 p1s2 " {
+		t.Fatalf("deltas = content %q, reasoning %q", content.String(), reasoning.String())
 	}
 }
 
@@ -413,6 +438,22 @@ func serveCodexFixture() int {
 					"threadId": thread.id, "turnId": "turn-" + thread.id, "callId": "call-price", "tool": thread.tools[0].Name,
 					"arguments": map[string]string{"symbol": "BTCUSDT"}}})
 			case "hang":
+			case "slow-stream":
+				// Each notification arrives well within the idle timeout, the whole turn well past it.
+				for part := range 2 {
+					for step := range 3 {
+						time.Sleep(100 * time.Millisecond)
+						emit("item/reasoning/summaryTextDelta", map[string]any{"threadId": thread.id, "turnId": "turn-" + thread.id,
+							"itemId": "reasoning-1", "summaryIndex": part, "delta": fmt.Sprintf("p%ds%d ", part, step)})
+					}
+				}
+				for _, word := range []string{"slow ", "answer"} {
+					time.Sleep(100 * time.Millisecond)
+					emit("item/agentMessage/delta", map[string]any{"threadId": thread.id, "turnId": "turn-" + thread.id, "itemId": "message-1", "delta": word})
+				}
+				emit("item/completed", map[string]any{"threadId": thread.id,
+					"item": map[string]any{"type": "reasoning", "summary": []string{"p0s0 p0s1 p0s2 ", "p1s0 p1s1 p1s2 "}, "content": []string{}}})
+				completeWith(thread, "slow answer")
 			case "invalid-output":
 				emit("turn/completed", map[string]any{"threadId": thread.id, "turn": map[string]any{"id": "turn-" + thread.id, "status": "completed"}})
 			case "auth-failure":

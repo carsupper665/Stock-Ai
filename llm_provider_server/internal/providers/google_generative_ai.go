@@ -24,7 +24,7 @@ var GeminiOptionNames = map[string]bool{
 	"topP":             true,
 }
 
-// GoogleGenerativeAI is pi-ai's google-generative-ai Api: one non-streaming generateContent call with an
+// GoogleGenerativeAI is pi-ai's google-generative-ai Api: one streamGenerateContent call with an
 // x-goog-api-key credential, limited to the model whose state needs no thought signatures.
 type GoogleGenerativeAI struct{}
 
@@ -38,12 +38,12 @@ func (api GoogleGenerativeAI) Complete(ctx context.Context, model Model, request
 		return GenerateResponse{}, errCredentialRequired
 	}
 	call.headers["x-goog-api-key"] = options.APIKey
-	response, err := postJSON(ctx, options.Client, call)
+	response, err := postJSON(ctx, options, call)
 	if err != nil {
 		return GenerateResponse{}, err
 	}
 	defer response.Body.Close()
-	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages))
+	return api.parseResponse(response, aliases.RuntimeByWire, HistoricalToolCallIDs(request.Messages), options)
 }
 
 func (api GoogleGenerativeAI) buildParams(baseURL, model string, request GenerateRequest, options map[string]json.RawMessage, WireByRuntime map[string]string) (providerCall, error) {
@@ -83,7 +83,7 @@ func (api GoogleGenerativeAI) buildParams(baseURL, model string, request Generat
 		return providerCall{}, errors.New("Options contain an invalid value.")
 	}
 	return providerCall{
-		url: strings.TrimRight(baseURL, "/") + "/models/" + model + ":generateContent", headers: map[string]string{}, body: encoded,
+		url: strings.TrimRight(baseURL, "/") + "/models/" + model + ":streamGenerateContent?alt=sse", headers: map[string]string{}, body: encoded,
 	}, nil
 }
 
@@ -148,7 +148,7 @@ func geminiToolResult(content *string) (map[string]json.RawMessage, error) {
 	return result, nil
 }
 
-func (api GoogleGenerativeAI) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool) (GenerateResponse, error) {
+func (api GoogleGenerativeAI) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool, options Options) (GenerateResponse, error) {
 	switch upstream.StatusCode {
 	case http.StatusBadRequest:
 		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "Gemini rejected the generated request."}
@@ -158,7 +158,7 @@ func (api GoogleGenerativeAI) parseResponse(upstream *http.Response, RuntimeByWi
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 		return GenerateResponse{}, upstreamStatusFailure(upstream)
 	}
-	body, err := readProviderBody(upstream.Body)
+	body, err := readResponseBody(upstream, func(reader io.Reader) ([]byte, error) { return assembleGeminiStream(reader, options) })
 	if err != nil {
 		return GenerateResponse{}, err
 	}
@@ -317,4 +317,97 @@ func normalizeGeminiFinishReason(reason string, hasText, hasCalls bool) (string,
 	default:
 		return "", errors.New("invalid Gemini response")
 	}
+}
+
+// assembleGeminiStream folds streamGenerateContent chunks into one GenerateContentResponse: each
+// candidate collects its parts in order, and the last finish reason, prompt feedback and usage win.
+func assembleGeminiStream(reader io.Reader, options Options) ([]byte, error) {
+	type streamedCandidate struct {
+		role         string
+		parts        []json.RawMessage
+		finishReason string
+	}
+	var candidates []*streamedCandidate
+	var promptFeedback, usage json.RawMessage
+	var size streamText
+	err := readServerSentEvents(reader, func(_ string, data []byte) (bool, error) {
+		var chunk struct {
+			Candidates []struct {
+				Index   int `json:"index"`
+				Content *struct {
+					Role  string            `json:"role"`
+					Parts []json.RawMessage `json:"parts"`
+				} `json:"content"`
+				FinishReason string `json:"finishReason"`
+			} `json:"candidates"`
+			PromptFeedback json.RawMessage `json:"promptFeedback"`
+			Usage          json.RawMessage `json:"usageMetadata"`
+			Error          json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal(data, &chunk) != nil {
+			return false, errors.New("invalid Gemini stream")
+		}
+		if len(chunk.Error) != 0 && !IsJSONNull(chunk.Error) {
+			return false, errStreamFailed
+		}
+		if len(chunk.PromptFeedback) != 0 {
+			promptFeedback = chunk.PromptFeedback
+		}
+		if len(chunk.Usage) != 0 {
+			usage = chunk.Usage
+		}
+		for _, candidate := range chunk.Candidates {
+			if candidate.Index < 0 || candidate.Index > len(candidates) {
+				return false, errors.New("invalid Gemini stream")
+			}
+			if candidate.Index == len(candidates) {
+				candidates = append(candidates, &streamedCandidate{})
+			}
+			target := candidates[candidate.Index]
+			if candidate.FinishReason != "" {
+				target.finishReason = candidate.FinishReason
+			}
+			if candidate.Content == nil {
+				continue
+			}
+			if candidate.Content.Role != "" {
+				target.role = candidate.Content.Role
+			}
+			for _, part := range candidate.Content.Parts {
+				target.parts = append(target.parts, part)
+				if err := size.add(string(part)); err != nil {
+					return false, err
+				}
+				var text struct {
+					Text string `json:"text"`
+				}
+				if candidate.Index == 0 && json.Unmarshal(part, &text) == nil {
+					options.delta(text.Text, "")
+				}
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	assembled := map[string]any{}
+	list := make([]map[string]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		item := map[string]any{"finishReason": candidate.finishReason}
+		if candidate.role != "" || candidate.parts != nil {
+			item["content"] = map[string]any{"role": candidate.role, "parts": candidate.parts}
+		}
+		list = append(list, item)
+	}
+	if len(list) != 0 {
+		assembled["candidates"] = list
+	}
+	if promptFeedback != nil {
+		assembled["promptFeedback"] = promptFeedback
+	}
+	if usage != nil {
+		assembled["usageMetadata"] = usage
+	}
+	return json.Marshal(assembled)
 }
