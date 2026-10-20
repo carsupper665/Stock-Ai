@@ -31,7 +31,8 @@ def main():
         check("建立兩個帳號", True)
 
         check.section("發布留言")
-        status, posted, _ = server.request("POST", "/v1/messages", USER_TOKEN, {"content": "Market looks choppy today."})
+        status, posted, _ = server.request("POST", "/v1/messages", USER_TOKEN,
+                                          {"content": "Market looks choppy today.", "tags": ["BTC-Agent-01"]})
         check("USER 發布回 201", status == 201, f"{status} {posted}")
         check("回應以 you 顯示自己", posted.get("user_name") == "you", str(posted))
         check("回應帶 id 與 created_at",
@@ -42,12 +43,26 @@ def main():
                                                   {"content": "BTC breakout looks valid.", "tags": ["ETH-Agent-02"]})
         check("帳號 A 發布回 201", status == 201, f"實際 {status}")
         check("發布回應保留帳號名稱標籤", alpha_posted.get("tags") == ["ETH-Agent-02"], str(alpha_posted))
-        status, _, _ = server.request("POST", "/v1/messages", beta, {"content": "ETH is lagging."})
+        status, _, _ = server.request("POST", "/v1/messages", beta, {"content": "ETH is lagging.", "tags": [USER_NAME]})
         check("帳號 B 發布回 201", status == 201, f"實際 {status}")
 
-        status, err, _ = server.request("POST", "/v1/messages", None, {"content": "anon"})
+        check.section("每則留言都要寄給 USER 或其他帳號")
+        for label, token, body in [
+            ("沒有 tags", alpha, {"content": "hi"}),
+            ("空 tags", alpha, {"content": "hi", "tags": []}),
+            ("tag 不存在的帳號", alpha, {"content": "hi", "tags": ["risk"]}),
+            ("帳號 tag 自己", alpha, {"content": "hi", "tags": ["BTC-Agent-01"]}),
+            ("USER tag 自己", USER_TOKEN, {"content": "hi", "tags": ["USER"]}),
+        ]:
+            status, err, _ = server.request("POST", "/v1/messages", token, body)
+            check(f"{label} 回 400", status == 400, f"{status} {err}")
+        _, inbox, _ = server.request("GET", "/v1/messages?tag=USER", USER_TOKEN)
+        check("tag USER_NAME 存成 USER", [m.get("content") for m in inbox.get("messages", [])] == ["ETH is lagging."],
+              str(inbox))
+
+        status, err, _ = server.request("POST", "/v1/messages", None, {"content": "anon", "tags": ["USER"]})
         check("未帶 token 發布回 401", status == 401, f"{status} {err}")
-        status, err, _ = server.request("POST", "/v1/messages", "at_bogus", {"content": "spoof"})
+        status, err, _ = server.request("POST", "/v1/messages", "at_bogus", {"content": "spoof", "tags": ["USER"]})
         check("無效 token 發布回 401", status == 401, f"{status} {err}")
         status, err, _ = server.request("POST", "/v1/messages", alpha, {"content": "hi", "author_name": "Bless"})
         check("自帶 author_name 回 400", status == 400, f"{status} {err}")
@@ -78,7 +93,7 @@ def main():
         check.section("固定十筆分頁、排序與標籤")
         for i in range(35):
             server.request("POST", "/v1/messages", alpha,
-                           {"content": f"tick {i:02d}", "tags": ["ETH-Agent-02"] if i % 2 == 0 else []})
+                           {"content": f"tick {i:02d}", "tags": ["ETH-Agent-02"] if i % 2 == 0 else ["USER"]})
 
         _, body, _ = server.request("GET", "/v1/messages")
         check("預設固定 10 則", len(body.get("messages", [])) == 10, f"實際 {len(body.get('messages', []))}")
@@ -105,7 +120,8 @@ def main():
         check("其他帳號不可刪除", status == 403, f"實際 {status}")
         status, _, _ = server.request("DELETE", f"/v1/messages/{alpha_posted['id']}", alpha)
         check("作者可刪除", status == 204, f"實際 {status}")
-        status, user_post, _ = server.request("POST", "/v1/messages", USER_TOKEN, {"content": "remove me"})
+        status, user_post, _ = server.request("POST", "/v1/messages", USER_TOKEN,
+                                              {"content": "remove me", "tags": ["BTC-Agent-01"]})
         status, _, _ = server.request("DELETE", f"/v1/messages/{user_post['id']}", USER_TOKEN)
         check("USER 可管理刪除", status == 204, f"實際 {status}")
 

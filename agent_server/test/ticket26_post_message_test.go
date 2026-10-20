@@ -120,7 +120,10 @@ func TestTicket26PostMessageValidationMatchesBackendBoundaries(t *testing.T) {
 		{name: "string root", arguments: `{"content":"hi"} trailing`},
 		{name: "mixed-case declared field", arguments: map[string]any{"CONTENT": "hi"}},
 		{name: "null content", arguments: map[string]any{"content": nil}},
-		{name: "exact Unicode limit after trim", arguments: map[string]any{"content": "  " + strings.Repeat("界", 500) + "  "}, wantBackend: true, wantContent: strings.Repeat("界", 500)},
+		{name: "missing tags", arguments: map[string]any{"content": "hi"}},
+		{name: "empty tags", arguments: map[string]any{"content": "hi", "tags": []string{}}},
+		{name: "null tags", arguments: map[string]any{"content": "hi", "tags": nil}},
+		{name: "exact Unicode limit after trim", arguments: map[string]any{"content": "  " + strings.Repeat("界", 500) + "  ", "tags": []string{"USER"}}, wantBackend: true, wantContent: strings.Repeat("界", 500)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -188,7 +191,7 @@ func TestTicket26PostMessageRejectsDisabledOrBackendRejectedRefreshedIdentityWit
 						fixture.accountStatus = "disabled"
 						fixture.mu.Unlock()
 					}
-					messageToolCall(w, "post-identity", "post_message", map[string]any{"content": "must not be retried"})
+					messageToolCall(w, "post-identity", "post_message", map[string]any{"content": "must not be retried", "tags": []string{"USER"}})
 					return
 				}
 				result := messageToolResult(t, request, "post-identity")
@@ -226,7 +229,7 @@ func TestTicket26PostMessageRejectsNullFieldAndMalformedSuccessWithoutRetry(t *t
 			fixture := newMessageToolFixture()
 			fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 				if call == 1 {
-					messageToolCall(w, "post-invalid-success", "post_message", map[string]any{"content": "one attempt"})
+					messageToolCall(w, "post-invalid-success", "post_message", map[string]any{"content": "one attempt", "tags": []string{"USER"}})
 					return
 				}
 				result := messageToolResult(t, request, "post-invalid-success")
@@ -261,7 +264,7 @@ func TestTicket26PostMessagePartialErrorBodyTimeoutIsUnknownAndNotRetried(t *tes
 	var startOnce, cancelOnce sync.Once
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		if call == 1 {
-			messageToolCall(w, "post-partial-error", "post_message", map[string]any{"content": "possibly stored"})
+			messageToolCall(w, "post-partial-error", "post_message", map[string]any{"content": "possibly stored", "tags": []string{"USER"}})
 			return
 		}
 		result := messageToolResult(t, request, "post-partial-error")
@@ -304,7 +307,7 @@ func TestTicket26PostMessagePreservesExactBackendErrorAndMarksFiveHundredUnknown
 	fixture := newMessageToolFixture()
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		if call == 1 {
-			messageToolCall(w, "post-backend-error", "post_message", map[string]any{"content": "one attempt"})
+			messageToolCall(w, "post-backend-error", "post_message", map[string]any{"content": "one attempt", "tags": []string{"USER"}})
 			return
 		}
 		result := messageToolResult(t, request, "post-backend-error")
@@ -334,14 +337,14 @@ func TestTicket26PostTimeoutAfterWriteIsUnknownAndNeverAutomaticallyRetried(t *t
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		switch call {
 		case 1:
-			messageToolCall(w, "post-timeout", "post_message", map[string]any{"content": "first attempt"})
+			messageToolCall(w, "post-timeout", "post_message", map[string]any{"content": "first attempt", "tags": []string{"USER"}})
 		case 2:
 			result := messageToolResult(t, request, "post-timeout")
 			errorBody, _ := result["error"].(map[string]any)
 			if errorBody["code"] != "TOOL_TIMEOUT" || errorBody["outcome"] != "unknown" || stored.Load() != 1 {
 				t.Errorf("timeout result=%#v stored=%d", result, stored.Load())
 			}
-			messageToolCall(w, "post-explicit-second", "post_message", map[string]any{"content": "second LLM attempt"})
+			messageToolCall(w, "post-explicit-second", "post_message", map[string]any{"content": "second LLM attempt", "tags": []string{"USER"}})
 		default:
 			result := messageToolResult(t, request, "post-explicit-second")
 			if result["ok"] != true || stored.Load() != 2 {

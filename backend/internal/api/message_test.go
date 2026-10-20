@@ -22,6 +22,7 @@ func messageNames(body map[string]any) []string {
 func TestPostMessageRequiresTokenAndReturnsTags(t *testing.T) {
 	engine, _ := newTestServer(t)
 	_, token := createAccountFor(t, engine, "BTC-Agent-01", 100)
+	createAccountFor(t, engine, "ETH-Agent-02", 100)
 
 	if status, _ := do(t, engine, http.MethodPost, "/v1/messages", "", gin.H{"content": "hi"}); status != http.StatusUnauthorized {
 		t.Fatalf("未帶 token 發布應回 401，得到 %d", status)
@@ -46,7 +47,7 @@ func TestPostMessageRequiresTokenAndReturnsTags(t *testing.T) {
 		}
 	}
 
-	status, body = do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "from user"})
+	status, body = do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "from user", "tags": []string{"BTC-Agent-01"}})
 	if status != http.StatusCreated || body["user_name"] != "you" {
 		t.Fatalf("USER 也可以發布: %d %v", status, body)
 	}
@@ -73,14 +74,54 @@ func TestPostMessageValidation(t *testing.T) {
 	}
 }
 
+func TestPostMessageRequiresOtherRecipient(t *testing.T) {
+	engine, _ := newTestServer(t)
+	_, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
+	createAccountFor(t, engine, "ETH-Agent-02", 100)
+
+	for _, test := range []struct {
+		name  string
+		token string
+		tags  []string
+	}{
+		{"沒有 tags", alpha, nil},
+		{"空 tags", alpha, []string{}},
+		{"不存在的帳號", alpha, []string{"risk"}},
+		{"帳號 tag 自己", alpha, []string{"BTC-Agent-01"}},
+		{"USER tag 自己", testUserToken, []string{"USER"}},
+		{"USER 用 USER_NAME tag 自己", testUserToken, []string{"Bless"}},
+		{"USER 與 USER_NAME 重複", alpha, []string{"USER", "Bless"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := gin.H{"content": "hi"}
+			if test.tags != nil {
+				body["tags"] = test.tags
+			}
+			if status, resp := do(t, engine, http.MethodPost, "/v1/messages", test.token, body); status != http.StatusBadRequest {
+				t.Fatalf("應回 400，得到 %d: %v", status, resp)
+			}
+		})
+	}
+
+	status, body := do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{"content": "bug report", "tags": []string{"Bless", "ETH-Agent-02"}})
+	tags, _ := body["tags"].([]any)
+	if status != http.StatusCreated || fmt.Sprint(tags) != "[USER ETH-Agent-02]" {
+		t.Fatalf("USER_NAME 應存成 USER: %d %v", status, body)
+	}
+	status, body = do(t, engine, http.MethodGet, "/v1/messages?tag=USER", testUserToken, nil)
+	if status != http.StatusOK || len(body["messages"].([]any)) != 1 {
+		t.Fatalf("tag=USER 應查到寄給 USER 的留言: %d %v", status, body)
+	}
+}
+
 func TestListMessagesOptionalAuth(t *testing.T) {
 	engine, _ := newTestServer(t)
 	_, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
 	_, beta := createAccountFor(t, engine, "ETH-Agent-02", 100)
 
-	do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "1"})
-	do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{"content": "2"})
-	do(t, engine, http.MethodPost, "/v1/messages", beta, gin.H{"content": "3"})
+	do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "1", "tags": []string{"BTC-Agent-01"}})
+	do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{"content": "2", "tags": []string{"USER"}})
+	do(t, engine, http.MethodPost, "/v1/messages", beta, gin.H{"content": "3", "tags": []string{"USER"}})
 
 	cases := []struct {
 		name  string

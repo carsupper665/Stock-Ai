@@ -31,6 +31,8 @@ type messageToolFixture struct {
 	messageCalls  int
 	messageAuth   []string
 	message       func(http.ResponseWriter, *http.Request, int)
+	inbox         func(http.ResponseWriter, *http.Request, int)
+	inboxCalls    int
 	generate      func(http.ResponseWriter, *http.Request, int)
 	generateCalls int
 	toolTimeout   time.Duration
@@ -77,6 +79,18 @@ func (f *messageToolFixture) serveBackend(w http.ResponseWriter, request *http.R
 		messageFixtureJSON(w, http.StatusOK, map[string]any{
 			"id": messageAccountID, "user_name": "Message Agent", "status": status, "token": token,
 		})
+		return
+	}
+	if isInboxRequest(request, "Message Agent") {
+		f.mu.Lock()
+		f.inboxCalls++
+		call, handler := f.inboxCalls, f.inbox
+		f.mu.Unlock()
+		if handler == nil {
+			emptyInbox(w)
+			return
+		}
+		handler(w, request, call)
 		return
 	}
 	if request.URL.Path == "/v1/messages" {

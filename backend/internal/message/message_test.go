@@ -42,8 +42,15 @@ func newTestService(t *testing.T) (*Service, *database.Store) {
 	return New(store, "Bless"), store
 }
 
+// mustPost 沒指定 tags 時寄給一個合法的收件人：帳號寄給 USER，USER 寄給 alpha。
 func mustPost(t *testing.T, s *Service, author auth.Identity, content string, tags ...string) *database.Message {
 	t.Helper()
+	if len(tags) == 0 {
+		tags = []string{UserTag}
+		if author.IsUser() {
+			tags = []string{alpha.UserName}
+		}
+	}
 	m, err := s.Post(context.Background(), author, content, tags)
 	if err != nil {
 		t.Fatalf("發布留言: %v", err)
@@ -93,7 +100,7 @@ func TestPostRejectsBadContent(t *testing.T) {
 	if _, err := s.Post(ctx, alpha, strings.Repeat("字", MaxContentLen+1), nil); !errors.Is(err, ErrContentLong) {
 		t.Fatalf("過長內容應被拒絕，得到 %v", err)
 	}
-	if _, err := s.Post(ctx, alpha, strings.Repeat("字", MaxContentLen), nil); err != nil {
+	if _, err := s.Post(ctx, alpha, strings.Repeat("字", MaxContentLen), []string{UserTag}); err != nil {
 		t.Fatalf("剛好上限應可發布: %v", err)
 	}
 	if _, err := s.Post(ctx, alpha, "tagged", []string{"beta", " beta "}); !errors.Is(err, ErrInvalidTags) {

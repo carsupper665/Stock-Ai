@@ -40,6 +40,17 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			"ok": true, "id": account.ID, "user_name": account.UserName, "status": account.Status,
 			"initial_balance": account.InitialBalance, "balance": account.Balance,
 		}
+		inbox, err := r.inbox(ctx, session.ID, runID, account)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			r.handleRunPersistenceError(session.ID, runID, err)
+			return
+		}
+		if inbox != nil {
+			contextBody["inbox"] = inbox
+		}
 	}
 	if trigger == "session_restart" && len(session.RestartContext) != 0 && string(session.RestartContext) != "null" {
 		restartContext, err := normalizeRestartContext(session.RestartContext)

@@ -125,7 +125,7 @@ async function removeSelected() {
 }
 
 async function post() {
-  if (!draft.value.trim() || characterCount.value > 500) return
+  if (!draft.value.trim() || characterCount.value > 500 || !selectedTags.value.length) return
   busy.value = true
   listGeneration++
   loadingMore.value = false
@@ -166,7 +166,7 @@ async function remove(message) {
       <section class="card col compose">
         <textarea v-model="draft" :disabled="bulkDeleting" placeholder="以 USER 身分留話給 Agent…"></textarea>
         <div v-if="data?.accounts.length" class="row tags">
-          <span class="note">標記帳號</span>
+          <span class="note">寄給（至少一個）</span>
           <label v-for="account in data.accounts" :key="account.id" class="row">
             <input v-model="selectedTags" type="checkbox" :value="account.user_name" :disabled="bulkDeleting" />
             {{ account.user_name }}
@@ -175,7 +175,7 @@ async function remove(message) {
         <div class="row">
           <span class="mono" :data-tone="characterCount > 500 ? 'neg' : 'mute'">{{ characterCount }} / 500</span>
           <span class="note grow">只發布需要協作的訊息；避免例行進度與重複日誌。</span>
-          <button data-tone="acc" :disabled="busy || bulkDeleting || !draft.trim() || characterCount > 500" @click="post">發佈</button>
+          <button data-tone="acc" :disabled="busy || bulkDeleting || !draft.trim() || characterCount > 500 || !selectedTags.length" @click="post">發佈</button>
         </div>
       </section>
 
@@ -183,6 +183,7 @@ async function remove(message) {
         <label class="row">標籤
           <select v-model="tagFilter" :disabled="bulkDeleting" @change="resetList">
             <option value="">全部</option>
+            <option value="USER">給我的</option>
             <option v-for="account in data?.accounts ?? []" :key="account.id" :value="account.user_name">{{ account.user_name }}</option>
           </select>
         </label>

@@ -60,6 +60,29 @@ it('以 USER token 發布含帳號名稱 tags 的 500 Unicode 字元內訊息', 
   expect(JSON.parse(request.body)).toEqual({ content: '😀 hello', tags: ['Research Agent'] })
 })
 
+it('沒有收件人不能發佈，「給我的」查寄給 USER 的留言', async () => {
+  session.token = 'user-token'
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/v1/accounts') return respond({ accounts: [{ id: 'acc_1', user_name: 'Research Agent' }] })
+    return respond({ messages: [], page: 1, has_more: false })
+  })
+  mountPage()
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Research Agent'))
+  const textarea = document.querySelector('textarea')
+  textarea.value = 'hello'
+  textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  await nextTick()
+  expect(button('發佈').disabled).toBe(true)
+  document.querySelector('input[type=checkbox]').click()
+  await nextTick()
+  expect(button('發佈').disabled).toBe(false)
+
+  const filter = document.querySelectorAll('select')[0]
+  filter.value = 'USER'
+  filter.dispatchEvent(new Event('change', { bubbles: true }))
+  await vi.waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/v1/messages?page=1&sort=desc&tag=USER')).toBe(true))
+})
+
 it('使用固定 page/sort/tag 查詢並經確認刪除留言', async () => {
   session.token = 'user-token'
   const message = { id: 'msg_1', user_name: 'Agent A', content: 'action needed', tags: ['Agent B'], created_at: '2026-09-16T00:00:00Z' }

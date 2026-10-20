@@ -89,12 +89,17 @@ func (b *tradingBackend) serve(w http.ResponseWriter, request *http.Request) {
 			accountID = id
 		}
 	}
-	if accountID != "" {
+	inbox := accountID != "" && isInboxRequest(request, accountID)
+	if accountID != "" && !inbox {
 		b.requests = append(b.requests, tradingRequest{AccountID: accountID, Method: request.Method, URI: request.URL.RequestURI(), Body: string(body)})
 	}
 	b.mu.Unlock()
 	if accountID == "" {
 		writeFixtureJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized", "message": "token 無效或帳號已停用"})
+		return
+	}
+	if inbox {
+		emptyInbox(w)
 		return
 	}
 	b.handle(w, request, accountID, body)

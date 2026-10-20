@@ -101,3 +101,21 @@ func (s *Store) AccountNames(ctx context.Context, ids []string) (map[string]stri
 	}
 	return names, nil
 }
+
+// AccountIDsByName 依名稱查帳號 id，用來確認留言的 tag 是存在的帳號。
+func (s *Store) AccountIDsByName(ctx context.Context, names []string) (map[string]string, error) {
+	ids := make(map[string]string, len(names))
+	if len(names) == 0 {
+		return ids, nil
+	}
+
+	var accounts []Account
+	err := s.db.WithContext(ctx).Select("id", "user_name").Where("user_name IN ?", names).Find(&accounts).Error
+	if err != nil {
+		return nil, translate(err)
+	}
+	for _, a := range accounts {
+		ids[a.UserName] = a.ID
+	}
+	return ids, nil
+}

@@ -41,12 +41,12 @@ func messageDefinitions() []map[string]any {
 			},
 		},
 		{
-			"name": "post_message", "description": "Publish one message to the shared board as the bound Account: a trading insight or lesson for other agents, an improvement proposal, or a bug report. Never post trades, orders, positions, PnL, routine progress, completion notices, raw tool output or secrets. Tag Account names a message is addressed to.",
+			"name": "post_message", "description": "Publish one message to the shared board as the bound Account: a trading insight or lesson for other agents, an improvement proposal, or a bug report. Never post trades, orders, positions, PnL, routine progress, completion notices, raw tool output or secrets. Tag at least one recipient: USER for the developer, or another Account's user_name for its agent; never yourself.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
 					"content": map[string]any{"type": "string", "minLength": 1, "maxLength": messageContentLimit},
-					"tags":    map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "uniqueItems": true},
-				}, "required": []string{"content"}, "additionalProperties": false,
+					"tags":    map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+				}, "required": []string{"content", "tags"}, "additionalProperties": false,
 			},
 		},
 	}
@@ -85,7 +85,7 @@ func MessageQuery(arguments json.RawMessage) (url.Values, error) {
 func MessagePostArguments(arguments json.RawMessage) (string, []string, error) {
 	raw, err := decodeMessageObject(arguments, "content", "tags")
 	if err != nil {
-		return "", nil, errors.New("content is required and only content and tags are accepted")
+		return "", nil, errors.New("content and tags are required and only content and tags are accepted")
 	}
 	var content string
 	if len(raw["content"]) == 0 || bytes.Equal(bytes.TrimSpace(raw["content"]), []byte("null")) || json.Unmarshal(raw["content"], &content) != nil {
@@ -98,12 +98,12 @@ func MessagePostArguments(arguments json.RawMessage) (string, []string, error) {
 	if utf8.RuneCountInString(content) > messageContentLimit {
 		return "", nil, fmt.Errorf("content cannot exceed %d Unicode characters", messageContentLimit)
 	}
-	tags := make([]string, 0)
-	if len(raw["tags"]) == 0 {
-		return content, tags, nil
-	}
-	if bytes.Equal(bytes.TrimSpace(raw["tags"]), []byte("null")) || json.Unmarshal(raw["tags"], &tags) != nil {
+	var tags []string
+	if len(raw["tags"]) == 0 || bytes.Equal(bytes.TrimSpace(raw["tags"]), []byte("null")) || json.Unmarshal(raw["tags"], &tags) != nil {
 		return "", nil, errors.New("tags must be an array of strings")
+	}
+	if len(tags) == 0 {
+		return "", nil, errors.New("tags must name at least one recipient: USER or another Account's user_name")
 	}
 	seen := make(map[string]bool, len(tags))
 	for index, tag := range tags {

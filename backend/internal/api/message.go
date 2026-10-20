@@ -105,7 +105,8 @@ func (s *Server) writeMessageError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, message.ErrEmptyContent), errors.Is(err, message.ErrContentLong),
 		errors.Is(err, message.ErrInvalidSort), errors.Is(err, message.ErrInvalidPage),
-		errors.Is(err, message.ErrInvalidTag), errors.Is(err, message.ErrInvalidTags):
+		errors.Is(err, message.ErrInvalidTag), errors.Is(err, message.ErrInvalidTags),
+		errors.Is(err, message.ErrNoRecipient), errors.Is(err, message.ErrUnknownTag), errors.Is(err, message.ErrSelfTag):
 		fail(c, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, message.ErrForbidden):
 		fail(c, http.StatusForbidden, "forbidden", err.Error())

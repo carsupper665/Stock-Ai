@@ -26,15 +26,15 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 	other := createTicket26Account(t, backendURL, "Other Message Agent")
 	posted := make([]ticket26MessageView, 0, 35)
 	for index := 0; index < 35; index++ {
-		token := messageBackendToken
+		token, tag := messageBackendToken, "Other Message Agent"
 		switch index % 3 {
 		case 1:
-			token = other.Token
+			token, tag = other.Token, "USER"
 		case 2:
-			token = bound.Token
+			token, tag = bound.Token, "USER"
 		}
 		raw := ticket26BackendRequest(t, http.MethodPost, backendURL+"/v1/messages", token, map[string]any{
-			"content": fmt.Sprintf("seed %02d", index),
+			"content": fmt.Sprintf("seed %02d", index), "tags": []string{tag},
 		}, http.StatusCreated)
 		var message ticket26MessageView
 		if err := json.Unmarshal(raw, &message); err != nil || message.ID == "" || message.CreatedAt == "" {
@@ -48,7 +48,7 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		switch call {
 		case 1:
-			messageToolCall(w, "cross-post", "post_message", map[string]any{"content": "from bound account"})
+			messageToolCall(w, "cross-post", "post_message", map[string]any{"content": "from bound account", "tags": []string{"USER"}})
 		case 2:
 			post := messageToolResult(t, request, "cross-post")
 			postResult, _ := post["result"].(map[string]any)
@@ -111,7 +111,7 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 	if err := json.Unmarshal(resetRaw, &reset); err != nil || reset.Token == "" || reset.Token == bound.Token {
 		t.Fatalf("actual Backend Token reset = %+v (%v)", reset, err)
 	}
-	ticket26BackendRequest(t, http.MethodPost, backendURL+"/v1/messages", bound.Token, map[string]any{"content": "stale token must fail"}, http.StatusUnauthorized)
+	ticket26BackendRequest(t, http.MethodPost, backendURL+"/v1/messages", bound.Token, map[string]any{"content": "stale token must fail", "tags": []string{"USER"}}, http.StatusUnauthorized)
 	status, raw = messageRuntimeRequest(t, runtime.Handler(), http.MethodPost, "/api/v1/sessions/"+session.ID+"/start", nil)
 	if status != http.StatusAccepted {
 		t.Fatalf("start actual Backend Session status=%d body=%s", status, raw)

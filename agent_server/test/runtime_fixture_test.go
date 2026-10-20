@@ -79,7 +79,21 @@ func (f *runtimeFixture) open(t *testing.T, databasePath string) (*agent.AgentRu
 	return runtime, backend, gateway
 }
 
+// isInboxRequest reports the Run-start inbox read: GET /v1/messages tagged with the Account's
+// own name. Fixtures answer it with emptyInbox so they only see the requests their tests script.
+func isInboxRequest(request *http.Request, userName string) bool {
+	return request.Method == http.MethodGet && request.URL.Path == "/v1/messages" && request.URL.Query().Get("tag") == userName
+}
+
+func emptyInbox(w http.ResponseWriter) {
+	writeFixtureJSON(w, http.StatusOK, map[string]any{"messages": []any{}, "page": 1, "has_more": false})
+}
+
 func (f *runtimeFixture) serveBackend(w http.ResponseWriter, request *http.Request) {
+	if isInboxRequest(request, "fixture") {
+		emptyInbox(w)
+		return
+	}
 	f.mu.Lock()
 	f.backendRequests = append(f.backendRequests, request.Method+" "+request.URL.RequestURI())
 	f.backendAuth = append(f.backendAuth, request.Header.Get("Authorization"))

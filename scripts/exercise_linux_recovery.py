@@ -436,7 +436,7 @@ def seed_business_fixture(
         secret_directory / f"{NAMESPACE}_backend_middleware_token",
         "http://backend:7794/v1/messages",
         request_directory,
-        {"content": FIXTURE_MESSAGE},
+        {"content": FIXTURE_MESSAGE, "tags": [FIXTURE_ACCOUNT]},
     )
     if message.get("content") != FIXTURE_MESSAGE:
         raise ExerciseError("Message fixture creation failed.")
