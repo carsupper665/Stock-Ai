@@ -18,6 +18,7 @@ import (
 
 	"stock-ai/agent-server/internal/history"
 	"stock-ai/agent-server/internal/memory"
+	"stock-ai/agent-server/internal/skills"
 	"stock-ai/agent-server/internal/tools"
 )
 
@@ -109,9 +110,13 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 	if len(recalled) != 0 {
 		contextBody["bring_back_memories"] = recalled
 	}
-	contextBody["available_tools"] = runtimeToolNames()
+	contextBody["available_tools"] = runtimeToolNames(session.SkillsEnabled)
+	systemPrompt := session.Prompt + toolDisclosureInstruction(session.SkillsEnabled) + messageBoardInstruction + memory.Instruction
+	if session.SkillsEnabled {
+		contextBody["skill_index"] = skills.Index()
+		systemPrompt += skills.Instruction
+	}
 	encodedContext, _ := json.Marshal(contextBody)
-	systemPrompt := session.Prompt + toolDisclosureInstruction() + messageBoardInstruction + memory.Instruction
 	userPrompt := string(encodedContext)
 	messages := []gatewayMessage{{Role: "system", Content: &systemPrompt}, {Role: "user", Content: &userPrompt}}
 	progress := make([]traceEntry, 0)
@@ -366,7 +371,8 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 		}
 		return gatewayResponse{}, 0, false
 	}
-	if compacted, entry := r.compactContext(ctx, session, runID, iteration, model, *messages, toolsEnabled); entry != nil {
+	definitions := modelTools(session, toolsEnabled)
+	if compacted, entry := r.compactContext(ctx, session, runID, iteration, model, *messages, definitions); entry != nil {
 		if ctx.Err() != nil {
 			return gatewayResponse{}, 0, false
 		}
@@ -420,7 +426,7 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 			continuation = continuationFor(continuationState, projection.Messages)
 		}
 		live.begin(len(*progress) - 1)
-		response, requestBytes, dispatched, generateErr := r.generate(ctx, model, session.ModelLevel, session.ID+"/"+strconv.FormatInt(runID, 10), projection.Messages, toolsEnabled, continuation, live.append)
+		response, requestBytes, dispatched, generateErr := r.generate(ctx, model, session.ModelLevel, session.ID+"/"+strconv.FormatInt(runID, 10), projection.Messages, definitions, continuation, live.append)
 		live.end()
 		entry := &(*progress)[len(*progress)-1]
 		entry.RequestBytes = requestBytes
@@ -508,14 +514,10 @@ func retryableGenerateError(err error) bool {
 // silence: the Gateway pings every few seconds while the model works, so a model that thinks for
 // minutes still succeeds, while a Gateway that goes quiet fails like any other timeout. onDelta,
 // when set, receives the streamed text. A Gateway that answers with one JSON object is read as before.
-func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *string, conversationID string, messages []gatewayMessage, toolsEnabled bool, continuation *gatewayContinuation, onDelta func(content, reasoning string)) (gatewayResponse, int, bool, error) {
+func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *string, conversationID string, messages []gatewayMessage, toolDefinitions []map[string]any, continuation *gatewayContinuation, onDelta func(content, reasoning string)) (gatewayResponse, int, bool, error) {
 	options := map[string]any{}
 	if level != nil {
 		options["model_level"] = *level
-	}
-	toolDefinitions := []map[string]any{}
-	if toolsEnabled {
-		toolDefinitions = tools.Definitions()
 	}
 	body := map[string]any{
 		"provider": model.ProviderID, "model": model.Model, "messages": messages,

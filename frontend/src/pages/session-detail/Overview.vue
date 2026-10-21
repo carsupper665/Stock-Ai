@@ -44,6 +44,7 @@ const config = computed(() => [
   ['model_level', props.session.model_level ?? '—'],
   ['max_loop', String(props.session.max_loop)],
   ['max_tool_call', String(props.session.max_tool_call)],
+  ['skills_enabled', String(props.session.skills_enabled)],
   ['prompt', props.session.prompt || '（留空 → 使用 Server Default）'],
 ])
 const last = computed(() => props.session.last_run)

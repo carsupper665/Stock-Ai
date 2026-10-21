@@ -386,7 +386,7 @@ func (r *AgentRuntime) serveToolStats(w http.ResponseWriter, request *http.Reque
 func aggregateToolStats(runs []monitoringRun) ([]toolStats, error) {
 	known := make(map[string]bool)
 	statsByName := make(map[string]*toolStats)
-	for _, definition := range tools.Definitions() {
+	for _, definition := range tools.Definitions(true) {
 		name, _ := definition["name"].(string)
 		if name == "" {
 			continue

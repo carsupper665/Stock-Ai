@@ -16,6 +16,7 @@ const form = reactive({
   prompt: props.preset?.prompt ?? '',
   max_loop: props.preset?.max_loop ?? '',
   max_tool_call: props.preset?.max_tool_call ?? '',
+  skills_enabled: props.preset?.skills_enabled ?? false,
 })
 const accounts = ref(null)
 const bound = ref(new Map())
@@ -44,6 +45,7 @@ async function submit() {
   if (form.prompt.trim()) body.prompt = form.prompt
   if (form.max_loop !== '') body.max_loop = Number(form.max_loop)
   if (form.max_tool_call !== '') body.max_tool_call = Number(form.max_tool_call)
+  if (form.skills_enabled) body.skills_enabled = true
   try {
     const created = await createSession(body)
     say(`已建立「${created.name}」（stopped，不自動啟動）`)
@@ -93,6 +95,7 @@ async function submit() {
         <label class="grow">max_loop（留空＝Server Default）<input v-model="form.max_loop" type="number" min="1" /></label>
         <label class="grow">max_tool_call（留空＝Server Default）<input v-model="form.max_tool_call" type="number" min="1" /></label>
       </div>
+      <label class="row"><input v-model="form.skills_enabled" type="checkbox" />skills_enabled（給模型 skill 與 plan_trade；建立後不能改）</label>
       <p v-if="error" data-tone="neg">{{ error }}</p>
       <menu>
         <button type="button" @click="$emit('close')">取消</button>

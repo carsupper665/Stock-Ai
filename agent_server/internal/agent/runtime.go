@@ -80,6 +80,7 @@ type Session struct {
 	Prompt         string          `json:"prompt"`
 	MaxLoop        int             `json:"max_loop"`
 	MaxToolCall    int             `json:"max_tool_call"`
+	SkillsEnabled  bool            `json:"skills_enabled"`
 	Status         string          `json:"status"`
 	CurrentRunID   int64           `json:"current_run_id"`
 	RestartContext json.RawMessage `json:"restart_context"`
@@ -196,6 +197,7 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, account_id TEXT NOT NULL UNIQUE,
 			model_name TEXT NOT NULL, model_level TEXT, prompt TEXT NOT NULL,
 			max_loop INTEGER NOT NULL, max_tool_call INTEGER NOT NULL,
+			skills_enabled INTEGER NOT NULL DEFAULT 0,
 			status TEXT NOT NULL, current_run_id INTEGER NOT NULL,
 			restart_context TEXT, created_at TEXT NOT NULL, started_at TEXT,
 			stopped_at TEXT, deleted_at TEXT
@@ -227,6 +229,10 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 		return nil, fmt.Errorf("migrate agent database: %w", err)
 	}
 	if err := ensureRunInitialContextColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate agent database: %w", err)
+	}
+	if err := ensureSessionSkillsColumn(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate agent database: %w", err)
 	}
@@ -345,6 +351,15 @@ func ensureRunInitialContextColumn(db *sql.DB) error {
 		return nil
 	}
 	_, err = db.Exec(`ALTER TABLE runs ADD COLUMN initial_context_json TEXT`)
+	return err
+}
+
+func ensureSessionSkillsColumn(db *sql.DB) error {
+	var found int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'skills_enabled'`).Scan(&found); err != nil || found != 0 {
+		return err
+	}
+	_, err := db.Exec(`ALTER TABLE sessions ADD COLUMN skills_enabled INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 

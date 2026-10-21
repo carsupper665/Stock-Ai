@@ -148,13 +148,14 @@ func (r *AgentRuntime) authorized(request *http.Request) bool {
 }
 
 type createSessionRequest struct {
-	Name        string          `json:"name"`
-	AccountID   string          `json:"account_id"`
-	ModelName   string          `json:"model_name"`
-	ModelLevel  json.RawMessage `json:"model_level"`
-	Prompt      json.RawMessage `json:"prompt"`
-	MaxLoop     json.RawMessage `json:"max_loop"`
-	MaxToolCall json.RawMessage `json:"max_tool_call"`
+	Name          string          `json:"name"`
+	AccountID     string          `json:"account_id"`
+	ModelName     string          `json:"model_name"`
+	ModelLevel    json.RawMessage `json:"model_level"`
+	Prompt        json.RawMessage `json:"prompt"`
+	MaxLoop       json.RawMessage `json:"max_loop"`
+	MaxToolCall   json.RawMessage `json:"max_tool_call"`
+	SkillsEnabled bool            `json:"skills_enabled"`
 }
 
 func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Request) {
@@ -230,9 +231,9 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 		return
 	}
 	_, err = r.db.ExecContext(request.Context(), `INSERT INTO sessions
-		(id, name, account_id, model_name, model_level, prompt, max_loop, max_tool_call,
-		 status, current_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'stopped', 0, ?)`,
-		id, input.Name, input.AccountID, input.ModelName, level, prompt, maxLoop, maxTools, now)
+		(id, name, account_id, model_name, model_level, prompt, max_loop, max_tool_call, skills_enabled,
+		 status, current_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', 0, ?)`,
+		id, input.Name, input.AccountID, input.ModelName, level, prompt, maxLoop, maxTools, input.SkillsEnabled, now)
 	requestCanceled := requestCancellationCausedPersistenceError(request.Context(), err)
 	if err != nil {
 		var sqliteError *sqlite.Error
@@ -252,7 +253,7 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 	}
 	session := Session{
 		ID: id, Name: input.Name, AccountID: input.AccountID, ModelName: input.ModelName,
-		ModelLevel: level, Prompt: prompt, MaxLoop: maxLoop, MaxToolCall: maxTools,
+		ModelLevel: level, Prompt: prompt, MaxLoop: maxLoop, MaxToolCall: maxTools, SkillsEnabled: input.SkillsEnabled,
 		Status: "stopped", RestartContext: json.RawMessage("null"), CreatedAt: now,
 	}
 	writeRuntimeJSON(w, http.StatusCreated, session)

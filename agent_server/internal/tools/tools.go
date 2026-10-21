@@ -10,13 +10,16 @@ import (
 )
 
 // Definitions returns every tool exposed to the model: market, event, trading, message,
-// and memory tools.
-func Definitions() []map[string]any {
+// and memory tools, plus the skill tools when skills are enabled.
+func Definitions(skillsEnabled bool) []map[string]any {
 	definitions := marketDefinitions()
 	definitions = append(definitions, eventSchemas()...)
 	definitions = append(definitions, tradingDefinitions()...)
 	definitions = append(definitions, messageDefinitions()...)
 	definitions = append(definitions, memoryDefinitions()...)
+	if skillsEnabled {
+		definitions = append(definitions, skillDefinitions()...)
+	}
 	return definitions
 }
 

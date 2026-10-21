@@ -52,8 +52,8 @@ type modelContextProjection struct {
 	Compacted      int
 }
 
-func runtimeToolNames() []string {
-	definitions := tools.Definitions()
+func runtimeToolNames(skillsEnabled bool) []string {
+	definitions := tools.Definitions(skillsEnabled)
 	names := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
 		name, _ := definition["name"].(string)
@@ -64,8 +64,16 @@ func runtimeToolNames() []string {
 	return names
 }
 
-func toolDisclosureInstruction() string {
-	return "\n\nThe available tool names are exactly: " + strings.Join(runtimeToolNames(), ", ") + ". Use only these names through the structured tool channel."
+func toolDisclosureInstruction(skillsEnabled bool) string {
+	return "\n\nThe available tool names are exactly: " + strings.Join(runtimeToolNames(skillsEnabled), ", ") + ". Use only these names through the structured tool channel."
+}
+
+// modelTools returns the tool definitions sent with a model call: none while finalizing.
+func modelTools(session Session, toolsEnabled bool) []map[string]any {
+	if !toolsEnabled {
+		return []map[string]any{}
+	}
+	return tools.Definitions(session.SkillsEnabled)
 }
 
 func projectModelContext(messages []gatewayMessage) (modelContextProjection, error) {
@@ -167,6 +175,9 @@ func replaceMessageContent(message *gatewayMessage, replacement string) bool {
 
 func compactToolContent(name, content string, mutation bool) string {
 	raw := json.RawMessage(content)
+	if name == "skill_get" {
+		return content
+	}
 	if name == "get_ohlcv" {
 		return string(history.FilterToolResult(name, raw))
 	}
@@ -263,13 +274,13 @@ func acknowledgeContinuation(state *continuationState, request []gatewayMessage,
 // compactContext applies the two-stage context compaction when the estimated request reaches
 // compactTriggerRatio of the model's window. It returns nil when nothing was compacted.
 func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runID int64, iteration int,
-	model modelMapping, messages []gatewayMessage, toolsEnabled bool,
+	model modelMapping, messages []gatewayMessage, toolDefinitions []map[string]any,
 ) ([]gatewayMessage, *traceEntry) {
 	window := model.ContextWindow
 	if window <= 0 {
 		window = defaultContextWindow
 	}
-	before := estimateContextTokens(messages, toolsEnabled)
+	before := estimateContextTokens(messages, toolDefinitions)
 	if float64(before) < compactTriggerRatio*float64(window) {
 		return messages, nil
 	}
@@ -295,7 +306,7 @@ func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runI
 		}
 	}
 	entry.Result = tools.SuccessResult(map[string]any{"stage": stage, "context_window": window,
-		"tokens_before": before, "tokens_after": estimateContextTokens(compacted, toolsEnabled)})
+		"tokens_before": before, "tokens_after": estimateContextTokens(compacted, toolDefinitions)})
 	finishTraceTiming(&entry, started, time.Now())
 	return compacted, &entry
 }
@@ -306,7 +317,7 @@ func (r *AgentRuntime) summarizeHistory(ctx context.Context, session Session, ru
 	instruction := compactionInstruction
 	messages := []gatewayMessage{{Role: "system", Content: &instruction}, {Role: "user", Content: &history}}
 	conversationID := session.ID + "/" + strconv.FormatInt(runID, 10) + "/compaction"
-	response, _, _, err := r.generate(ctx, model, session.ModelLevel, conversationID, messages, false, nil, nil)
+	response, _, _, err := r.generate(ctx, model, session.ModelLevel, conversationID, messages, []map[string]any{}, nil, nil)
 	if err != nil {
 		return "", response, err
 	}
@@ -320,12 +331,8 @@ func (r *AgentRuntime) summarizeHistory(ctx context.Context, session Session, ru
 	return summary, response, nil
 }
 
-func estimateContextTokens(messages []gatewayMessage, toolsEnabled bool) int {
-	tokens := estimateTokens(messages)
-	if toolsEnabled {
-		tokens += estimateTokens(tools.Definitions())
-	}
-	return tokens
+func estimateContextTokens(messages []gatewayMessage, toolDefinitions []map[string]any) int {
+	return estimateTokens(messages) + estimateTokens(toolDefinitions)
 }
 
 // estimateTokens approximates tokens without a tokenizer: ASCII JSON averages about four bytes
@@ -414,6 +421,11 @@ func compactToolCallLine(call gatewayTool, result string, seen map[string]bool) 
 		} `json:"error"`
 	}
 	_ = json.Unmarshal([]byte(result), &envelope)
+	// A skill is the playbook the rest of the Run follows, so its text survives compaction.
+	if call.Name == "skill_get" && envelope.OK && !seen[line] {
+		seen[line] = true
+		return line + " -> " + result, true
+	}
 	if !tools.IsMutation(call.Name) {
 		if !envelope.OK || seen[line] {
 			return "", false
