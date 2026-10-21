@@ -11,13 +11,15 @@ import (
 	"time"
 )
 
+const marketDescription = "crypto: Binance spot coins, e.g. BTCUSDT. stock: US stocks and ETFs as Binance USDⓈ-M perpetuals, e.g. TSLAUSDT, NVDAUSDT, SPYUSDT."
+
 func marketDefinitions() []map[string]any {
 	return []map[string]any{
 		{
 			"name": "get_market_snapshot", "description": "Get the latest market price snapshot.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
-					"market": map[string]any{"type": "string"}, "symbol": map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
+					"market": map[string]any{"type": "string", "description": marketDescription}, "symbol": map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
 				}, "required": []string{"symbol"}, "additionalProperties": false,
 			},
 		},
@@ -27,7 +29,7 @@ func marketDefinitions() []map[string]any {
 				"The response's current_time is the Backend query time in UTC — use it as the reference for 'now'.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
-					"market":     map[string]any{"type": "string", "default": "crypto"},
+					"market":     map[string]any{"type": "string", "default": "crypto", "description": marketDescription},
 					"symbol":     map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
 					"interval":   map[string]any{"type": "string", "enum": []string{"1m", "5m", "15m", "1h", "4h", "1d"}},
 					"start_time": map[string]any{"type": "string", "format": "date-time", "description": "Optional RFC3339 UTC. Omit to request the latest candles."},
@@ -40,7 +42,7 @@ func marketDefinitions() []map[string]any {
 			"name": "get_market_info", "description": "Get source market rules and their relationship to virtual Backend execution.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
-					"market": map[string]any{"type": "string", "default": "crypto"}, "symbol": map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
+					"market": map[string]any{"type": "string", "default": "crypto", "description": marketDescription}, "symbol": map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
 				}, "required": []string{"symbol"}, "additionalProperties": false,
 			},
 		},

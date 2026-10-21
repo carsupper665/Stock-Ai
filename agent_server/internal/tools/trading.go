@@ -67,7 +67,7 @@ func tradingDefinitions() []map[string]any {
 				"limit orders stay open until the matching engine fills them. The Backend validates prices, leverage and balance.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
-					"market":      map[string]any{"type": "string", "enum": []string{"crypto", "stock"}, "default": "crypto"},
+					"market":      map[string]any{"type": "string", "enum": []string{"crypto", "stock"}, "default": "crypto", "description": marketDescription},
 					"symbol":      map[string]any{"type": "string", "pattern": "^[A-Z0-9]{2,24}$", "description": "Exchange symbol with no separator, uppercase, e.g. BTCUSDT or ETHUSDT. Never BTC/USDT or BTC-USDT."},
 					"product":     map[string]any{"type": "string", "enum": []string{"spot", "futures"}, "default": "futures"},
 					"side":        map[string]any{"type": "string", "enum": []string{"buy", "sell"}},

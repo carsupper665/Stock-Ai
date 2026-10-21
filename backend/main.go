@@ -18,7 +18,6 @@ import (
 	"backend/internal/logging"
 	"backend/internal/market"
 	"backend/internal/market/crypto"
-	"backend/internal/market/stock"
 	"backend/internal/trading"
 )
 
@@ -63,7 +62,7 @@ func run() error {
 
 	prices := market.New(map[string]market.Source{
 		market.Crypto: crypto.NewBinance(),
-		market.Stock:  stock.New(),
+		market.Stock:  crypto.NewBinanceFutures(),
 	}, marketLog, market.Options{
 		FreshTTL:    cfg.MarketFreshTTL,
 		IdleTimeout: cfg.MarketIdleTimeout,

@@ -16,6 +16,7 @@ import (
 
 const (
 	defaultBaseURL  = "https://api.binance.com"
+	futuresBaseURL  = "https://fapi.binance.com"
 	defaultInterval = time.Second
 	requestTimeout  = 5 * time.Second
 )
@@ -25,8 +26,11 @@ const (
 // 這裡刻意不用 WebSocket：快取的新鮮度上限是 1.5 秒，每秒輪詢就足夠，
 // 而且少了連線管理與重連邏輯。要換成 WebSocket 時只要換掉這個型別，
 // Market Runtime 不受影響。
+//
+// Futures 為 true 時改打 USDⓈ-M 永續合約（fapi），美股合約（例如 TSLAUSDT）在那裡。
 type Binance struct {
 	BaseURL  string
+	Futures  bool
 	Interval time.Duration
 	Client   *http.Client
 }
@@ -39,7 +43,30 @@ func NewBinance() *Binance {
 	}
 }
 
+// NewBinanceFutures 是幣安 USDⓈ-M 永續合約的來源，用來提供美股行情。
+func NewBinanceFutures() *Binance {
+	b := NewBinance()
+	b.BaseURL = futuresBaseURL
+	b.Futures = true
+	return b
+}
+
 func (b *Binance) Name() string { return "binance" }
+
+// url 組出 endpoint 的完整網址：現貨走 /api/v3，合約走 /fapi/v1。
+func (b *Binance) url(endpoint string) string {
+	base, prefix := b.BaseURL, "/api/v3/"
+	if b.Futures {
+		prefix = "/fapi/v1/"
+	}
+	if base == "" {
+		base = defaultBaseURL
+		if b.Futures {
+			base = futuresBaseURL
+		}
+	}
+	return base + prefix + endpoint
+}
 
 // Binance rejects a caller's bad symbol with -1121 (unknown) or -1100 (illegal characters).
 // Both mean the symbol is wrong, so they must not surface as an unavailable source: the caller
@@ -97,11 +124,7 @@ type tickerPrice struct {
 }
 
 func (b *Binance) fetch(ctx context.Context, symbol string) (float64, error) {
-	base := b.BaseURL
-	if base == "" {
-		base = defaultBaseURL
-	}
-	endpoint := base + "/api/v3/ticker/price?symbol=" + url.QueryEscape(symbol)
+	endpoint := b.url("ticker/price?symbol=" + url.QueryEscape(symbol))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {

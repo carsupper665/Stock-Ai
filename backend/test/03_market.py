@@ -128,7 +128,7 @@ def main():
             ("缺少 symbol 回 400", "/v1/market/price", 400),
             ("symbol 只有空白回 400", "/v1/market/price?symbol=%20", 400),
             ("未支援的市場回 400", "/v1/market/price?market=forex&symbol=EURUSD", 400),
-            ("美股尚未接上回 501", "/v1/market/price?market=stock&symbol=AAPL", 501),
+            ("美股找不到的 symbol 回 404", "/v1/market/price?market=stock&symbol=AAPL", 404),
         ]
         for label, path, want in cases:
             status, err, _ = server.request("GET", path, USER_TOKEN)

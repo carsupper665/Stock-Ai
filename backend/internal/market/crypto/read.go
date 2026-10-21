@@ -31,7 +31,7 @@ func (b *Binance) OHLCV(ctx context.Context, symbol, interval string, start, end
 		"endTime": {strconv.FormatInt(endMillis, 10)}, "limit": {strconv.Itoa(limit)},
 	}
 	var rows [][]json.RawMessage
-	if err := b.getJSON(ctx, "/api/v3/klines?"+query.Encode(), &rows); err != nil {
+	if err := b.getJSON(ctx, "klines?"+query.Encode(), &rows); err != nil {
 		return nil, err
 	}
 	if rows == nil {
@@ -69,7 +69,7 @@ func (b *Binance) MarketInfo(ctx context.Context, symbol string) (market.MarketI
 	var response struct {
 		Symbols json.RawMessage `json:"symbols"`
 	}
-	if err := b.getJSON(ctx, "/api/v3/exchangeInfo?symbol="+url.QueryEscape(symbol), &response); err != nil {
+	if err := b.getJSON(ctx, "exchangeInfo?symbol="+url.QueryEscape(symbol), &response); err != nil {
 		return market.MarketInfo{}, err
 	}
 	if len(response.Symbols) == 0 || bytes.Equal(bytes.TrimSpace(response.Symbols), []byte("null")) {
@@ -78,6 +78,10 @@ func (b *Binance) MarketInfo(ctx context.Context, symbol string) (market.MarketI
 	var symbols []binanceSymbol
 	if err := json.Unmarshal(response.Symbols, &symbols); err != nil || symbols == nil {
 		return market.MarketInfo{}, market.ErrInvalidSourceData
+	}
+	if b.Futures {
+		// fapi 會忽略 ?symbol=、回傳全部合約，所以先挑出要的那一個。
+		symbols = onlySymbol(symbols, symbol)
 	}
 	if len(symbols) == 0 {
 		return market.MarketInfo{}, market.ErrUnknownSymbol
@@ -106,17 +110,15 @@ func (b *Binance) MarketInfo(ctx context.Context, symbol string) (market.MarketI
 	if !ok {
 		return market.MarketInfo{}, market.ErrInvalidSourceData
 	}
-	spotAllowed, ok := requiredSourceBool(value.SpotTradingAllowed)
-	if !ok {
-		return market.MarketInfo{}, market.ErrInvalidSourceData
-	}
-	marginAllowed, ok := requiredSourceBool(value.MarginTradingAllowed)
-	if !ok {
-		return market.MarketInfo{}, market.ErrInvalidSourceData
-	}
-	info := market.MarketInfo{
-		Symbol: symbol, Status: status, BaseAsset: baseAsset, QuoteAsset: quoteAsset,
-		OrderTypes: orderTypes, SpotTradingAllowed: spotAllowed, MarginTradingAllowed: marginAllowed,
+	info := market.MarketInfo{Symbol: symbol, Status: status, BaseAsset: baseAsset, QuoteAsset: quoteAsset, OrderTypes: orderTypes}
+	// 合約沒有現貨與槓桿現貨交易，fapi 也不回這兩個欄位，所以維持 false。
+	if !b.Futures {
+		if info.SpotTradingAllowed, ok = requiredSourceBool(value.SpotTradingAllowed); !ok {
+			return market.MarketInfo{}, market.ErrInvalidSourceData
+		}
+		if info.MarginTradingAllowed, ok = requiredSourceBool(value.MarginTradingAllowed); !ok {
+			return market.MarketInfo{}, market.ErrInvalidSourceData
+		}
 	}
 	if len(value.Filters) == 0 || bytes.Equal(bytes.TrimSpace(value.Filters), []byte("null")) {
 		return info, nil
@@ -151,7 +153,11 @@ func (b *Binance) MarketInfo(ctx context.Context, symbol string) (market.MarketI
 			quantitySeen = true
 			info.QuantityFilter = &market.QuantityFilter{MinQuantity: minQuantity, MaxQuantity: maxQuantity, StepSize: stepSize}
 		case "MIN_NOTIONAL", "NOTIONAL":
-			minimum, minimumOK := requiredSourceDecimal(filter.MinNotional)
+			raw := filter.MinNotional
+			if b.Futures {
+				raw = filter.Notional
+			}
+			minimum, minimumOK := requiredSourceDecimal(raw)
 			if notionalSeen || !minimumOK {
 				return market.MarketInfo{}, market.ErrInvalidSourceData
 			}
@@ -182,14 +188,20 @@ type binanceFilter struct {
 	MaxQuantity json.RawMessage `json:"maxQty"`
 	StepSize    json.RawMessage `json:"stepSize"`
 	MinNotional json.RawMessage `json:"minNotional"`
+	Notional    json.RawMessage `json:"notional"`
+}
+
+func onlySymbol(symbols []binanceSymbol, symbol string) []binanceSymbol {
+	for _, value := range symbols {
+		if sourceSymbol, ok := requiredSourceString(value.Symbol); ok && sourceSymbol == symbol {
+			return []binanceSymbol{value}
+		}
+	}
+	return []binanceSymbol{}
 }
 
 func (b *Binance) getJSON(ctx context.Context, path string, target any) error {
-	base := b.BaseURL
-	if base == "" {
-		base = defaultBaseURL
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, b.url(path), nil)
 	if err != nil {
 		return err
 	}
