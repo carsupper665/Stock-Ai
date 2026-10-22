@@ -64,11 +64,6 @@ type Recalled struct {
 	Msg   string `json:"msg"`
 }
 
-type RecentRun struct {
-	RunID   int64  `json:"run_id"`
-	Summary string `json:"summary"`
-}
-
 type Filter struct {
 	Query    string
 	Since    *time.Time
@@ -372,37 +367,27 @@ func Delete(ctx context.Context, tx querier, sessionID string, id int64) (Memory
 	return memory, err
 }
 
-// ProgressiveContext returns what a Run starts with: the latest earlier completed Run's
-// summary, the newest memory labels, and every bring_back memory in full.
-func ProgressiveContext(ctx context.Context, db querier, sessionID string, currentRunID int64) (*RecentRun, []Label, []Recalled, error) {
-	var recent *RecentRun
-	var value RecentRun
-	err := db.QueryRowContext(ctx, `SELECT run_id, summary FROM runs
-		WHERE session_id = ? AND run_id < ? AND status = 'completed' AND summary IS NOT NULL
-		ORDER BY run_id DESC LIMIT 1`, sessionID, currentRunID).Scan(&value.RunID, &value.Summary)
-	if err == nil {
-		recent = &value
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, nil, err
-	}
+// ProgressiveContext returns the memory part of a Run's wake-up message: the newest memory
+// labels and every bring_back memory in full.
+func ProgressiveContext(ctx context.Context, db querier, sessionID string) ([]Label, []Recalled, error) {
 	labels, err := List(ctx, db, sessionID, Filter{Limit: RecentIndexItems})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id, title, msg FROM memories WHERE session_id = ? AND bring_back = 1 ORDER BY id`, sessionID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	recalled := make([]Recalled, 0)
 	for rows.Next() {
 		var memory Recalled
 		if err := rows.Scan(&memory.ID, &memory.Title, &memory.Msg); err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		recalled = append(recalled, memory)
 	}
-	return recent, labels, recalled, rows.Err()
+	return labels, recalled, rows.Err()
 }
 
 // ParseListArguments parses memory_list arguments; every field is optional.

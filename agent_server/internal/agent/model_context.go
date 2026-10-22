@@ -22,15 +22,17 @@ const (
 	compactStringRunes     = 512
 
 	defaultContextWindow = 128000
-	// Compaction starts when the estimate reaches 80% of the window. The LLM pass runs only
-	// when the rule-compacted history alone still takes 20%, since it cannot shrink the
-	// system prompt or the initial context.
+	// Compaction starts when the estimate reaches 80% of the window and aims for 50%: earlier
+	// Runs fold first, the current Run's earlier steps only when that is not enough. The LLM
+	// pass runs on a folded history that alone still takes 20%, since it cannot shrink the
+	// system prompt or the wake-up message.
 	compactTriggerRatio    = 0.80
+	compactTargetRatio     = 0.50
 	llmCompactRatio        = 0.20
 	compactArgumentRunes   = 160
 	compactAssistantRunes  = 1000
-	compactedHistoryHeader = "[Context compacted] Earlier steps of this Run. Tool outputs were removed; re-query tools if exact data is needed."
-	compactionInstruction  = "Summarize the earlier steps of a trading agent Run so the agent can continue the same task. " +
+	compactedHistoryHeader = "[Context compacted] Earlier conversation of this Session. Tool outputs were removed; re-query tools if exact data is needed."
+	compactionInstruction  = "Summarize the earlier conversation of a trading agent Session so the agent can continue it. " +
 		"Keep decisions made, key numbers learned, every order/position/event id with its status, uncertain outcomes, and pending plans. " +
 		"Drop tool output detail, retries, and errors. Reply with plain text under 1000 words."
 )
@@ -284,16 +286,21 @@ func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runI
 	if float64(before) < compactTriggerRatio*float64(window) {
 		return messages, nil
 	}
-	compacted, changed := compactRunHistory(messages)
-	if !changed {
+	compacted, blocks := compactConversation(messages, func(candidate []gatewayMessage) bool {
+		return float64(estimateContextTokens(candidate, toolDefinitions)) < compactTargetRatio*float64(window)
+	})
+	if len(blocks) == 0 {
 		return messages, nil
 	}
 	started := time.Now()
 	entry := traceEntry{Type: "context_compaction", ToolName: "context_compaction", Iteration: iteration,
 		StartedAt: started.UTC().Format(time.RFC3339Nano)}
 	stage := "rules"
-	if float64(estimateTokens(compacted[2])) >= llmCompactRatio*float64(window) {
-		summary, response, err := r.summarizeHistory(ctx, session, runID, model, *compacted[2].Content)
+	for _, index := range blocks {
+		if float64(estimateTokens(compacted[index])) < llmCompactRatio*float64(window) {
+			continue
+		}
+		summary, response, err := r.summarizeHistory(ctx, session, runID, model, *compacted[index].Content)
 		if validGatewayUsage(response.Usage) {
 			entry.Usage = response.Usage
 		}
@@ -301,7 +308,7 @@ func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runI
 			entry.Error = err.Error()
 		} else {
 			stage = "llm"
-			compacted[2].Content = &summary
+			compacted[index].Content = &summary
 			entry.Content = &summary
 		}
 	}
@@ -350,29 +357,55 @@ func estimateTokens(value any) int {
 	return ascii/4 + other
 }
 
-// compactRunHistory keeps the system prompt, the initial context, and the tail from the last
-// assistant message verbatim, and folds everything between them into one user message with a
-// semantic line per step. Tool/assistant pairs in the tail stay intact, so no result is orphaned.
-func compactRunHistory(messages []gatewayMessage) ([]gatewayMessage, bool) {
+// compactConversation keeps the system prompt, the current Run's wake-up message, and the tail
+// from the last assistant message verbatim. Everything before the wake-up message folds into one
+// compacted message first; the current Run's steps before the tail fold too only when enough
+// reports that is still over budget. Tool/assistant pairs in the tail stay intact, so no result
+// is orphaned. It returns the indexes of the compacted messages it wrote.
+func compactConversation(messages []gatewayMessage, enough func([]gatewayMessage) bool) ([]gatewayMessage, []int) {
+	wake := 1
+	for index := len(messages) - 1; index > 0; index-- {
+		if isWakeMessage(messages[index]) {
+			wake = index
+			break
+		}
+	}
+	compacted := messages
+	blocks := make([]int, 0, 2)
+	if wake > 1 && !(wake == 2 && isCompactedHistory(messages[1])) {
+		compacted = append(append([]gatewayMessage{messages[0], foldMessages(messages[1:wake])}), messages[wake:]...)
+		blocks = append(blocks, 1)
+		wake = 2
+		if enough(compacted) {
+			return compacted, blocks
+		}
+	}
 	tail := 0
-	for index := len(messages) - 1; index > 2; index-- {
-		if messages[index].Role == "assistant" {
+	for index := len(compacted) - 1; index > wake+1; index-- {
+		if compacted[index].Role == "assistant" {
 			tail = index
 			break
 		}
 	}
-	if tail == 0 || (tail == 3 && isCompactedHistory(messages[2])) {
-		return messages, false
+	if tail == 0 || (tail == wake+2 && isCompactedHistory(compacted[wake+1])) {
+		return compacted, blocks
 	}
+	folded := foldMessages(compacted[wake+1 : tail])
+	result := append(append(append([]gatewayMessage{}, compacted[:wake+1]...), folded), compacted[tail:]...)
+	return result, append(blocks, wake+1)
+}
+
+// foldMessages renders messages as one compacted history message with a semantic line per step.
+func foldMessages(messages []gatewayMessage) gatewayMessage {
 	results := make(map[string]string)
-	for _, message := range messages[2:tail] {
+	for _, message := range messages {
 		if message.Role == "tool" && message.ToolCallID != nil && message.Content != nil {
 			results[*message.ToolCallID] = *message.Content
 		}
 	}
 	lines := make([]string, 0)
 	seen := make(map[string]bool)
-	for _, message := range messages[2:tail] {
+	for index, message := range messages {
 		if isCompactedHistory(message) {
 			if earlier := strings.TrimSpace(strings.TrimPrefix(*message.Content, compactedHistoryHeader)); earlier != "" {
 				lines = append(lines, earlier)
@@ -382,9 +415,13 @@ func compactRunHistory(messages []gatewayMessage) ([]gatewayMessage, bool) {
 			}
 			continue
 		}
-		// Assistant messages without tool calls here are rejected final responses, and other user
-		// messages are terminal repair instructions; both are retries and are dropped.
-		if message.Role != "assistant" || len(message.ToolCalls) == 0 {
+		if isWakeMessage(message) {
+			lines = append(lines, "wake: "+truncateRunes(*shrinkWake(*message.Content), compactAssistantRunes))
+			continue
+		}
+		// Rejected final responses and their repair instructions are retries and are dropped; an
+		// accepted final response is how an earlier Run ended and is kept.
+		if isRejectedFinal(messages, index) || message.Role != "assistant" {
 			continue
 		}
 		if message.Content != nil && strings.TrimSpace(*message.Content) != "" {
@@ -400,9 +437,7 @@ func compactRunHistory(messages []gatewayMessage) ([]gatewayMessage, bool) {
 	if len(lines) != 0 {
 		history += "\n" + strings.Join(lines, "\n")
 	}
-	compacted := make([]gatewayMessage, 0, 3+len(messages)-tail)
-	compacted = append(compacted, messages[0], messages[1], gatewayMessage{Role: "user", Content: &history})
-	return append(compacted, messages[tail:]...), true
+	return gatewayMessage{Role: "user", Content: &history}
 }
 
 func isCompactedHistory(message gatewayMessage) bool {

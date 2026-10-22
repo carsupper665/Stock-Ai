@@ -148,7 +148,7 @@ async function saveHistory() {
   finally { if (request === historyRequest) historyLoading.value = false }
 }
 // event Run 帶 triggers[]（最多 10 個）；其他 Run 只有一個 trigger 字串
-// initial_context 是這個 Run 送給模型的第一則 user 訊息；inbox 是 Run 開始時 tag 給這個帳號的新留言，
+// initial_context 是這個 Run 的喚醒訊息（接在 Session 對話尾端）；inbox 是 Run 開始時 tag 給這個帳號的新留言，
 // 讀取失敗時會是 Tool Error（{ok:false,error}）
 const contextOf = (r) => (r.initial_context && typeof r.initial_context === 'object' ? r.initial_context : null)
 const inboxOf = (r) => contextOf(r)?.inbox ?? null
@@ -238,11 +238,11 @@ function matchedText(t) {
               <div>{{ m.content }}</div>
             </div>
             <details class="context">
-              <summary>初始 context（模型收到的第一則 user 訊息）</summary>
+              <summary>喚醒訊息（這個 Run 接在 Session 對話尾端的訊息）</summary>
               <pre class="mono small">{{ contextText(run) }}</pre>
             </details>
           </template>
-          <p v-else class="note">這個 Run 沒有記錄初始 context。</p>
+          <p v-else class="note">這個 Run 沒有記錄喚醒訊息。</p>
         </div>
 
         <template v-for="item in history" :key="item.key">

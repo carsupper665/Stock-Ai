@@ -54,11 +54,13 @@ func TestTicket18RestartCreatesNewRunWithInterruptedFactsAndDoesNotReplayWork(t 
 	if restarted.Summary == nil || *restarted.Summary != "restart complete" {
 		t.Fatalf("restarted Run = %+v", restarted)
 	}
+	// The interrupted Run never got a model answer, so the conversation holds only its wake-up
+	// message before the restart's own.
 	messages, _ := restartRequest["messages"].([]any)
-	if len(messages) != 2 {
+	if len(messages) != 3 || messageRolesOf(messages) != "system,user,user" {
 		t.Fatalf("restart messages = %v", restartRequest["messages"])
 	}
-	contextText, _ := messages[1].(map[string]any)["content"].(string)
+	contextText := wakeText(messages)
 	if !strings.Contains(contextText, `"trigger":"session_restart"`) ||
 		!strings.Contains(contextText, `"status":"interrupted"`) ||
 		!strings.Contains(contextText, `"previous_run_id":1`) {
@@ -217,4 +219,13 @@ func TestTicket18DeletedSessionCannotReleaseAccountBinding(t *testing.T) {
 	if status != http.StatusConflict || !strings.Contains(string(raw), "ACCOUNT_ALREADY_BOUND") {
 		t.Fatalf("replacement binding = %d %s", status, raw)
 	}
+}
+
+func messageRolesOf(messages []any) string {
+	roles := make([]string, 0, len(messages))
+	for _, message := range messages {
+		role, _ := message.(map[string]any)["role"].(string)
+		roles = append(roles, role)
+	}
+	return strings.Join(roles, ",")
 }

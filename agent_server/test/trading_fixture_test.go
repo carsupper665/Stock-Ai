@@ -156,16 +156,22 @@ func (g *scriptedGateway) generate(w http.ResponseWriter, request *http.Request)
 		writeFixtureJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"code": "REQUEST_INVALID"}})
 		return
 	}
+	// The current Run's wake-up message is the last one; earlier Runs precede it in the Session
+	// conversation, with their tool results reduced to digests, so the first result seen is kept.
 	var context struct {
 		AccountID string `json:"account_id"`
 	}
-	_ = json.Unmarshal([]byte(*body.Messages[1].Content), &context)
+	for index := len(body.Messages) - 1; index > 0 && context.AccountID == ""; index-- {
+		if body.Messages[index].Role == "user" && body.Messages[index].Content != nil {
+			_ = json.Unmarshal([]byte(*body.Messages[index].Content), &context)
+		}
+	}
 	g.mu.Lock()
 	for _, tool := range body.Tools {
 		g.tools[tool.Name] = tool.InputSchema
 	}
 	for _, message := range body.Messages {
-		if message.Role == "tool" && message.Content != nil {
+		if _, seen := g.results[message.ToolCallID]; message.Role == "tool" && message.Content != nil && !seen {
 			g.results[message.ToolCallID] = *message.Content
 		}
 	}

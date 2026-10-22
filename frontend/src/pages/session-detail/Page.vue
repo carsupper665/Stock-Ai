@@ -9,6 +9,7 @@ import { activity } from '../../shared/run.js'
 import { copy, say } from '../../shared/toast.js'
 import NewSession from '../sessions/NewSession.vue'
 import { currentRun, deleteSession, getSession, listRuns, startSession, stopSession } from './api.js'
+import Conversation from './Conversation.vue'
 import Memories from './Memories.vue'
 import Monitor from './Monitor.vue'
 import Overview from './Overview.vue'
@@ -160,12 +161,14 @@ const cloning = ref(false)
       <div class="tabs">
         <button :aria-selected="tab === 'overview'" @click="go({ tab: 'overview' })">概覽</button>
         <button :aria-selected="tab === 'runs'" @click="go({ tab: 'runs' })">Run<small>{{ s.total_runs }}</small></button>
+        <button :aria-selected="tab === 'conversation'" @click="go({ tab: 'conversation' })">對話</button>
         <button :aria-selected="tab === 'memory'" @click="go({ tab: 'memory' })">Memory<small>{{ s.memory_summary?.count ?? '—' }}</small></button>
         <button :aria-selected="tab === 'monitor'" @click="go({ tab: 'monitor' })">監控</button>
       </div>
 
       <Overview v-if="tab === 'overview'" :session="s" :account="data.account" @changed="reload" @go-run="(run) => go({ tab: 'runs', run, page: undefined })" />
       <Runs v-else-if="tab === 'runs'" :session="s" :runs="data.runs" :page="page" :initial="route.query.run" @page="(p) => go({ page: p, run: undefined })" @retried="reload" @ended="reload" />
+      <Conversation v-else-if="tab === 'conversation'" :session="s" />
       <Memories v-else-if="tab === 'memory'" :session="s" />
       <Monitor v-else :session="s" />
     </template>

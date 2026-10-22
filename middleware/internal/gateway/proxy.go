@@ -106,7 +106,7 @@ func agentMethods(rawPath string) []string {
 	case len(parts) == 2 && (parts[1] == "start" || parts[1] == "stop"):
 		return []string{http.MethodPost}
 	case len(parts) == 2 && (parts[1] == "runs" || parts[1] == "events" || parts[1] == "memories" ||
-		parts[1] == "ledger" || parts[1] == "positions" || parts[1] == "usage"):
+		parts[1] == "ledger" || parts[1] == "positions" || parts[1] == "usage" || parts[1] == "conversation"):
 		return []string{http.MethodGet}
 	case len(parts) == 3 && parts[1] == "runs":
 		return []string{http.MethodGet}

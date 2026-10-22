@@ -210,6 +210,7 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 			retry_of_run_id INTEGER, retry_attempt INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (session_id, run_id)
 		)`,
+		conversationSchema,
 	}, events.Schema...), history.Schema...) {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()

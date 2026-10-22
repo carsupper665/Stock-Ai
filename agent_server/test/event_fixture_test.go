@@ -306,14 +306,29 @@ func timerParams(at time.Time) map[string]any {
 	return map[string]any{"at": at.UTC().Format(time.RFC3339Nano)}
 }
 
-// contextText returns the factual Run context the Runtime sends as the user message.
+// contextText returns the factual Run context: the current Run's wake-up message, which follows
+// the Session conversation of earlier Runs.
 func contextText(request map[string]any) string {
 	messages, _ := request["messages"].([]any)
-	if len(messages) < 2 {
-		return ""
+	return wakeText(messages)
+}
+
+// wakeText returns the last wake-up message: a user message holding the JSON Run context.
+func wakeText(messages []any) string {
+	for index := len(messages) - 1; index > 0; index-- {
+		message, _ := messages[index].(map[string]any)
+		text, _ := message["content"].(string)
+		var body map[string]any
+		if message["role"] != "user" || json.Unmarshal([]byte(text), &body) != nil {
+			continue
+		}
+		if _, ok := body["trigger"]; ok {
+			if _, ok := body["current_time"]; ok {
+				return text
+			}
+		}
 	}
-	text, _ := messages[1].(map[string]any)["content"].(string)
-	return text
+	return ""
 }
 
 func runContext(t *testing.T, request map[string]any) map[string]any {

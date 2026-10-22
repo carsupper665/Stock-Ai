@@ -26,7 +26,7 @@ func TestRuntimeInitialContextIncludesCompactAccountAndLimits(t *testing.T) {
 	waitForRunStatus(t, runtime, session.ID, 1, "completed")
 
 	messages := requestBody["messages"].([]any)
-	contextText := messages[1].(map[string]any)["content"].(string)
+	contextText := wakeText(messages)
 	var contextBody map[string]any
 	if err := json.Unmarshal([]byte(contextText), &contextBody); err != nil {
 		t.Fatalf("decode initial context %q: %v", contextText, err)
@@ -90,11 +90,13 @@ func TestManualRetryCreatesBoundedNewRunWithoutReplayingTools(t *testing.T) {
 	if retried.Trigger != "manual_retry" || retried.RetryAttempt != 1 || retried.RetryOfRunID == nil || *retried.RetryOfRunID != 1 {
 		t.Fatalf("retry Run = %+v", retried)
 	}
+	// The retry continues the Session conversation where the failed Run stopped; it does not
+	// re-execute those tools, and its own wake-up message comes last.
 	messages := retryRequest["messages"].([]any)
-	if len(messages) != 2 {
-		t.Fatalf("retry replayed old protocol messages: %+v", messages)
+	contextText := wakeText(messages)
+	if last, _ := messages[len(messages)-1].(map[string]any)["content"].(string); last != contextText {
+		t.Fatalf("retry must end with its wake-up message: %+v", messages)
 	}
-	contextText := messages[1].(map[string]any)["content"].(string)
 	if !containsAll(contextText, `"trigger":"manual_retry"`, `"max_loop":4`, `"max_tool_call":3`,
 		`"failed_run_id":1`, `"status":"failed"`, `"tool_name":"get_market_snapshot"`, `"error_code":"PROVIDER_UNAVAILABLE"`, `"audit_reference"`) ||
 		strings.Contains(contextText, "BTCUSDT") || strings.Contains(contextText, fixture.accountToken) {

@@ -276,5 +276,5 @@ it('says when a Run had no inbox, could not read it, or has no initial context r
 
   const old = mountRuns({ run_id: 10, status: 'completed', trigger: 'event', progress: [], initial_context: null })
   await nextTick()
-  expect(old.textContent).toContain('這個 Run 沒有記錄初始 context。')
+  expect(old.textContent).toContain('這個 Run 沒有記錄喚醒訊息。')
 })

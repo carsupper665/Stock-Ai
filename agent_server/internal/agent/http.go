@@ -91,6 +91,10 @@ func (r *AgentRuntime) serveHTTP(w http.ResponseWriter, request *http.Request) {
 		r.serveUsage(w, request, parts[0])
 		return
 	}
+	if len(parts) == 2 && parts[1] == "conversation" {
+		r.serveConversation(w, request, parts[0])
+		return
+	}
 	if len(parts) == 3 && parts[1] == "tools" && parts[2] == "stats" {
 		r.serveToolStats(w, request, parts[0])
 		return

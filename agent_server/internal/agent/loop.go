@@ -95,15 +95,12 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		}
 		contextBody["retry_context"] = retryContext
 	}
-	recentSummary, memoryIndex, recalled, err := memory.ProgressiveContext(ctx, r.db, session.ID, runID)
+	memoryIndex, recalled, err := memory.ProgressiveContext(ctx, r.db, session.ID)
 	if err != nil {
 		r.handleRunPersistenceError(session.ID, runID, err)
 		return
 	}
 	contextBody["current_time"] = time.Now().UTC().Format(memory.TimeLayout)
-	if recentSummary != nil && trigger != "server_recovery" {
-		contextBody["recent_run_summary"] = recentSummary
-	}
 	if len(memoryIndex) != 0 {
 		contextBody["memory_index"] = memoryIndex
 	}
@@ -118,7 +115,14 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 	}
 	encodedContext, _ := json.Marshal(contextBody)
 	userPrompt := string(encodedContext)
-	messages := []gatewayMessage{{Role: "system", Content: &systemPrompt}, {Role: "user", Content: &userPrompt}}
+	// The Run continues the Session conversation: earlier Runs, then this Run's wake-up message.
+	conversation, err := r.loadConversation(session.ID)
+	if err != nil {
+		r.handleRunPersistenceError(session.ID, runID, err)
+		return
+	}
+	messages := append([]gatewayMessage{{Role: "system", Content: &systemPrompt}}, conversation...)
+	messages = append(messages, gatewayMessage{Role: "user", Content: &userPrompt})
 	progress := make([]traceEntry, 0)
 	modelCalls, toolCalls, decisions := 0, 0, 0
 	finalizing, finalizationAttempts := false, 0
@@ -127,6 +131,17 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		r.handleRunPersistenceError(session.ID, runID, err)
 		return
 	} else if !updated {
+		return
+	}
+	saveConversation := func() bool {
+		updated, err := r.saveConversation(session.ID, runID, messages[1:])
+		if err != nil {
+			r.handleRunPersistenceError(session.ID, runID, err)
+			return false
+		}
+		return updated
+	}
+	if !saveConversation() {
 		return
 	}
 	persistInstruction := func(instruction string, attempt int) bool {
@@ -232,6 +247,10 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				}
 				continue
 			}
+			messages = append(messages, gatewayMessage{Role: "assistant", Content: response.Content})
+			if !saveConversation() {
+				return
+			}
 			if final.Status == "failed" {
 				r.persistRunFailure(session.ID, runID, "TASK_FAILED: "+final.Output)
 				return
@@ -242,6 +261,9 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			return
 		}
 		messages = append(messages, gatewayMessage{Role: "assistant", Content: response.Content, ToolCalls: response.ToolCalls})
+		if !saveConversation() {
+			return
+		}
 		if finalizing || response.FinishReason != "tool_call" {
 			for _, call := range response.ToolCalls {
 				result := tools.ErrorResult("TOOL_DISABLED", "tools are disabled during finalization", "not_executed")
@@ -285,7 +307,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				content := string(result)
 				callID := call.ID
 				messages = append(messages, gatewayMessage{Role: "tool", Content: &content, ToolCallID: &callID})
-				if !persistDeniedTool(call, result) {
+				if !persistDeniedTool(call, result) || !saveConversation() {
 					return
 				}
 				continue
@@ -321,6 +343,9 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			content := string(result)
 			callID := call.ID
 			messages = append(messages, gatewayMessage{Role: "tool", Content: &content, ToolCallID: &callID})
+			if !saveConversation() {
+				return
+			}
 		}
 	}
 }

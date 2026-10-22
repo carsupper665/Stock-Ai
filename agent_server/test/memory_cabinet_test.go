@@ -51,7 +51,8 @@ func (s *cabinetScript) context(t *testing.T, call int) map[string]any {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return decodeMap(t, []byte(messageText(requestMessages(s.requests[call-1])[1])))
+	messages, _ := s.requests[call-1]["messages"].([]any)
+	return decodeMap(t, []byte(wakeText(messages)))
 }
 
 func memoryCall(id, name string, arguments map[string]any) map[string]any {
@@ -189,8 +190,9 @@ func TestMemoryCabinetNextRunStartsWithBringBackRecentLabelsAndTime(t *testing.T
 	if len(recalled) != 1 || recalled[0].(map[string]any)["msg"] != "body 1" {
 		t.Fatalf("bring_back_memories = %+v", recalled)
 	}
-	if recent, _ := context["recent_run_summary"].(map[string]any); recent["summary"] != "run summary 2" {
-		t.Fatalf("recent_run_summary = %+v", context["recent_run_summary"])
+	// The previous Run is in the Session conversation itself, so no separate summary is sent.
+	if _, exists := context["recent_run_summary"]; exists {
+		t.Fatalf("recent_run_summary must not be sent: %+v", context["recent_run_summary"])
 	}
 	script.mu.Lock()
 	system := messageText(requestMessages(script.requests[2])[0])

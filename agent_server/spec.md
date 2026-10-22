@@ -1068,7 +1068,7 @@ summary
 # 28. Run Finalization Flow
 
 每個正常完成（`finish_reason:"stop"`）的 Run 只產生 `status`、`output` 與短 `summary`。
-`summary` 是下一個 Run 的基礎資訊（`recent_run_summary`）。Memory 不在 finalization 寫入，
+`summary` 供 Run 列表與 Dashboard 顯示；下一個 Run 直接延續 Session 對話（§70），不另外帶入 summary。Memory 不在 finalization 寫入，
 而是在 Run 中任何時候用記憶櫃工具（§32）存取，所以 Run 失敗或被硬停時，已存的記憶仍保留。
 
 `failed`、`interrupted`、hard stop、dependency failure、budget exhaustion 與非正常
@@ -1141,7 +1141,6 @@ updated_run_id  系統自動（不回給 LLM）
 
 ```text
 current_time         目前 UTC 時間
-recent_run_summary   上一個 completed Run 的 summary（server_recovery 除外）
 memory_index         最新 10 則記憶的標籤（id、title、created_at）
 bring_back_memories  所有 bring_back 記憶的 id、title、msg
 ```
@@ -3135,8 +3134,7 @@ A Memory detail contains:
 {"id":12,"session_id":"s_…","title":"BTC 假突破教訓","msg":"量能不足的突破不要追","bring_back":true,"created_at":"2026-10-18T01:02:03.000Z","updated_at":"2026-10-18T01:02:03.000Z","created_run_id":4,"updated_run_id":4}
 ```
 
-Each Run's initial context adds `current_time`, the latest earlier completed Run's
-`recent_run_summary:{run_id,summary}` (not for `server_recovery`), `memory_index` with the 10
+Each Run's wake-up message adds `current_time`, `memory_index` with the 10
 newest labels `{id,title,created_at}`, and `bring_back_memories` with `{id,title,msg}` of every
 pinned memory. The History shard's `memory_ids` lists the ids a Run created, read from
 `run_memories` (§39): decimal strings for cabinet memories and the original `m_…` ids for
@@ -3643,3 +3641,37 @@ Finalization 可加上 `status`，值只允許 `completed` 或 `failed`；省略
 此時 Run 立即標記 `failed`，錯誤為 `TASK_FAILED`，不發佈完成摘要；Run 中已存的記憶保留。
 正常的無交易決策可以零工具呼叫完成；部署工具驗收另行要求成功的實際工具紀錄。
 Codex 非重試錯誤、失敗回合或沒有工具呼叫的中斷不得正規化成成功回應。
+
+---
+
+# 70. Session Conversation
+
+A Session is one continuous conversation; a Run is a segment of it (terms in the repository's
+`CONTEXT.md`). `session_conversations` holds, per Session, the semantic form of every message
+the model has seen except the system prompt, which is rebuilt each Run.
+
+- **Run start.** The request is the system prompt, the stored conversation, then this Run's
+  wake-up message (the JSON context formerly called the initial context, still persisted in
+  `runs.initial_context_json`). A Session with no stored conversation starts with only the wake-up
+  message; existing Sessions start accumulating from their next Run.
+- **Saving.** The conversation is written while the Run is `running`: after the wake-up message,
+  after each assistant turn, after each tool result, and after the accepted final response.
+  A stopped or superseded Run cannot overwrite it.
+- **Semantic form.** Rejected final responses and their `Terminal instruction` repairs are
+  dropped. Mutation tool results (`tools.IsMutation`) and `skill_get` stay whole; read tool results
+  become `{"ok":true,"digest":…}` of at most 300 runes, errors keep only code and message. A lone
+  tool call failing exactly like the previous one folds into it as `"repeated":N`. Earlier wake-up
+  messages keep only `trigger`, `triggers`, `current_time`, `account_snapshot`, `inbox` and the
+  restart/recovery/retry contexts. Reasoning is never carried. The current Run still sees its
+  own results in full.
+- **Interruption.** On load, every tool call without a recorded result gets
+  `{"ok":false,"error":{"code":"RUN_INTERRUPTED","outcome":"unknown",…}}`, telling the model the
+  call may have executed and to check state first.
+- **Compaction.** When the estimate reaches 80% of the model's window, everything before the
+  current wake-up message folds into one `[Context compacted]` message; if the request is still
+  at or above 50%, the current Run's steps before the last assistant turn fold too. A folded
+  message that alone takes 20% of the window gets one tool-less LLM summary. The compacted
+  conversation is what later Runs continue; the original stays in the Run History shards.
+- **Read API.** `GET /api/v1/sessions/{id}/conversation` returns `messages`, `run_id`,
+  `estimated_tokens`, `context_window` (null when the model catalog is unavailable) and
+  `updated_at`.
