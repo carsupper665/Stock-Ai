@@ -2,7 +2,7 @@ FROM node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db86
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --ignore-scripts
-COPY frontend/index.html frontend/vite.config.js ./
+COPY frontend/index.html frontend/vite.config.js frontend/VERSION ./
 COPY frontend/src ./src
 RUN npm run build
 

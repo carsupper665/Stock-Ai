@@ -11,6 +11,7 @@ import { setTheme } from './core/theme.js'
 import Confirm from './shared/Confirm.vue'
 import { relTime } from './shared/format.js'
 import { toast } from './shared/toast.js'
+import versionFile from '../VERSION?raw'
 
 const route = useRoute()
 const active = computed(() => route.meta.parent ?? route.name)
@@ -23,17 +24,23 @@ function cycleTheme() {
   setTheme(theme.value)
 }
 
-// 三個服務各自獨立、各自會掛（X-02）；健康端點都不需要憑證
+// 各服務各自獨立、各自會掛（X-02）；健康端點都不需要憑證，並回報各自 VERSION 檔的版本。
+// 版本只顯示：相容與否在建置 image 時由 scripts/check_versions.py 檢查。
+const frontendVersion = versionFile.split('\n')[0].trim()
 const services = reactive([
-  { name: '交易後端', path: '/v1/health', state: '…', tone: 'mute' },
-  { name: 'Agent Server', path: '/agent/health', state: '…', tone: 'mute' },
-  { name: 'LLM Provider', path: '/llm/healthz', state: '…', tone: 'mute' },
+  { name: '交易後端', path: '/v1/health', state: '…', tone: 'mute', version: '' },
+  { name: 'Agent Server', path: '/agent/health', state: '…', tone: 'mute', version: '' },
+  { name: 'LLM Provider', path: '/llm/healthz', state: '…', tone: 'mute', version: '' },
+  { name: 'Middleware', path: '/middleware/healthz', state: '…', tone: 'mute', version: '' },
 ])
 async function probe(s) {
   try {
-    s.state = (await api('GET', s.path, undefined, null)).status
+    const health = await api('GET', s.path, undefined, null)
+    s.state = health.status
+    s.version = health.version ?? '?'
     s.tone = s.state === 'ok' ? 'pos' : 'warn'
   } catch (e) {
+    s.version = '?'
     // 503 是服務活著但 DB 不健康；其他（代理回 502、憑證錯 401）視為連不上
     s.state = e.status === 503 ? 'degraded' : e.status ? `down ${e.status}` : 'down'
     s.tone = e.status === 503 ? 'warn' : 'neg'
@@ -66,7 +73,13 @@ watch(() => [sync.key, isAuthenticated()], probeAll)
         <div v-for="s in services" :key="s.name" class="row service">
           <i class="dot big" :data-tone="s.tone"></i>
           <span class="grow ellipsis" data-tone="dim">{{ s.name }}</span>
+          <span class="mono small" data-tone="mute">{{ s.version }}</span>
           <span class="mono small" :data-tone="s.tone">{{ s.state }}</span>
+        </div>
+        <div class="row service">
+          <i class="dot big" data-tone="pos"></i>
+          <span class="grow ellipsis" data-tone="dim">前端</span>
+          <span class="mono small" data-tone="mute">{{ frontendVersion }}</span>
         </div>
       </div>
       <nav>

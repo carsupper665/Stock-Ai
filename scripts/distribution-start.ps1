@@ -28,7 +28,7 @@ $services = @(
     @{ Name = 'backend'; Address = $env:BACKEND_URL; Health = '/v1/health'; Status = 200 },
     @{ Name = 'llm-provider-server'; Address = $env:LLM_SERVER_URL; Health = '/healthz'; Status = 200 },
     @{ Name = 'agent-server'; Address = $env:AGENT_SERVER_URL; Health = '/health'; Status = 200 },
-    @{ Name = 'middleware'; Address = 'http://' + $env:MIDDLEWARE_ADDR; Health = '/healthz'; Status = 204 },
+    @{ Name = 'middleware'; Address = 'http://' + $env:MIDDLEWARE_ADDR; Health = '/healthz'; Status = 200 },
     @{ Name = 'nginx'; Address = 'https://127.0.0.1:' + $app.Port; Health = '/healthz'; Status = 200; Binary = (Join-Path $nginxDir 'nginx.exe')
        Arguments = @('-p', ('"' + $nginxDir.Replace('\', '/') + '/"'), '-c', ('"' + $nginxMainConf.Replace('\', '/') + '"')) }
 )

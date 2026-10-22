@@ -1,11 +1,13 @@
 package test
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,13 +58,22 @@ func TestBackendProcessGracefullyClosesSQLiteOnPlatformSignal(t *testing.T) {
 		}
 	})
 
+	versionFile, err := os.ReadFile("../VERSION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVersion := strings.TrimSpace(strings.SplitN(string(versionFile), "\n", 2)[0])
 	healthURL := "http://" + address + "/v1/health"
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		response, requestErr := http.Get(healthURL) // #nosec G107 -- loopback process fixture
 		if requestErr == nil {
+			body, _ := io.ReadAll(response.Body)
 			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK {
+				if !strings.Contains(string(body), `"version":"`+wantVersion+`"`) {
+					t.Fatalf("health = %s, want version %q from backend/VERSION", body, wantVersion)
+				}
 				break
 			}
 		}

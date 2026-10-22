@@ -32,6 +32,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("設定載入失敗: %w", err)
 	}
+	cfg.Version = Version
 
 	apiLog, err := logging.New("api", cfg.LogDir, cfg.LogMaxLines, cfg.Debug)
 	if err != nil {

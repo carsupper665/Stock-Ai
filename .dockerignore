@@ -4,6 +4,8 @@
 !docker/**
 !middleware
 !middleware/go.mod
+!middleware/VERSION
+!middleware/version.go
 !middleware/cmd
 !middleware/cmd/**/*.go
 !middleware/internal
@@ -12,6 +14,7 @@ middleware/internal/**/*_test.go
 !scripts
 !backend
 !backend/go.mod
+!backend/VERSION
 !backend/go.sum
 !backend/*.go
 !backend/cmd
@@ -20,6 +23,8 @@ middleware/internal/**/*_test.go
 !backend/internal/**/*.go
 !agent_server
 !agent_server/go.mod
+!agent_server/VERSION
+!agent_server/version.go
 !agent_server/go.sum
 !agent_server/cmd
 !agent_server/cmd/**/*.go
@@ -27,6 +32,8 @@ middleware/internal/**/*_test.go
 !agent_server/internal/**/*.go
 !llm_provider_server
 !llm_provider_server/go.mod
+!llm_provider_server/VERSION
+!llm_provider_server/version.go
 !llm_provider_server/go.sum
 !llm_provider_server/cmd
 !llm_provider_server/cmd/**/*.go
@@ -35,6 +42,7 @@ middleware/internal/**/*_test.go
 !frontend
 !frontend/index.html
 !frontend/package.json
+!frontend/VERSION
 !frontend/package-lock.json
 !frontend/vite.config.js
 !frontend/src

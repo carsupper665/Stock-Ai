@@ -9,8 +9,8 @@ import (
 // health 回報服務與資料庫是否可用。
 func (s *Server) health(c *gin.Context) {
 	if err := s.store.Ping(c.Request.Context()); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "database": err.Error()})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "database": err.Error(), "version": s.cfg.Version})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "database": s.cfg.DBDriver})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "database": s.cfg.DBDriver, "version": s.cfg.Version})
 }

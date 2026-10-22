@@ -115,7 +115,7 @@ docker compose --env-file "$HOME/stock-ai-runtime/compose.env" \
 
 1. preflight 全部 `ok`，且 IdP 已登記它印出的 Redirect URI 與 Post-logout URI。
 2. 瀏覽器登入成功，`docker compose ... logs middleware` 沒有 `OIDC login failed`。
-3. 登入後側欄三個服務狀態皆為 `ok`（`/v1/health`、`/agent/health`、`/llm/healthz` 均 200）。
+3. 登入後側欄各服務狀態皆為 `ok`（`/v1/health`、`/agent/health`、`/llm/healthz` 均 200；主機 Nginx 部署另有 `/middleware/healthz`），並顯示各自的版本。
 4. 實際操作：開啟 Provider 頁、建立 Session、查看執行明細，皆無 401 或被登出。
 5. 登出後回到登入頁且沒有重新載入循環，再次登入成功。
 
@@ -179,3 +179,7 @@ Account／Session，要求一次 `get_account`，核對持久化的成功工具�
 
 這些修正需重新建置、驗證及核准映像後才會進入部署；既有 promotion manifest 與舊驗收紀錄
 不代表新映像已通過驗收。
+
+## 正式環境：主機 Nginx
+
+正式發布改用主機上的單層 Nginx，步驟見 `install.md`。

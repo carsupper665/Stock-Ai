@@ -21,6 +21,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	llmproviderserver "stock-ai/llm-provider-server"
 	"stock-ai/llm-provider-server/internal/providers"
 	"stock-ai/llm-provider-server/internal/webharness"
 	"strings"
@@ -537,7 +538,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "Service database is unavailable.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": llmproviderserver.Version})
 }
 
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {

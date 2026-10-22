@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	llmproviderserver "stock-ai/llm-provider-server"
 )
 
 func TestGatewayLogsRequestsAndProviderErrorsWithoutSecrets(t *testing.T) {
@@ -34,8 +36,9 @@ func TestGatewayLogsRequestsAndProviderErrorsWithoutSecrets(t *testing.T) {
 
 	assertError(t, request(t, server.Handler(), http.MethodPost, "/v1/generate?trace="+diagnosticSecret, runtimeToken,
 		[]byte(`{"provider":"fixture","messages":[{"role":"user","content":"hello"}]}`)), http.StatusBadGateway, "PROVIDER_UNAVAILABLE")
-	if response := request(t, server.Handler(), http.MethodGet, "/healthz", "", nil); response.Code != http.StatusOK {
-		t.Fatalf("health = %d", response.Code)
+	if response := request(t, server.Handler(), http.MethodGet, "/healthz", "", nil); response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"version":"`+llmproviderserver.Version+`"`) {
+		t.Fatalf("health = %d %s, want version %q", response.Code, response.Body.String(), llmproviderserver.Version)
 	}
 
 	logs := terminal.String()

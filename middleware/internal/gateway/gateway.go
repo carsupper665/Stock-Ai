@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"middleware"
 )
 
 const maxOIDCResponse = 1 << 20
@@ -110,7 +112,8 @@ func (s *statusRecorder) Write(body []byte) (int, error) {
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": middleware.Version})
 }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {

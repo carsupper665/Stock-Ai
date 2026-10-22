@@ -37,6 +37,8 @@ type Config struct {
 	MarketWaitTimeout time.Duration // 等新報價的上限
 
 	MatchingInterval time.Duration // 撮合引擎掃描間隔
+
+	Version string // 來自 backend/VERSION，由 main 填入，health 回報
 }
 
 // Load 讀取 .env（若存在）後組出設定。真實環境變數優先於 .env。

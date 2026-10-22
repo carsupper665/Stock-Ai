@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"middleware"
 )
 
 type fakeIDP struct {
@@ -79,12 +81,13 @@ func TestSecurityGateHeaders(t *testing.T) {
 	}
 }
 
-func TestHealthEndpointIsUnauthenticatedAndNoContent(t *testing.T) {
+func TestHealthEndpointIsUnauthenticatedAndReportsVersion(t *testing.T) {
 	s, _ := newFixture(t)
 	response := httptest.NewRecorder()
 	s.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway:4180/healthz", nil))
-	if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
-		t.Fatalf("health response = %d %q, want 204 with empty body", response.Code, response.Body.String())
+	var body map[string]string
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || body["status"] != "ok" || body["version"] != middleware.Version {
+		t.Fatalf("health response = %d %q, want 200 with status ok and version %q", response.Code, response.Body.String(), middleware.Version)
 	}
 }
 

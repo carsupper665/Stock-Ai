@@ -3,12 +3,15 @@
 
 import json
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import urlopen
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from check_versions import VersionError, check  # noqa: E402
 REGISTRY = "127.0.0.1:5000"
 BUILDER = "stock-ai-t10"
 SERVICES = {
@@ -25,6 +28,10 @@ def run(*args):
 
 
 def main():
+    try:
+        check()
+    except VersionError as error:
+        raise SystemExit(f"Incompatible service versions:\n{error}")
     revision = run("git", "rev-parse", "HEAD").stdout.strip()
     source_epoch = run("git", "show", "-s", "--format=%ct", "HEAD").stdout.strip()
     build_date = datetime.fromtimestamp(int(source_epoch), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

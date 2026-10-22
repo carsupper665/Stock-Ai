@@ -29,6 +29,10 @@ try {
     if (& git -c "safe.directory=$gitSafeDirectory" status --porcelain=v1 --untracked-files=all) {
         throw 'Production images must be built from a clean checkout.'
     }
+    # The services' VERSION files declare which versions they depend on; refuse to build an incompatible set.
+    $python = Get-Command 'py.exe' -ErrorAction SilentlyContinue
+    if ($python) { $pythonArgs = @('-3') } else { $python = Get-Command 'python.exe' -ErrorAction Stop; $pythonArgs = @() }
+    & $python.Source @pythonArgs (Join-Path $root 'scripts/check_versions.py')
     $revision = (& git -c "safe.directory=$gitSafeDirectory" rev-parse HEAD).Trim()
     $tree = (& git -c "safe.directory=$gitSafeDirectory" rev-parse 'HEAD^{tree}').Trim()
     $sourceDateEpoch = (& git -c "safe.directory=$gitSafeDirectory" show -s --format=%ct HEAD).Trim()

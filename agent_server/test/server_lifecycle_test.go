@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	agentserver "stock-ai/agent-server"
 	eventloop "stock-ai/agent-server/internal/eventloop"
 	server "stock-ai/agent-server/internal/server"
 )
@@ -55,13 +56,14 @@ func TestServerStartsHTTPAndCancelsBackgroundWorkOnShutdown(t *testing.T) {
 		t.Fatalf("GET /health Content-Type = %q, want application/json", got)
 	}
 	var body struct {
-		Status string `json:"status"`
+		Status  string `json:"status"`
+		Version string `json:"version"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decode health response: %v", err)
 	}
-	if body.Status != "ok" {
-		t.Fatalf("health status = %q, want ok", body.Status)
+	if body.Status != "ok" || body.Version != agentserver.Version || body.Version == "" {
+		t.Fatalf("health = %+v, want status ok and version %q", body, agentserver.Version)
 	}
 	request, err := http.NewRequest(http.MethodPost, "http://"+listener.Addr().String()+"/health", nil)
 	if err != nil {

@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
         '/v1': middleware,
         '/agent': middleware,
         '/llm': middleware,
+        '/middleware/healthz': { target: middleware, rewrite: () => '/healthz' },
       },
     },
     test: { environment: 'happy-dom', include: ['test/**/*.test.js'] },

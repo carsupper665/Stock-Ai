@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	agentserver "stock-ai/agent-server"
 	"stock-ai/agent-server/internal/eventloop"
 )
 
@@ -82,7 +84,7 @@ func NewServer(loop *eventloop.EventLoop, tasks []BackgroundTask, resources []io
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"status":"ok"}`)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": agentserver.Version})
 	})
 	if len(application) == 1 {
 		mux.Handle("/api/", application[0])

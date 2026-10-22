@@ -95,6 +95,15 @@ server {
         return 200 "ok\n";
     }
 
+    # The middleware's own health and version, shown in the frontend's service status panel.
+    location = /middleware/healthz {
+        limit_req zone=per_ip burst=40 nodelay;
+        limit_except GET { deny all; }
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_middleware/healthz;
+        proxy_http_version 1.1;
+    }
+
     location ^~ /assets/ {
         limit_req zone=per_ip burst=40 nodelay;
         limit_except GET HEAD { deny all; }
