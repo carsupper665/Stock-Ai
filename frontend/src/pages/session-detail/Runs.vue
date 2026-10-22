@@ -148,6 +148,11 @@ async function saveHistory() {
   finally { if (request === historyRequest) historyLoading.value = false }
 }
 // event Run 帶 triggers[]（最多 10 個）；其他 Run 只有一個 trigger 字串
+// initial_context 是這個 Run 送給模型的第一則 user 訊息；inbox 是 Run 開始時 tag 給這個帳號的新留言，
+// 讀取失敗時會是 Tool Error（{ok:false,error}）
+const contextOf = (r) => (r.initial_context && typeof r.initial_context === 'object' ? r.initial_context : null)
+const inboxOf = (r) => contextOf(r)?.inbox ?? null
+const contextText = (r) => JSON.stringify(contextOf(r), null, 2)
 const triggersOf = (r) => (Array.isArray(r.triggers) && r.triggers.length ? r.triggers : null)
 const triggerLabel = (r) => triggersOf(r)?.map((t) => t.type).join(' · ') ?? r.trigger
 const meanings = { session_start: '第一次啟動', session_restart: '停止後重新啟動', server_recovery: 'Server 重啟後恢復', manual_retry: '使用者對失敗的 Run 重試', event: 'Event 觸發' }
@@ -221,6 +226,23 @@ function matchedText(t) {
             <span class="mono type" data-tone="acc">{{ run.trigger }}</span>
             <span data-tone="dim">{{ meanings[run.trigger] ?? '' }}</span>
           </div>
+          <template v-if="contextOf(run)">
+            <div class="row trigger">
+              <span class="mono type" data-tone="acc">inbox</span>
+              <span v-if="!inboxOf(run)" data-tone="dim">沒有上一個 Run 之後 tag 給這個帳號的留言</span>
+              <span v-else-if="inboxOf(run).error" data-tone="neg">讀取失敗 · {{ inboxOf(run).error.code }} · {{ inboxOf(run).error.message }}</span>
+              <span v-else data-tone="dim">{{ inboxOf(run).messages.length }} 則{{ inboxOf(run).has_more ? '（還有更多未送進來）' : '' }}</span>
+            </div>
+            <div v-for="m in inboxOf(run)?.messages ?? []" :key="m.id" class="inbox-message">
+              <span class="mono small" data-tone="mute">{{ fmtClock(m.created_at) }} · {{ m.user_name }} → {{ m.tags.map((t) => '@' + t).join(' ') }}</span>
+              <div>{{ m.content }}</div>
+            </div>
+            <details class="context">
+              <summary>初始 context（模型收到的第一則 user 訊息）</summary>
+              <pre class="mono small">{{ contextText(run) }}</pre>
+            </details>
+          </template>
+          <p v-else class="note">這個 Run 沒有記錄初始 context。</p>
         </div>
 
         <template v-for="item in history" :key="item.key">
@@ -322,6 +344,23 @@ function matchedText(t) {
 }
 .trigger {
   padding: 2px 0;
+}
+.inbox-message {
+  margin-left: 140px;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--line2);
+}
+.context summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 13px;
+}
+.context pre {
+  margin: 6px 0 0;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .type {
   width: 132px;
@@ -491,6 +530,11 @@ function matchedText(t) {
 @media (max-width: 1100px) {
   .run-layout {
     grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .inbox-message {
+    margin-left: 0;
   }
 }
 </style>

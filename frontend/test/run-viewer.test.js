@@ -248,3 +248,33 @@ it('labels a unified position_close trigger with identity and only an evidenced 
   expect(document.body.textContent).not.toContain('SL_hit')
   expect(document.body.textContent).not.toContain('TP_hit')
 })
+
+it('shows the inbox delivered at Run start and the full initial context', async () => {
+  const root = mountRuns({ run_id: 7, status: 'completed', trigger: 'event', progress: [], start_time: '2026-10-23T01:00:00Z',
+    initial_context: { trigger: 'event', inbox: { messages: [
+      { id: 'msg_1', user_name: 'car', content: '看得到這則嗎？', tags: ['1000u_p3'], created_at: '2026-10-23T00:58:00Z' },
+    ] } } })
+  await nextTick()
+
+  expect(root.textContent).toContain('1 則')
+  expect(root.textContent).toContain('car → @1000u_p3')
+  expect(root.textContent).toContain('看得到這則嗎？')
+  expect(root.querySelector('.context pre').textContent).toContain('"inbox"')
+})
+
+it('says when a Run had no inbox, could not read it, or has no initial context recorded', async () => {
+  const root = mountRuns({ run_id: 8, status: 'completed', trigger: 'event', progress: [], initial_context: { trigger: 'event' } })
+  await nextTick()
+  expect(root.textContent).toContain('沒有上一個 Run 之後 tag 給這個帳號的留言')
+  app.unmount()
+
+  const failed = mountRuns({ run_id: 9, status: 'completed', trigger: 'event', progress: [],
+    initial_context: { inbox: { ok: false, error: { code: 'BACKEND_UNAVAILABLE', message: 'Backend message request failed' } } } })
+  await nextTick()
+  expect(failed.textContent).toContain('讀取失敗 · BACKEND_UNAVAILABLE')
+  app.unmount()
+
+  const old = mountRuns({ run_id: 10, status: 'completed', trigger: 'event', progress: [], initial_context: null })
+  await nextTick()
+  expect(old.textContent).toContain('這個 Run 沒有記錄初始 context。')
+})
