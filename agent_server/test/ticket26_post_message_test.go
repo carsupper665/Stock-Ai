@@ -17,13 +17,13 @@ func TestTicket26PostMessageUsesBoundIdentityThenReadsItBack(t *testing.T) {
 		switch call {
 		case 1:
 			body := decodeMessageGatewayRequest(t, request)
-			tool := messageToolByName(t, body, "post_message")
+			tool := messageToolByName(t, body, "post_chat")
 			schema := tool["input_schema"].(map[string]any)
 			properties := schema["properties"].(map[string]any)
 			if schema["additionalProperties"] != false || len(properties) != 2 || properties["content"].(map[string]any)["maxLength"] != float64(500) {
-				t.Errorf("post_message schema = %#v", schema)
+				t.Errorf("post_chat schema = %#v", schema)
 			}
-			messageToolCall(w, "post-one", "post_message", map[string]any{"content": "  多位元留言  ", "tags": []string{"risk", "desk-b"}})
+			messageToolCall(w, "post-one", "post_chat", map[string]any{"content": "  多位元留言  ", "tags": []string{"risk", "desk-b"}})
 		case 2:
 			result := messageToolResult(t, request, "post-one")
 			encoded, _ := json.Marshal(result)
@@ -31,7 +31,7 @@ func TestTicket26PostMessageUsesBoundIdentityThenReadsItBack(t *testing.T) {
 				strings.Contains(string(encoded), "author_id") || strings.Contains(string(encoded), "content") {
 				t.Errorf("post Tool Result = %s", encoded)
 			}
-			messageToolCall(w, "read-posted", "get_messages", map[string]any{})
+			messageToolCall(w, "read-posted", "get_chat", map[string]any{})
 		default:
 			result := messageToolResult(t, request, "read-posted")
 			encoded, _ := json.Marshal(result)
@@ -78,7 +78,7 @@ func TestTicket26PostMessageUsesBoundIdentityThenReadsItBack(t *testing.T) {
 	}
 	var postTrace map[string]any
 	for _, entry := range progress {
-		if entry["type"] == "tool_call" && entry["tool_name"] == "post_message" {
+		if entry["type"] == "tool_call" && entry["tool_name"] == "post_chat" {
 			postTrace = entry
 			break
 		}
@@ -86,7 +86,7 @@ func TestTicket26PostMessageUsesBoundIdentityThenReadsItBack(t *testing.T) {
 	traceJSON, _ := json.Marshal(postTrace)
 	if postTrace == nil || !strings.Contains(string(traceJSON), `"content":"  多位元留言  "`) ||
 		!strings.Contains(string(traceJSON), `"id":"msg_posted"`) {
-		t.Fatalf("post_message Run trace = %s", traceJSON)
+		t.Fatalf("post_chat Run trace = %s", traceJSON)
 	}
 	for _, secret := range []string{"ticket-25-account-v1", messageBackendToken, messageGatewayToken} {
 		if strings.Contains(string(run.Progress), secret) {
@@ -120,8 +120,8 @@ func TestTicket26PostMessageValidationMatchesBackendBoundaries(t *testing.T) {
 		{name: "string root", arguments: `{"content":"hi"} trailing`},
 		{name: "mixed-case declared field", arguments: map[string]any{"CONTENT": "hi"}},
 		{name: "null content", arguments: map[string]any{"content": nil}},
-		{name: "missing tags", arguments: map[string]any{"content": "hi"}},
-		{name: "empty tags", arguments: map[string]any{"content": "hi", "tags": []string{}}},
+		{name: "missing tags", arguments: map[string]any{"content": "hi"}, wantBackend: true, wantContent: "hi"},
+		{name: "empty tags", arguments: map[string]any{"content": "hi", "tags": []string{}}, wantBackend: true, wantContent: "hi"},
 		{name: "null tags", arguments: map[string]any{"content": "hi", "tags": nil}},
 		{name: "exact Unicode limit after trim", arguments: map[string]any{"content": "  " + strings.Repeat("界", 500) + "  ", "tags": []string{"USER"}}, wantBackend: true, wantContent: strings.Repeat("界", 500)},
 	}
@@ -130,7 +130,7 @@ func TestTicket26PostMessageValidationMatchesBackendBoundaries(t *testing.T) {
 			fixture := newMessageToolFixture()
 			fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 				if call == 1 {
-					messageToolCall(w, "post-case", "post_message", test.arguments)
+					messageToolCall(w, "post-case", "post_chat", test.arguments)
 					return
 				}
 				result := messageToolResult(t, request, "post-case")
@@ -191,7 +191,7 @@ func TestTicket26PostMessageRejectsDisabledOrBackendRejectedRefreshedIdentityWit
 						fixture.accountStatus = "disabled"
 						fixture.mu.Unlock()
 					}
-					messageToolCall(w, "post-identity", "post_message", map[string]any{"content": "must not be retried", "tags": []string{"USER"}})
+					messageToolCall(w, "post-identity", "post_chat", map[string]any{"content": "must not be retried", "tags": []string{"USER"}})
 					return
 				}
 				result := messageToolResult(t, request, "post-identity")
@@ -229,7 +229,7 @@ func TestTicket26PostMessageRejectsNullFieldAndMalformedSuccessWithoutRetry(t *t
 			fixture := newMessageToolFixture()
 			fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 				if call == 1 {
-					messageToolCall(w, "post-invalid-success", "post_message", map[string]any{"content": "one attempt", "tags": []string{"USER"}})
+					messageToolCall(w, "post-invalid-success", "post_chat", map[string]any{"content": "one attempt", "tags": []string{"USER"}})
 					return
 				}
 				result := messageToolResult(t, request, "post-invalid-success")
@@ -264,7 +264,7 @@ func TestTicket26PostMessagePartialErrorBodyTimeoutIsUnknownAndNotRetried(t *tes
 	var startOnce, cancelOnce sync.Once
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		if call == 1 {
-			messageToolCall(w, "post-partial-error", "post_message", map[string]any{"content": "possibly stored", "tags": []string{"USER"}})
+			messageToolCall(w, "post-partial-error", "post_chat", map[string]any{"content": "possibly stored", "tags": []string{"USER"}})
 			return
 		}
 		result := messageToolResult(t, request, "post-partial-error")
@@ -307,7 +307,7 @@ func TestTicket26PostMessagePreservesExactBackendErrorAndMarksFiveHundredUnknown
 	fixture := newMessageToolFixture()
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		if call == 1 {
-			messageToolCall(w, "post-backend-error", "post_message", map[string]any{"content": "one attempt", "tags": []string{"USER"}})
+			messageToolCall(w, "post-backend-error", "post_chat", map[string]any{"content": "one attempt", "tags": []string{"USER"}})
 			return
 		}
 		result := messageToolResult(t, request, "post-backend-error")
@@ -337,14 +337,14 @@ func TestTicket26PostTimeoutAfterWriteIsUnknownAndNeverAutomaticallyRetried(t *t
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		switch call {
 		case 1:
-			messageToolCall(w, "post-timeout", "post_message", map[string]any{"content": "first attempt", "tags": []string{"USER"}})
+			messageToolCall(w, "post-timeout", "post_chat", map[string]any{"content": "first attempt", "tags": []string{"USER"}})
 		case 2:
 			result := messageToolResult(t, request, "post-timeout")
 			errorBody, _ := result["error"].(map[string]any)
 			if errorBody["code"] != "TOOL_TIMEOUT" || errorBody["outcome"] != "unknown" || stored.Load() != 1 {
 				t.Errorf("timeout result=%#v stored=%d", result, stored.Load())
 			}
-			messageToolCall(w, "post-explicit-second", "post_message", map[string]any{"content": "second LLM attempt", "tags": []string{"USER"}})
+			messageToolCall(w, "post-explicit-second", "post_chat", map[string]any{"content": "second LLM attempt", "tags": []string{"USER"}})
 		default:
 			result := messageToolResult(t, request, "post-explicit-second")
 			if result["ok"] != true || stored.Load() != 2 {

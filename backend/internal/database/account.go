@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 const encryptedTokenPrefix = "enc:v1:"
@@ -86,13 +87,31 @@ func (s *Store) ListMaxDDAccounts(ctx context.Context) ([]Account, error) {
 
 // UpdateAccountFields only writes fields owned by Account administration. Trading balance and
 // token rotation are separate mutations and must not be overwritten by a stale Account value.
-func (s *Store) UpdateAccountFields(ctx context.Context, id string, userName, status *string) error {
-	fields := make(map[string]any, 2)
-	if userName != nil {
-		fields["user_name"] = *userName
+// AccountFields 是 USER 可以修改的帳號欄位；nil 表示不改。
+type AccountFields struct {
+	UserName      *string
+	Status        *string
+	ChatRead      *bool
+	ChatPost      *bool
+	ChatReadSince *time.Time
+}
+
+func (s *Store) UpdateAccountFields(ctx context.Context, id string, in AccountFields) error {
+	fields := make(map[string]any, 5)
+	if in.UserName != nil {
+		fields["user_name"] = *in.UserName
 	}
-	if status != nil {
-		fields["status"] = *status
+	if in.Status != nil {
+		fields["status"] = *in.Status
+	}
+	if in.ChatRead != nil {
+		fields["chat_read"] = *in.ChatRead
+	}
+	if in.ChatPost != nil {
+		fields["chat_post"] = *in.ChatPost
+	}
+	if in.ChatReadSince != nil {
+		fields["chat_read_since"] = *in.ChatReadSince
 	}
 	if len(fields) == 0 {
 		return nil

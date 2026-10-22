@@ -74,7 +74,7 @@ func TestPostMessageValidation(t *testing.T) {
 	}
 }
 
-func TestPostMessageRequiresOtherRecipient(t *testing.T) {
+func TestPostMessageTagsAreOptionalButMustNameOthers(t *testing.T) {
 	engine, _ := newTestServer(t)
 	_, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
 	createAccountFor(t, engine, "ETH-Agent-02", 100)
@@ -84,8 +84,6 @@ func TestPostMessageRequiresOtherRecipient(t *testing.T) {
 		token string
 		tags  []string
 	}{
-		{"沒有 tags", alpha, nil},
-		{"空 tags", alpha, []string{}},
 		{"不存在的帳號", alpha, []string{"risk"}},
 		{"帳號 tag 自己", alpha, []string{"BTC-Agent-01"}},
 		{"USER tag 自己", testUserToken, []string{"USER"}},
@@ -101,6 +99,12 @@ func TestPostMessageRequiresOtherRecipient(t *testing.T) {
 				t.Fatalf("應回 400，得到 %d: %v", status, resp)
 			}
 		})
+	}
+
+	for _, body := range []gin.H{{"content": "no tags"}, {"content": "empty tags", "tags": []string{}}} {
+		if status, resp := do(t, engine, http.MethodPost, "/v1/messages", alpha, body); status != http.StatusCreated {
+			t.Fatalf("群聊的 tag 是選填，應回 201，得到 %d: %v", status, resp)
+		}
 	}
 
 	status, body := do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{"content": "bug report", "tags": []string{"Bless", "ETH-Agent-02"}})
@@ -184,5 +188,60 @@ func TestMessagesPageFilterAndDeleteAuthorization(t *testing.T) {
 	}
 	if status, _ = do(t, engine, http.MethodDelete, "/v1/messages/"+ids[1], testUserToken, nil); status != http.StatusNoContent {
 		t.Fatalf("USER 管理刪除應回 204，得到 %d", status)
+	}
+}
+
+func TestChatPermissionsAreEnforcedPerAccount(t *testing.T) {
+	engine, _ := newTestServer(t)
+	id, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
+	createAccountFor(t, engine, "ETH-Agent-02", 100)
+
+	status, body := do(t, engine, http.MethodPatch, "/v1/accounts/"+id, testUserToken, gin.H{"chat_post": false})
+	if status != http.StatusOK || body["chat_post"] != false || body["chat_read"] != true {
+		t.Fatalf("設為唯讀: %d %v", status, body)
+	}
+	status, body = do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{"content": "hi"})
+	if status != http.StatusForbidden || body["error"] != "chat_post_disabled" || body["message"] != "此帳號已被管理者停用群聊發言權限" {
+		t.Fatalf("唯讀帳號發言應回 403 chat_post_disabled: %d %v", status, body)
+	}
+	if status, body := do(t, engine, http.MethodGet, "/v1/messages", alpha, nil); status != http.StatusOK {
+		t.Fatalf("唯讀帳號仍可讀: %d %v", status, body)
+	}
+
+	if status, body := do(t, engine, http.MethodPatch, "/v1/accounts/"+id, testUserToken, gin.H{"chat_read": false}); status != http.StatusOK || body["chat_read"] != false {
+		t.Fatalf("停權: %d %v", status, body)
+	}
+	status, body = do(t, engine, http.MethodGet, "/v1/messages", alpha, nil)
+	if status != http.StatusForbidden || body["error"] != "chat_read_disabled" {
+		t.Fatalf("停權帳號讀取應回 403 chat_read_disabled: %d %v", status, body)
+	}
+	if status, _ := do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "USER 不受限", "tags": []string{"BTC-Agent-01"}}); status != http.StatusCreated {
+		t.Fatalf("USER 發言應不受帳號權限影響: %d", status)
+	}
+
+	status, body = do(t, engine, http.MethodPatch, "/v1/accounts/"+id, testUserToken, gin.H{"chat_read": true, "chat_post": true})
+	if status != http.StatusOK || body["chat_read"] != true || body["chat_read_since"] == nil {
+		t.Fatalf("重新開放讀取應記下 chat_read_since: %d %v", status, body)
+	}
+}
+
+func TestListMessagesAfterReturnsOnlyLaterMessages(t *testing.T) {
+	engine, _ := newTestServer(t)
+	_, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
+	ids := make([]string, 0, 3)
+	for _, content := range []string{"one", "two", "three"} {
+		status, body := do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{"content": content})
+		if status != http.StatusCreated {
+			t.Fatalf("post %s: %d %v", content, status, body)
+		}
+		ids = append(ids, body["id"].(string))
+	}
+	status, body := do(t, engine, http.MethodGet, "/v1/messages?sort=asc&after="+ids[0], alpha, nil)
+	messages, _ := body["messages"].([]any)
+	if status != http.StatusOK || len(messages) != 2 || messages[0].(map[string]any)["content"] != "two" || messages[1].(map[string]any)["content"] != "three" {
+		t.Fatalf("after 應只回之後的留言: %d %v", status, body)
+	}
+	if status, _ := do(t, engine, http.MethodGet, "/v1/messages?after=msg_missing", alpha, nil); status != http.StatusBadRequest {
+		t.Fatalf("不存在的 after 應回 400: %d", status)
 	}
 }

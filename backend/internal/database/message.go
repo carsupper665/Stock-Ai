@@ -1,12 +1,18 @@
 package database
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type MessageQuery struct {
 	Desc   bool
 	Limit  int
 	Offset int
 	Tag    string
+	// AfterCreatedAt／AfterID 非空時只取排在這則留言之後的留言。
+	AfterCreatedAt *time.Time
+	AfterID        string
 }
 
 func (s *Store) CreateMessage(ctx context.Context, message *Message) error {
@@ -29,6 +35,9 @@ func (s *Store) ListMessages(ctx context.Context, q MessageQuery) ([]Message, er
 	query := s.db.WithContext(ctx).Model(&Message{})
 	if q.Tag != "" {
 		query = query.Joins("JOIN message_tags ON message_tags.message_id = messages.id AND message_tags.tag = ?", q.Tag)
+	}
+	if q.AfterCreatedAt != nil {
+		query = query.Where("messages.created_at > ? OR (messages.created_at = ? AND messages.id > ?)", *q.AfterCreatedAt, *q.AfterCreatedAt, q.AfterID)
 	}
 	order := "created_at asc, id asc"
 	if q.Desc {

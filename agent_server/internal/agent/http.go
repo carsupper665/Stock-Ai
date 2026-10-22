@@ -332,6 +332,9 @@ type backendAccount struct {
 	Token          string  `json:"token"`
 	InitialBalance float64 `json:"initial_balance"`
 	Balance        float64 `json:"balance"`
+	// ChatRead is nil from a Backend that predates chat permissions, which means allowed.
+	ChatRead      *bool   `json:"chat_read"`
+	ChatReadSince *string `json:"chat_read_since"`
 }
 
 func (r *AgentRuntime) fetchAccount(ctx context.Context, accountID string) (backendAccount, error) {

@@ -16,17 +16,17 @@ func TestTicket25GetMessagesSchemaMapsFiltersAndReturnsOnlyPublicFields(t *testi
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		if call == 1 {
 			body := decodeMessageGatewayRequest(t, request)
-			tool := messageToolByName(t, body, "get_messages")
+			tool := messageToolByName(t, body, "get_chat")
 			schema := tool["input_schema"].(map[string]any)
 			properties := schema["properties"].(map[string]any)
 			if schema["additionalProperties"] != false || len(properties) != 3 ||
 				properties["page"].(map[string]any)["default"] != float64(1) || properties["sort"].(map[string]any)["default"] != "desc" {
-				t.Errorf("get_messages schema = %#v", schema)
+				t.Errorf("get_chat schema = %#v", schema)
 			}
 			if _, hasLimit := properties["limit"]; hasLimit {
-				t.Errorf("get_messages must have a fixed page size: %#v", properties)
+				t.Errorf("get_chat must have a fixed page size: %#v", properties)
 			}
-			messageToolCall(w, "read-filtered", "get_messages", map[string]any{
+			messageToolCall(w, "read-filtered", "get_chat", map[string]any{
 				"tag": "risk", "page": 3, "sort": "asc",
 			})
 			return
@@ -109,7 +109,7 @@ func TestTicket25GetMessagesDefaultsCapAndArgumentErrorsUseOneAttemptEach(t *tes
 			fixture := newMessageToolFixture()
 			fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 				if call == 1 {
-					messageToolCall(w, "read-case", "get_messages", test.arguments)
+					messageToolCall(w, "read-case", "get_chat", test.arguments)
 					return
 				}
 				result := messageToolResult(t, request, "read-case")
@@ -153,7 +153,7 @@ func TestTicket25InvalidRefreshedAccountTokenIsNotRetriedAsAnonymous(t *testing.
 			fixture.mu.Lock()
 			fixture.accountToken = "reset-token"
 			fixture.mu.Unlock()
-			messageToolCall(w, "read-auth", "get_messages", map[string]any{})
+			messageToolCall(w, "read-auth", "get_chat", map[string]any{})
 			return
 		}
 		result := messageToolResult(t, request, "read-auth")
@@ -192,7 +192,7 @@ func TestTicket25GetMessagesRejectsNullFieldAndMalformedSuccessWithoutRetry(t *t
 			fixture := newMessageToolFixture()
 			fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 				if call == 1 {
-					messageToolCall(w, "read-invalid-success", "get_messages", map[string]any{})
+					messageToolCall(w, "read-invalid-success", "get_chat", map[string]any{})
 					return
 				}
 				result := messageToolResult(t, request, "read-invalid-success")
@@ -227,7 +227,7 @@ func TestTicket25GetMessagesPartialSuccessBodyTimeoutIsUnknownAndNotRetried(t *t
 	var startOnce, cancelOnce sync.Once
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		if call == 1 {
-			messageToolCall(w, "read-partial-timeout", "get_messages", map[string]any{})
+			messageToolCall(w, "read-partial-timeout", "get_chat", map[string]any{})
 			return
 		}
 		result := messageToolResult(t, request, "read-partial-timeout")

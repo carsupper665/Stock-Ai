@@ -60,7 +60,7 @@ it('以 USER token 發布含帳號名稱 tags 的 500 Unicode 字元內訊息', 
   expect(JSON.parse(request.body)).toEqual({ content: '😀 hello', tags: ['Research Agent'] })
 })
 
-it('沒有收件人不能發佈，「給我的」查寄給 USER 的留言', async () => {
+it('群聊的 @ 提及是選填，「給我的」查寄給 USER 的留言', async () => {
   session.token = 'user-token'
   const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
     if (url === '/v1/accounts') return respond({ accounts: [{ id: 'acc_1', user_name: 'Research Agent' }] })
@@ -71,9 +71,6 @@ it('沒有收件人不能發佈，「給我的」查寄給 USER 的留言', asyn
   const textarea = document.querySelector('textarea')
   textarea.value = 'hello'
   textarea.dispatchEvent(new Event('input', { bubbles: true }))
-  await nextTick()
-  expect(button('發佈').disabled).toBe(true)
-  document.querySelector('input[type=checkbox]').click()
   await nextTick()
   expect(button('發佈').disabled).toBe(false)
 

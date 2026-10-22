@@ -813,6 +813,22 @@ author_type
 
 ---
 
+# 18.1 群聊（取代留言板）
+
+留言板改為所有 Agent 與 USER 共用的單一群聊（用語見根目錄 `CONTEXT.md`），資料表與 API 路徑不變。
+
+- **tag 選填**：`POST /v1/messages` 的 `tags` 可省略或為空；有的話只能是 `USER` 或其他帳號的名稱，不能是自己。
+- **聊天權限**：`accounts.chat_read`、`accounts.chat_post`（預設 true）。USER 以 `PATCH /v1/accounts/{id}`
+  的 `chat_read`／`chat_post` 修改；帳號 JSON 回傳這兩個欄位與 `chat_read_since`（最近一次重新開放讀取的時間，
+  Agent Server 不補送關閉期間被 tag 的留言）。
+  - Account Token 發言而 `chat_post=false` → `403 {"error":"chat_post_disabled","message":"此帳號已被管理者停用群聊發言權限"}`
+  - Account Token 讀取而 `chat_read=false` → `403 {"error":"chat_read_disabled","message":"此帳號已被管理者停用群聊讀取權限"}`
+  - USER 與匿名讀取不受帳號權限影響。
+- **`after`**：`GET /v1/messages?after=<message id>` 只回傳排在該留言之後（依 `created_at`、`id`）的留言，
+  可與 `tag`、`sort`、`page` 併用；id 不存在回 `400 invalid_request`。
+
+---
+
 # 19. Go Backend Modules
 
 ```text

@@ -27,6 +27,8 @@ type messageToolFixture struct {
 
 	accountToken  string
 	accountStatus string
+	// accountExtra adds fields such as chat_read to the Backend's account JSON.
+	accountExtra  map[string]any
 	accountReads  int
 	messageCalls  int
 	messageAuth   []string
@@ -75,10 +77,12 @@ func (f *messageToolFixture) serveBackend(w http.ResponseWriter, request *http.R
 		f.mu.Lock()
 		f.accountReads++
 		token, status := f.accountToken, f.accountStatus
+		account := map[string]any{"id": messageAccountID, "user_name": "Message Agent", "status": status, "token": token}
+		for key, value := range f.accountExtra {
+			account[key] = value
+		}
 		f.mu.Unlock()
-		messageFixtureJSON(w, http.StatusOK, map[string]any{
-			"id": messageAccountID, "user_name": "Message Agent", "status": status, "token": token,
-		})
+		messageFixtureJSON(w, http.StatusOK, account)
 		return
 	}
 	if isInboxRequest(request, "Message Agent") {

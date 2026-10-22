@@ -25,7 +25,7 @@ func Definitions(skillsEnabled bool) []map[string]any {
 
 func IsMutation(name string) bool {
 	switch name {
-	case "create_event", "delete_event", "place_order", "cancel_order", "close_position", "set_position_stops", "post_message",
+	case "create_event", "delete_event", "place_order", "cancel_order", "close_position", "set_position_stops", "post_chat",
 		"memory_save", "memory_edit":
 		return true
 	default:

@@ -373,7 +373,7 @@ func compactConversation(messages []gatewayMessage, enough func([]gatewayMessage
 	compacted := messages
 	blocks := make([]int, 0, 2)
 	if wake > 1 && !(wake == 2 && isCompactedHistory(messages[1])) {
-		compacted = append(append([]gatewayMessage{messages[0], foldMessages(messages[1:wake])}), messages[wake:]...)
+		compacted = append([]gatewayMessage{messages[0], foldMessages(messages[1:wake])}, messages[wake:]...)
 		blocks = append(blocks, 1)
 		wake = 2
 		if enough(compacted) {
@@ -417,6 +417,10 @@ func foldMessages(messages []gatewayMessage) gatewayMessage {
 		}
 		if isWakeMessage(message) {
 			lines = append(lines, "wake: "+truncateRunes(*shrinkWake(*message.Content), compactAssistantRunes))
+			continue
+		}
+		if isChatMention(message) {
+			lines = append(lines, "chat: "+truncateRunes(strings.TrimPrefix(*message.Content, chatMentionHeader+"\n"), compactAssistantRunes))
 			continue
 		}
 		// Rejected final responses and their repair instructions are retries and are dropped; an

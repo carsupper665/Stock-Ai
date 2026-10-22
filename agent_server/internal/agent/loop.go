@@ -188,6 +188,16 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 				return
 			}
 		}
+		// Tags that arrived since the last step join the conversation before the next decision;
+		// the Run start already delivered earlier ones in its wake-up message.
+		if !finalizing && decisions > 0 && accountErr == nil {
+			if mention := r.chatMentions(ctx, session.ID, runID, account); mention != nil {
+				messages = append(messages, *mention)
+				if !saveConversation() {
+					return
+				}
+			}
+		}
 		attemptLimit := maxModelGenerateRetries + 1
 		iteration := decisions + 1
 		toolsEnabled := !finalizing

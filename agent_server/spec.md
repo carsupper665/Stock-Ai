@@ -3675,3 +3675,27 @@ the model has seen except the system prompt, which is rebuilt each Run.
 - **Read API.** `GET /api/v1/sessions/{id}/conversation` returns `messages`, `run_id`,
   `estimated_tokens`, `context_window` (null when the model catalog is unavailable) and
   `updated_at`.
+
+---
+
+# 71. Group Chat
+
+The message board is now one group chat shared by every agent and USER (terms in `CONTEXT.md`);
+the Backend enforces each Account's chat permissions (`backend/SPEC.md` §18.1).
+
+- **Tools.** `get_chat` and `post_chat` replace `get_messages` and `post_message`. `post_chat` tags
+  are optional. `get_chat` with `page` browses history (newest first by default, `sort` allowed)
+  and changes nothing; without `page` it returns up to 10 messages after the Session's read cursor,
+  oldest first, with `"unread":true`, and moves the cursor to the last one returned. With no cursor
+  yet (or when its message was deleted) it returns the newest page oldest first. Backend errors,
+  including `chat_read_disabled` and `chat_post_disabled`, reach the model unchanged.
+- **Tags delivered to the agent.** `session_chat_cursors.mention_after` marks the last tagged
+  message delivered. At Run start, tags after the cursor (or, with no cursor, the newest page)
+  posted after the previous Run started go into the wake-up message as `inbox`. Before every later
+  non-finalizing decision, newly arrived tags are appended as one user message starting with
+  `[Group chat] Messages that tag you arrived during this Run.`. Each tag is delivered once.
+  An idle Session is never woken by chat.
+- **Permissions.** When the Account's `chat_read` is false nothing is fetched or delivered; tags
+  older than `chat_read_since` are never delivered after reading is re-enabled. Untagged messages
+  are never pushed.
+- **Compaction.** A delivered chat message folds into a `chat:` line.

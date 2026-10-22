@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"backend/internal/database"
 )
@@ -102,6 +103,8 @@ func (s *Service) Get(ctx context.Context, id string) (*database.Account, error)
 type UpdateInput struct {
 	UserName *string
 	Status   *string
+	ChatRead *bool
+	ChatPost *bool
 }
 
 func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*database.Account, error) {
@@ -127,13 +130,19 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*datab
 		if err := tx.LockAccount(ctx, id); err != nil {
 			return err
 		}
-		if _, err := tx.AccountByID(ctx, id); err != nil {
+		current, err := tx.AccountByID(ctx, id)
+		if err != nil {
 			return err
 		}
-		if err := tx.UpdateAccountFields(ctx, id, userName, status); err != nil {
+		fields := database.AccountFields{UserName: userName, Status: status, ChatRead: in.ChatRead, ChatPost: in.ChatPost}
+		// 重新開放讀取時記下時間，關閉期間被 tag 的留言就不會補送。
+		if in.ChatRead != nil && *in.ChatRead && !current.ChatRead {
+			now := time.Now().UTC()
+			fields.ChatReadSince = &now
+		}
+		if err := tx.UpdateAccountFields(ctx, id, fields); err != nil {
 			return err
 		}
-		var err error
 		acc, err = tx.AccountByID(ctx, id)
 		return err
 	})

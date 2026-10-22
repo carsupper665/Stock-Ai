@@ -1,4 +1,5 @@
 <script setup>
+import ChatPermission from '../../shared/ChatPermission.vue'
 import { computed } from 'vue'
 
 import { confirm } from '../../shared/confirm.js'
@@ -62,7 +63,7 @@ const rc = computed(() => props.session.restart_context)
 
     <div class="col middle">
       <section class="card">
-          <div class="row"><span class="eyebrow">帳戶摘要</span></div>
+          <div class="row"><span class="eyebrow grow">帳戶摘要</span><ChatPermission v-if="account && !account.error" :account="account" @changed="$emit('changed')" /></div>
         <div v-if="account?.error" class="empty">帳號 {{ session.account_id }} 讀不到：{{ account.error.message }}</div>
         <template v-else-if="summary">
           <div class="stats">

@@ -1,4 +1,5 @@
 <script setup>
+import ChatPermission from '../../shared/ChatPermission.vue'
 import { computed, ref, watch } from 'vue'
 
 import { useLoad } from '../../core/load.js'
@@ -126,6 +127,7 @@ async function resume() {
         <button v-if="account.max_dd_stopped_at" class="wide" data-tone="acc" :disabled="resuming" @click="resume">{{ resuming ? '解除中…' : '解除風控停止' }}</button>
       </div>
       <p v-else class="note">最大虧損 max_dd：未設定</p>
+      <ChatPermission :account="account" @changed="emit('changed')" />
       <p v-if="summary.error.value" class="empty">讀取失敗：{{ summary.error.value.message }}</p>
       <div v-else-if="summary.data.value" class="stats">
         <div v-for="k in ['equity', 'available', 'locked_margin', 'unrealized_pnl']" :key="k" class="stat big">

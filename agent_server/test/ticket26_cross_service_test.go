@@ -48,7 +48,7 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
 		switch call {
 		case 1:
-			messageToolCall(w, "cross-post", "post_message", map[string]any{"content": "from bound account", "tags": []string{"USER"}})
+			messageToolCall(w, "cross-post", "post_chat", map[string]any{"content": "from bound account", "tags": []string{"USER"}})
 		case 2:
 			post := messageToolResult(t, request, "cross-post")
 			postResult, _ := post["result"].(map[string]any)
@@ -57,7 +57,7 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 				t.Errorf("actual Backend post result = %#v", post)
 			}
 			boundPosted <- postedID
-			messageToolCall(w, "cross-default-desc", "get_messages", map[string]any{})
+			messageToolCall(w, "cross-default-desc", "get_chat", map[string]any{"page": 1})
 		case 3:
 			latest := <-boundPosted
 			boundPosted <- latest
@@ -66,14 +66,14 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 				want = append(want, ticket26ExpectedMessage{ID: posted[index].ID, UserName: ticket26SeedDisplayName(index)})
 			}
 			ticket26AssertMessageList(t, messageToolResult(t, request, "cross-default-desc"), want)
-			messageToolCall(w, "cross-page-2", "get_messages", map[string]any{"page": 2})
+			messageToolCall(w, "cross-page-2", "get_chat", map[string]any{"page": 2})
 		case 4:
 			want := make([]ticket26ExpectedMessage, 0, 10)
 			for index := 25; index >= 16; index-- {
 				want = append(want, ticket26ExpectedMessage{ID: posted[index].ID, UserName: ticket26SeedDisplayName(index)})
 			}
 			ticket26AssertMessageList(t, messageToolResult(t, request, "cross-page-2"), want)
-			messageToolCall(w, "cross-first-asc", "get_messages", map[string]any{"sort": "asc"})
+			messageToolCall(w, "cross-first-asc", "get_chat", map[string]any{"page": 1, "sort": "asc"})
 		default:
 			want := make([]ticket26ExpectedMessage, 0, 10)
 			for index := 0; index < 10; index++ {

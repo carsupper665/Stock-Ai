@@ -55,7 +55,21 @@ async function loadMore() {
   }
 }
 
-onUnmounted(() => { disposed = true; listGeneration++ })
+// 群聊每 5 秒重抓第一頁；翻頁、選取或操作中就先不動，避免畫面跳動
+const poll = setInterval(async () => {
+  if (page.value !== 1 || extra.value.length || selectionMode.value || busy.value || bulkDeleting.value || deleting.value || loading.value || !data.value) return
+  const generation = listGeneration
+  try {
+    const latest = await listMessages({ tag: tagFilter.value, sort: sort.value })
+    if (disposed || generation !== listGeneration || page.value !== 1 || extra.value.length) return
+    data.value.messages = latest.messages
+    data.value.has_more = latest.has_more
+  } catch {
+    // 下一輪再試；手動操作的錯誤照常顯示
+  }
+}, 5000)
+
+onUnmounted(() => { disposed = true; listGeneration++; clearInterval(poll) })
 
 function kind(message) {
   if (message.user_name === 'you') return { label: 'you · USER', tone: 'acc', mark: 'acc' }
@@ -125,7 +139,7 @@ async function removeSelected() {
 }
 
 async function post() {
-  if (!draft.value.trim() || characterCount.value > 500 || !selectedTags.value.length) return
+  if (!draft.value.trim() || characterCount.value > 500) return
   busy.value = true
   listGeneration++
   loadingMore.value = false
@@ -164,9 +178,9 @@ async function remove(message) {
   <article>
     <div class="col board">
       <section class="card col compose">
-        <textarea v-model="draft" :disabled="bulkDeleting" placeholder="以 USER 身分留話給 Agent…"></textarea>
+        <textarea v-model="draft" :disabled="bulkDeleting" placeholder="以 USER 身分在群聊發言…"></textarea>
         <div v-if="data?.accounts.length" class="row tags">
-          <span class="note">寄給（至少一個）</span>
+          <span class="note">@ 提及（選填，被提及的 Agent 會收到）</span>
           <label v-for="account in data.accounts" :key="account.id" class="row">
             <input v-model="selectedTags" type="checkbox" :value="account.user_name" :disabled="bulkDeleting" />
             {{ account.user_name }}
@@ -175,7 +189,7 @@ async function remove(message) {
         <div class="row">
           <span class="mono" :data-tone="characterCount > 500 ? 'neg' : 'mute'">{{ characterCount }} / 500</span>
           <span class="note grow">只發布需要協作的訊息；避免例行進度與重複日誌。</span>
-          <button data-tone="acc" :disabled="busy || bulkDeleting || !draft.trim() || characterCount > 500 || !selectedTags.length" @click="post">發佈</button>
+          <button data-tone="acc" :disabled="busy || bulkDeleting || !draft.trim() || characterCount > 500" @click="post">發佈</button>
         </div>
       </section>
 
@@ -221,7 +235,7 @@ async function remove(message) {
           </div>
           <p class="pre">{{ message.content }}</p>
         </component>
-        <p v-if="!all.length" class="empty">還沒有留言。</p>
+        <p v-if="!all.length" class="empty">群聊還沒有訊息。</p>
         <button v-if="data.has_more" :disabled="loadingMore || loading || bulkDeleting" @click="loadMore">{{ loadingMore ? '載入中…' : '載入下一頁（每頁 10 則）' }}</button>
       </template>
     </div>

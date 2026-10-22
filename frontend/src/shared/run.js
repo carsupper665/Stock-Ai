@@ -84,10 +84,10 @@ const toolLabels = {
   get_market_snapshot: '查即時價', get_ohlcv: '查 K 線', get_market_info: '查市場資訊',
   place_order: '下單', cancel_order: '撤單', close_position: '平倉', set_position_stops: '設定停損停利',
   create_event: '建立 Event', delete_event: '刪除 Event', list_events: '查 Event',
-  get_messages: '讀留言板', post_message: '發留言',
+  get_chat: '讀群聊', post_chat: '發群聊訊息', get_messages: '讀留言板', post_message: '發留言',
   memory_list: '翻記憶櫃', memory_get: '讀記憶', memory_save: '存記憶', memory_edit: '改記憶', get_run_history: '讀 Run 歷史',
 }
-const actionTools = new Set(['place_order', 'cancel_order', 'close_position', 'set_position_stops', 'create_event', 'delete_event', 'post_message', 'memory_save', 'memory_edit'])
+const actionTools = new Set(['place_order', 'cancel_order', 'close_position', 'set_position_stops', 'create_event', 'delete_event', 'post_chat', 'post_message', 'memory_save', 'memory_edit'])
 
 function toolItem(entry, key, running) {
   const ok = entry.result?.ok === true

@@ -30,6 +30,10 @@ type accountView struct {
 	MaxDDStoppedAt      *time.Time `json:"max_dd_stopped_at"`
 	MaxDDLossLimit      *float64   `json:"max_dd_loss_limit"`
 	MaxDDEquityFloor    *float64   `json:"max_dd_equity_floor"`
+
+	ChatRead      bool       `json:"chat_read"`
+	ChatPost      bool       `json:"chat_post"`
+	ChatReadSince *time.Time `json:"chat_read_since"`
 }
 
 func viewAccount(a *database.Account, includeToken bool) accountView {
@@ -43,6 +47,9 @@ func viewAccount(a *database.Account, includeToken bool) accountView {
 		MaxDD:               a.MaxDD,
 		MaxDDBaselineEquity: a.MaxDDBaselineEquity,
 		MaxDDStoppedAt:      a.MaxDDStoppedAt,
+		ChatRead:            a.ChatRead,
+		ChatPost:            a.ChatPost,
+		ChatReadSince:       a.ChatReadSince,
 	}
 	if a.MaxDD != nil && a.MaxDDBaselineEquity != nil {
 		limits := trading.DrawdownLimits(a.InitialBalance, *a.MaxDDBaselineEquity, *a.MaxDD)
@@ -106,6 +113,8 @@ func (s *Server) getAccount(c *gin.Context) {
 type updateAccountRequest struct {
 	UserName *string `json:"user_name"`
 	Status   *string `json:"status"`
+	ChatRead *bool   `json:"chat_read"`
+	ChatPost *bool   `json:"chat_post"`
 }
 
 func (s *Server) updateAccount(c *gin.Context) {
@@ -114,7 +123,7 @@ func (s *Server) updateAccount(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
 		return
 	}
-	if req.UserName == nil && req.Status == nil {
+	if req.UserName == nil && req.Status == nil && req.ChatRead == nil && req.ChatPost == nil {
 		fail(c, http.StatusBadRequest, "invalid_request", "沒有任何要修改的欄位")
 		return
 	}
@@ -122,6 +131,8 @@ func (s *Server) updateAccount(c *gin.Context) {
 	acc, err := s.accounts.Update(c.Request.Context(), c.Param("id"), account.UpdateInput{
 		UserName: req.UserName,
 		Status:   req.Status,
+		ChatRead: req.ChatRead,
+		ChatPost: req.ChatPost,
 	})
 	if err != nil {
 		s.writeAccountError(c, err)

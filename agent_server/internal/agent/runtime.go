@@ -211,6 +211,7 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 			PRIMARY KEY (session_id, run_id)
 		)`,
 		conversationSchema,
+		chatCursorSchema,
 	}, events.Schema...), history.Schema...) {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()

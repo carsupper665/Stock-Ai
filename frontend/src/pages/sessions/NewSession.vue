@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 
 import Modal from '../../shared/Modal.vue'
 import { say } from '../../shared/toast.js'
+import { updateAccount } from '../accounts/api.js'
 import { createSession, listAccounts, listBindings, listModels } from './api.js'
 
 const props = defineProps({ preset: Object })
@@ -17,7 +18,10 @@ const form = reactive({
   max_loop: props.preset?.max_loop ?? '',
   max_tool_call: props.preset?.max_tool_call ?? '',
   skills_enabled: props.preset?.skills_enabled ?? false,
+  chat: 'full',
 })
+// 群聊權限掛在帳號上（交易後端強制），建立 Session 時順便設定，之後在 Session 或帳號頁隨時可改
+const chatModes = { full: { chat_read: true, chat_post: true }, readonly: { chat_read: true, chat_post: false }, banned: { chat_read: false, chat_post: false } }
 const accounts = ref(null)
 const bound = ref(new Map())
 const models = ref(null)
@@ -48,6 +52,11 @@ async function submit() {
   if (form.skills_enabled) body.skills_enabled = true
   try {
     const created = await createSession(body)
+    const account = accounts.value?.find((a) => a.id === form.account_id)
+    const wanted = chatModes[form.chat]
+    if (account && (account.chat_read !== wanted.chat_read || account.chat_post !== wanted.chat_post)) {
+      try { await updateAccount(form.account_id, wanted) } catch (e) { say(`Session 已建立，但群聊權限設定失敗：${e.message}`, 'neg') }
+    }
     say(`已建立「${created.name}」（stopped，不自動啟動）`)
     emit('created', created)
   } catch (e) {
@@ -96,6 +105,9 @@ async function submit() {
         <label class="grow">max_tool_call（留空＝Server Default）<input v-model="form.max_tool_call" type="number" min="1" /></label>
       </div>
       <label class="row"><input v-model="form.skills_enabled" type="checkbox" />skills_enabled（給模型 skill 與 plan_trade；建立後不能改）</label>
+      <label class="row">群聊權限（設在帳號上，之後可改）
+        <select v-model="form.chat"><option value="full">可讀可發</option><option value="readonly">唯讀（不能發言）</option><option value="banned">停權（不能讀也不能發）</option></select>
+      </label>
       <p v-if="error" data-tone="neg">{{ error }}</p>
       <menu>
         <button type="button" @click="$emit('close')">取消</button>

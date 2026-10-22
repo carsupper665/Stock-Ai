@@ -18,20 +18,25 @@ func TestRunContextCarriesMessagesTaggedSincePreviousRun(t *testing.T) {
 	}
 	fixture := newMessageToolFixture()
 	fixture.inbox = func(w http.ResponseWriter, request *http.Request, call int) {
-		if request.Header.Get("Authorization") != "Bearer ticket-25-account-v1" || request.URL.RawQuery != "page=1&sort=desc&tag=Message+Agent" {
-			t.Errorf("inbox request = %s auth=%q", request.URL.RequestURI(), request.Header.Get("Authorization"))
+		// The first delivery reads the newest page; later ones read after the last delivered message.
+		want := "page=1&sort=desc&tag=Message+Agent"
+		if call > 1 {
+			want = "after=msg_2&page=1&sort=asc&tag=Message+Agent"
+		}
+		if request.Header.Get("Authorization") != "Bearer ticket-25-account-v1" || request.URL.RawQuery != want {
+			t.Errorf("inbox request %d = %s auth=%q", call, request.URL.RequestURI(), request.Header.Get("Authorization"))
 		}
 		if call == 1 {
 			messageFixtureJSON(w, http.StatusOK, map[string]any{"messages": old, "page": 1, "has_more": true})
 			return
 		}
 		latest := map[string]any{"id": "msg_3", "user_name": "Bless", "content": "reply please", "tags": []string{"Message Agent"}, "created_at": time.Now().UTC().Format(time.RFC3339Nano)}
-		messageFixtureJSON(w, http.StatusOK, map[string]any{"messages": append([]any{latest}, old...), "page": 1, "has_more": true})
+		messageFixtureJSON(w, http.StatusOK, map[string]any{"messages": []any{latest}, "page": 1, "has_more": false})
 	}
 	fixture.generate = func(w http.ResponseWriter, request *http.Request, _ int) {
 		body := decodeMessageGatewayRequest(t, request)
 		system, _ := body["messages"].([]any)[0].(map[string]any)["content"].(string)
-		if !strings.Contains(system, "arrive in the run context as inbox") || !strings.Contains(system, "must tag at least one recipient") {
+		if !strings.Contains(system, "in the wake-up message as inbox") || !strings.Contains(system, "Tags are optional") {
 			t.Errorf("system prompt lacks inbox guidance: %s", system)
 		}
 		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("inbox read", "inbox read"), "tool_calls": []any{}, "finish_reason": "stop"})
@@ -41,7 +46,7 @@ func TestRunContextCarriesMessagesTaggedSincePreviousRun(t *testing.T) {
 	if first.Status != "completed" {
 		t.Fatalf("first Run = %+v", first)
 	}
-	if ids, more := inboxOf(t, first); ids != "msg_2,msg_1" || !more {
+	if ids, more := inboxOf(t, first); ids != "msg_1,msg_2" || !more {
 		t.Fatalf("first Run inbox = %s has_more=%v; want every tagged message on the first page", ids, more)
 	}
 

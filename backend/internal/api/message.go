@@ -59,13 +59,13 @@ func (s *Server) postMessage(c *gin.Context) {
 
 func (s *Server) listMessages(c *gin.Context) {
 	for key, values := range c.Request.URL.Query() {
-		if (key != "page" && key != "sort" && key != "tag") || len(values) != 1 {
-			fail(c, http.StatusBadRequest, "invalid_request", "只接受 page、sort、tag 查詢參數")
+		if (key != "page" && key != "sort" && key != "tag" && key != "after") || len(values) != 1 {
+			fail(c, http.StatusBadRequest, "invalid_request", "只接受 page、sort、tag、after 查詢參數")
 			return
 		}
 	}
 
-	q := message.Query{Page: 1, Sort: c.Query("sort"), Tag: c.Query("tag")}
+	q := message.Query{Page: 1, Sort: c.Query("sort"), Tag: c.Query("tag"), After: c.Query("after")}
 	if raw, present := c.GetQuery("page"); present {
 		page, err := strconv.Atoi(strings.TrimSpace(raw))
 		if err != nil || page <= 0 {
@@ -106,8 +106,12 @@ func (s *Server) writeMessageError(c *gin.Context, err error) {
 	case errors.Is(err, message.ErrEmptyContent), errors.Is(err, message.ErrContentLong),
 		errors.Is(err, message.ErrInvalidSort), errors.Is(err, message.ErrInvalidPage),
 		errors.Is(err, message.ErrInvalidTag), errors.Is(err, message.ErrInvalidTags),
-		errors.Is(err, message.ErrNoRecipient), errors.Is(err, message.ErrUnknownTag), errors.Is(err, message.ErrSelfTag):
+		errors.Is(err, message.ErrUnknownTag), errors.Is(err, message.ErrSelfTag), errors.Is(err, message.ErrInvalidAfter):
 		fail(c, http.StatusBadRequest, "invalid_request", err.Error())
+	case errors.Is(err, message.ErrChatPostDisabled):
+		fail(c, http.StatusForbidden, "chat_post_disabled", err.Error())
+	case errors.Is(err, message.ErrChatReadDisabled):
+		fail(c, http.StatusForbidden, "chat_read_disabled", err.Error())
 	case errors.Is(err, message.ErrForbidden):
 		fail(c, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, database.ErrNotFound):

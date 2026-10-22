@@ -78,6 +78,12 @@ type Account struct {
 	MaxDDBaselineEquity *float64 `gorm:"max_dd_baseline_equity"`
 	// MaxDDStoppedAt 非 null 代表已觸發風控停止；非 null 時不能普通下單。
 	MaxDDStoppedAt *time.Time `gorm:"max_dd_stopped_at"`
+
+	// 群聊權限由 USER 設定、在留言服務強制。ChatReadSince 是最近一次重新開放讀取的時間：
+	// 關閉讀取期間被 tag 的留言不補送給 Agent。
+	ChatRead      bool `gorm:"not null;default:true"`
+	ChatPost      bool `gorm:"not null;default:true"`
+	ChatReadSince *time.Time
 }
 
 func (a *Account) Active() bool {

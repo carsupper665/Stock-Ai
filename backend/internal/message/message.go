@@ -31,10 +31,13 @@ var (
 	ErrInvalidPage  = errors.New("page 必須是正整數")
 	ErrInvalidTag   = errors.New("tag 不可為空")
 	ErrInvalidTags  = errors.New("tags 必須是唯一的非空字串")
-	ErrNoRecipient  = errors.New("tags 至少要有一個收件人：USER 或其他帳號的名稱")
 	ErrUnknownTag   = errors.New("tags 只能是 USER 或其他帳號的名稱")
+	ErrInvalidAfter = errors.New("after 必須是存在的留言 id")
 	ErrSelfTag      = errors.New("tags 不能是自己")
 	ErrForbidden    = errors.New("只能刪除自己的留言")
+
+	ErrChatPostDisabled = errors.New("此帳號已被管理者停用群聊發言權限")
+	ErrChatReadDisabled = errors.New("此帳號已被管理者停用群聊讀取權限")
 )
 
 type Service struct {
@@ -54,6 +57,9 @@ func (s *Service) Post(ctx context.Context, author auth.Identity, content string
 	}
 	if utf8.RuneCountInString(content) > MaxContentLen {
 		return nil, ErrContentLong
+	}
+	if err := s.checkPermission(ctx, author, func(a *database.Account) bool { return a.ChatPost }, ErrChatPostDisabled); err != nil {
+		return nil, err
 	}
 	tags, err := s.normalizeTags(tags)
 	if err != nil {
@@ -84,6 +90,8 @@ type Query struct {
 	Page int
 	Sort string
 	Tag  string
+	// After 只回傳這則留言之後（依時間與 id）的留言，用來讀「上次讀到之後」的新訊息。
+	After string
 }
 
 // View 是對外的留言：只有誰說的、說了什麼、什麼時候（規格 §18）。
@@ -113,10 +121,24 @@ func (s *Service) List(ctx context.Context, q Query, requester *auth.Identity) (
 	if q.Tag != "" && tag == "" {
 		return nil, false, ErrInvalidTag
 	}
+	if requester != nil {
+		if err := s.checkPermission(ctx, *requester, func(a *database.Account) bool { return a.ChatRead }, ErrChatReadDisabled); err != nil {
+			return nil, false, err
+		}
+	}
+	query := database.MessageQuery{Desc: desc, Limit: PageSize + 1, Offset: (page - 1) * PageSize, Tag: tag}
+	if after := strings.TrimSpace(q.After); after != "" {
+		anchor, err := s.store.MessageByID(ctx, after)
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, false, ErrInvalidAfter
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		query.AfterID, query.AfterCreatedAt = anchor.ID, &anchor.CreatedAt
+	}
 
-	messages, err := s.store.ListMessages(ctx, database.MessageQuery{
-		Desc: desc, Limit: PageSize + 1, Offset: (page - 1) * PageSize, Tag: tag,
-	})
+	messages, err := s.store.ListMessages(ctx, query)
 	if err != nil {
 		return nil, false, err
 	}
@@ -207,10 +229,25 @@ func (s *Service) normalizeTags(tags []string) ([]string, error) {
 	return normalized, nil
 }
 
-// checkRecipients 要求每則留言至少寄給一個收件人：USER 或另一個帳號（用名稱 tag），不能寄給自己。
+// checkPermission 擋下被 USER 停用群聊權限的帳號；USER 本身不受限。
+func (s *Service) checkPermission(ctx context.Context, who auth.Identity, allowed func(*database.Account) bool, denied error) error {
+	if who.IsUser() {
+		return nil
+	}
+	account, err := s.store.AccountByID(ctx, who.AccountID)
+	if err != nil {
+		return err
+	}
+	if !allowed(account) {
+		return denied
+	}
+	return nil
+}
+
+// checkRecipients 檢查 tag（選填）：只能是 USER 或另一個帳號的名稱，不能 tag 自己。
 func (s *Service) checkRecipients(ctx context.Context, author auth.Identity, tags []string) error {
 	if len(tags) == 0 {
-		return ErrNoRecipient
+		return nil
 	}
 	names := make([]string, 0, len(tags))
 	for _, tag := range tags {

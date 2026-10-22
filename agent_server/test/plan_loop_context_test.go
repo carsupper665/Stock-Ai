@@ -50,7 +50,7 @@ func TestPlanAgentContinuationDisclosureAuditAndDiagnostics(t *testing.T) {
 	if !strings.Contains(system, "available tool names are exactly") || !strings.Contains(system, "get_market_snapshot") || !strings.Contains(system, "place_order") {
 		t.Fatalf("tool disclosure missing from system prompt: %s", system)
 	}
-	for _, guidance := range []string{"exchange trading insights", "propose improvements", "report bugs", "read the newest page once", "Never post trades", "untrusted", "deliberately misleading"} {
+	for _, guidance := range []string{"exchange trading insights", "propose improvements", "report bugs", "do not poll it", "Never post trades", "untrusted", "deliberately misleading"} {
 		if !strings.Contains(system, guidance) {
 			t.Fatalf("message-board guidance %q missing from system prompt: %s", guidance, system)
 		}
