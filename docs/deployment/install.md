@@ -180,3 +180,19 @@
 - 前端：向下相容，服務的 `X.Y.Z` 小於或等於前端宣告的版本即可。
 
 執行中的系統不檢查相容性，只在側欄「服務狀態」顯示各服務回報的版本。
+
+## Windows 測試包（win-test）
+
+要在一台 Windows 上快速測試整套系統，不想設定 IdP、網域和憑證時使用。在 WSL 的 repo 執行：
+
+```bash
+scripts/build-win-test.sh
+```
+
+會在 `C:\stock-ai-win-test` 產生四個 Windows 執行檔、前端和啟動腳本，雙擊 `start.cmd` 啟動，瀏覽器開
+`http://127.0.0.1:24180/`。用法見該資料夾的 `README.md`（來源 `scripts/win-test/README.md`）。
+
+- 測試包的 middleware 以 `-tags wintest` 編譯：**沒有登入**，每個請求都是 USER，並直接提供前端。
+  一般編譯（Docker image、正式發行包）不含這段程式，無法用設定打開。只能用於本機測試，不要對外開放。
+- 重跑腳本會更新程式與 `.env`，`data\`、`logs\`、`secrets\` 保留不動；執行中的 `.exe` 無法覆蓋，先跑 `stop.cmd`。
+- port 與正式發行包、開發環境分開：Backend 27794、LLM Provider 28090、Agent 28080、網頁 24180。

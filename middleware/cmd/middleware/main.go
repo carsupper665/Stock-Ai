@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"middleware/internal/gateway"
+	"net/http"
 	"os"
 	"time"
 )
@@ -27,6 +27,10 @@ func main() {
 		return
 	}
 	server := &http.Server{Addr: cfg.ListenAddress, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 << 10}
-	log.Printf("middleware listening on %s; IdP client %s must register redirect URI %s and post-logout URI %s", cfg.ListenAddress, cfg.ClientID, cfg.RedirectURI, cfg.PostLogoutURI)
+	if cfg.WebDir != "" {
+		log.Printf("win-test (no login) on http://%s", cfg.ListenAddress)
+	} else {
+		log.Printf("middleware listening on %s; IdP client %s must register redirect URI %s and post-logout URI %s", cfg.ListenAddress, cfg.ClientID, cfg.RedirectURI, cfg.PostLogoutURI)
+	}
 	log.Fatal(server.ListenAndServe())
 }

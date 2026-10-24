@@ -22,9 +22,14 @@ type Config struct {
 	AgentAdminToken, LLMAdminToken, LLMRuntimeToken, BackendUserToken       string
 	CookieKey                                                               []byte
 	SessionTTL, LoginTTL                                                    time.Duration
+	// WebDir and UserName are used only by the win-test build (wintest.go).
+	WebDir, UserName string
 }
 
 func LoadConfig() (Config, error) {
+	if winTest {
+		return loadWinTestConfig()
+	}
 	environment := os.Getenv("STOCK_AI_ENVIRONMENT")
 	if environment != "Test" && environment != "Release" {
 		return Config{}, errors.New("STOCK_AI_ENVIRONMENT must be exactly Test or Release")
@@ -106,6 +111,9 @@ func readSecret(name, logical, environment string, key bool) (string, error) {
 }
 
 func (c Config) Validate() error {
+	if winTest {
+		return c.validateWinTest()
+	}
 	expectedCookie := "__Host-stock-ai-" + strings.ToLower(c.Environment) + "-session"
 	if c.ClientID == "" || strings.IndexFunc(c.ClientID, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 		return errors.New("OIDC_CLIENT_ID must be a non-empty identifier without whitespace")

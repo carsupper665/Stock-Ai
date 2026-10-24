@@ -71,6 +71,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/", s.serveBackend)
 	mux.HandleFunc("/agent/", s.serveAgent)
 	mux.HandleFunc("/llm/", s.serveLLM)
+	if winTest {
+		// No nginx in front: answer the frontend's middleware health probe here too.
+		mux.HandleFunc("GET /middleware/healthz", s.health)
+		mux.Handle("/", s.serveWeb())
+	}
 	return accessLog(s.securityHeaders(mux))
 }
 
@@ -151,6 +156,10 @@ func safeReturnTo(raw string) string {
 }
 
 func (s *Server) start(w http.ResponseWriter, r *http.Request) {
+	if winTest {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	state, err := randomURLSafe(32)
 	if err != nil {
 		s.fail(w, http.StatusServiceUnavailable, "login_unavailable")
@@ -198,6 +207,10 @@ func (s *Server) takeAttempt(state string) (loginAttempt, bool) {
 }
 
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
+	if winTest {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	state := r.URL.Query().Get("state")
 	transaction, cookieErr := r.Cookie(s.loginCookieName())
 	boundState, bound := "", false
@@ -347,6 +360,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if winTest {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	app, _ := url.Parse(s.cfg.RedirectURI)
 	expected := app.Scheme + "://" + app.Host
 	if r.Header.Get("Origin") != expected {
@@ -388,6 +405,9 @@ func (s *Server) verifiedID(raw string) (string, bool) {
 	return id, subtle.ConstantTimeCompare(supplied, mac.Sum(nil)) == 1
 }
 func (s *Server) current(r *http.Request) (session, bool) {
+	if winTest {
+		return s.winTestSession(), true
+	}
 	c, err := r.Cookie(s.cfg.CookieName)
 	if err != nil {
 		return session{}, false
