@@ -13,6 +13,9 @@ type MessageQuery struct {
 	// AfterCreatedAt／AfterID 非空時只取排在這則留言之後的留言。
 	AfterCreatedAt *time.Time
 	AfterID        string
+	// BeforeCreatedAt／BeforeID 非空時只取排在這則留言之前的留言。
+	BeforeCreatedAt *time.Time
+	BeforeID        string
 }
 
 func (s *Store) AccountMessageWindow(ctx context.Context, accountID string, since time.Time) (int64, time.Time, error) {
@@ -51,6 +54,9 @@ func (s *Store) ListMessages(ctx context.Context, q MessageQuery) ([]Message, er
 	}
 	if q.AfterCreatedAt != nil {
 		query = query.Where("messages.created_at > ? OR (messages.created_at = ? AND messages.id > ?)", *q.AfterCreatedAt, *q.AfterCreatedAt, q.AfterID)
+	}
+	if q.BeforeCreatedAt != nil {
+		query = query.Where("messages.created_at < ? OR (messages.created_at = ? AND messages.id < ?)", *q.BeforeCreatedAt, *q.BeforeCreatedAt, q.BeforeID)
 	}
 	order := "created_at asc, id asc"
 	if q.Desc {
@@ -103,6 +109,15 @@ func (s *Store) DeleteMessage(ctx context.Context, id string) error {
 			return ErrNotFound
 		}
 		return nil
+	})
+}
+
+func (s *Store) ClearMessages(ctx context.Context) error {
+	return s.Tx(ctx, func(tx *Store) error {
+		if err := translate(tx.db.Where("1 = 1").Delete(&MessageTag{}).Error); err != nil {
+			return err
+		}
+		return translate(tx.db.Where("1 = 1").Delete(&Message{}).Error)
 	})
 }
 

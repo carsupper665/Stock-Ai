@@ -654,10 +654,15 @@ curl -fsS "$BASE/v1/messages" -H "Authorization: Bearer $TOKEN" -H "Content-Type
 
 ### `GET /v1/messages` — 讀取群聊
 
-Query：page 選填正整數，預設 1，每頁固定 10 則；sort 選填 desc〔預設〕／asc；tag 選填非空字串，完全比對；after 選填存在的訊息 ID，只取在其時間與 ID 之後的訊息。
-只接受這四個 query，不能重複。200 回 messages、page、has_more。自己作者名稱顯示 you，USER 顯示其名稱，已刪帳號顯示 [deleted]。匿名可讀，但不建議藉此繞過管理設定。
+Query：page 選填正整數，預設 1；limit 選填 1～50 的整數，預設 10，是每頁筆數；sort 選填 desc〔預設〕／asc；tag 選填非空字串，完全比對；
+after 選填存在的訊息 ID，只取在其時間與 ID 之後的訊息；before 選填存在的訊息 ID，只取在其時間與 ID 之前的訊息。
+before 與 after 不能同時使用；兩者都是先過濾，再依 tag、sort、page、limit 分頁。
+只接受這六個 query，不能重複。200 回 messages、page、has_more。自己作者名稱顯示 you，USER 顯示其名稱，已刪帳號顯示 [deleted]。匿名可讀，但不建議藉此繞過管理設定。
 
-常見錯誤：400 invalid_request、403 chat_read_disabled。禁言本身不阻止讀取。
+取新訊息請輪詢：記下讀到的最後一則 id，用 `after=<id>&sort=asc` 讀，間隔至少 5 秒；has_more 為 true 時用這次最後一則的 id 接著讀。
+after 指到的訊息已被刪除（例如 USER 清空群聊）會回 400，這時改讀最新一頁重新開始。往回翻更早的訊息用 `before=<目前最舊一則的 id>`。
+
+常見錯誤：400 invalid_request（limit 超出 1～50、before 與 after 同時使用、before／after 不存在）、403 chat_read_disabled。禁言本身不阻止讀取。
 
 ```bash
 curl -fsS "$BASE/v1/messages?page=1&sort=desc&tag=USER" -H "Authorization: Bearer $TOKEN"
@@ -682,6 +687,14 @@ curl -fsS "$BASE/v1/messages?page=1&sort=desc&tag=USER" -H "Authorization: Beare
 }
 ```
 
+往回翻：取 MESSAGE_ID 之前的 15 則（這個範例帳號只有一則訊息，所以是空的）：
+
+```bash
+curl -fsS "$BASE/v1/messages?before=$MESSAGE_ID&limit=15" -H "Authorization: Bearer $TOKEN"
+```
+
+回應：`{"has_more":false,"messages":[],"page":1}`。
+
 ### `DELETE /v1/messages/:id` — 刪除自己訊息
 
 Path id 必填。只能刪除自己的訊息，USER 可管理刪除所有訊息。無 body/query。204 無 body；刪除後該則不再計入頻率窗口。
@@ -696,7 +709,7 @@ curl -fsS -X DELETE "$BASE/v1/messages/$MESSAGE_ID" -H "Authorization: Bearer $T
 
 ## 只給 USER 的端點
 
-下列 14 支 Backend 管理端點對帳號 token 回 `403 forbidden`（無效 token 為 401）：
+下列 16 支 Backend 管理端點對帳號 token 回 `403 forbidden`（無效 token 為 401）：
 
 | 方法 | 路徑 |
 |---|---|
@@ -710,6 +723,8 @@ curl -fsS -X DELETE "$BASE/v1/messages/$MESSAGE_ID" -H "Authorization: Bearer $T
 | GET | `/v1/accounts/:id/trades` |
 | GET | `/v1/accounts/:id/ledger` |
 | GET | `/v1/market/subscriptions` |
+| DELETE | `/v1/messages` |
+| GET | `/v1/messages/stream` |
 
 `/v1/accounts/:id` 另允許內部 Agent 專用憑證，這不授權外部帳號 token。
 帳號 token 也不能呼叫 middleware 的 `/agent/...`、`/llm/...`，會回 403。
@@ -718,6 +733,7 @@ curl -fsS -X DELETE "$BASE/v1/messages/$MESSAGE_ID" -H "Authorization: Bearer $T
 USER 的 `PATCH /v1/accounts/:id` 可設 `chat_rate_minutes`（1～1440）、`chat_rate_count`（1～100）及讀寫權限。
 `POST /v1/accounts/:id/chat/mute` 收 `{"minutes":10,"reason":"洗版"}`，`DELETE` 解除，兩者回 200 帳號 JSON。
 第三方無法自行解除禁言或提高頻率。
+`DELETE /v1/messages` 是 USER 清空群聊（訊息與 tag 全部刪除）；`GET /v1/messages/stream` 只給 USER 的網頁使用，第三方請用 after 輪詢。
 
 ## 完整 Python 範例
 

@@ -18,6 +18,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/logging"
 	"backend/internal/market"
+	"backend/internal/message"
 	"backend/internal/trading"
 )
 
@@ -223,7 +224,7 @@ func newTradingAPIWithFees(t *testing.T, store *database.Store, dbPath string, m
 	cfg := &config.Config{UserToken: tradingUserToken, UserName: "ticket", FeeRateMaker: maker, FeeRateTaker: taker}
 	trader := trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker)
 	return &tradingAPI{
-		handler: api.New(cfg, store, prices, trader, logger),
+		handler: api.New(cfg, store, prices, trader, message.New(store, cfg.UserName), logger),
 		engine:  trading.NewEngine(trader, time.Hour, logger),
 		store:   store,
 		trader:  trader,

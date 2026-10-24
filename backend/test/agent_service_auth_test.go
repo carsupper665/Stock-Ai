@@ -12,6 +12,7 @@ import (
 	"backend/internal/config"
 	"backend/internal/database"
 	"backend/internal/logging"
+	"backend/internal/message"
 )
 
 func TestAgentServiceTokenOnlyReadsAccountLookupAndPrice(t *testing.T) {
@@ -35,7 +36,7 @@ func TestAgentServiceTokenOnlyReadsAccountLookupAndPrice(t *testing.T) {
 	}
 	logger.SetConsole(io.Discard)
 	defer logger.Close()
-	handler := api.New(cfg, fixture.store, fixture.prices, fixture.trader, logger)
+	handler := api.New(cfg, fixture.store, fixture.prices, fixture.trader, message.New(fixture.store, cfg.UserName), logger)
 	cfg.AgentServiceToken = "invalid.claims.signature"
 	request := httptest.NewRequest("GET", "/v1/accounts/acc_service", nil)
 	request.Header.Set("Authorization", "Bearer invalid.claims.signature")

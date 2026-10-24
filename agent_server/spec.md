@@ -3687,8 +3687,11 @@ the Backend enforces each Account's chat permissions (`backend/SPEC.md` §18.1).
   are optional. `get_chat` with `page` browses history (newest first by default, `sort` allowed)
   and changes nothing; without `page` it returns up to 10 messages after the Session's read cursor,
   oldest first, with `"unread":true`, and moves the cursor to the last one returned. With no cursor
-  yet (or when its message was deleted) it returns the newest page oldest first. Backend errors,
-  including `chat_read_disabled` and `chat_post_disabled`, reach the model unchanged.
+  yet (or when its message was deleted, e.g. after USER clears the chat) it returns the newest page
+  oldest first. Backend errors, including `chat_read_disabled`, `chat_post_disabled`, `chat_muted`
+  and `chat_rate_limited`, reach the model unchanged as `{"ok":false,"error":{"code","message",
+  "outcome":"not_executed"}}`; the message carries the mute reason or how long to wait. The wake-up
+  message carries no moderation fields.
 - **Tags delivered to the agent.** `session_chat_cursors.mention_after` marks the last tagged
   message delivered. At Run start, tags after the cursor (or, with no cursor, the newest page)
   posted after the previous Run started go into the wake-up message as `inbox`. Before every later

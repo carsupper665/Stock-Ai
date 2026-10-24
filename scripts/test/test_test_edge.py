@@ -91,7 +91,11 @@ class TestEdgePolicyTest(unittest.TestCase):
         self.assertIn('location ^~ /llm/', self.nginx)
         self.assertIn("root /usr/share/nginx/html;", self.nginx)
         self.assertIn("try_files $uri /index.html;", self.nginx)
-        for route in ("location ~ ^/v1(?:/|$) {", "location ^~ /agent/ {", "location ^~ /llm/ {", "location ^~ /oauth2/ {"):
+        stream = self.nginx.split("location = /v1/messages/stream {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("proxy_buffering off;", stream)
+        self.assertIn("proxy_read_timeout 1h;", stream)
+        self.assertIn("proxy_set_header Authorization $http_authorization;", stream)
+        for route in ("location ~ ^/v1(?:/|$) {", "location = /v1/messages/stream {", "location ^~ /agent/ {", "location ^~ /llm/ {", "location ^~ /oauth2/ {"):
             block = self.nginx.split(route, 1)[1].split("\n    }", 1)[0]
             self.assertIn("proxy_set_header Cookie $http_cookie;", block, route)
             self.assertIn("proxy_pass http://stock_ai_middleware;", block, route)

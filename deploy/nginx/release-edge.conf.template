@@ -110,6 +110,28 @@ server {
         root /usr/share/nginx/html;
     }
 
+    # 群聊推播（SSE）是長連線：不緩衝、拉長讀取逾時；header 白名單與 /v1 相同。
+    location = /v1/messages/stream {
+        limit_req zone=per_ip burst=40 nodelay;
+        proxy_pass_request_headers off;
+        proxy_pass http://stock_ai_middleware;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+        proxy_set_header Host ${RELEASE_APP_HOST};
+        proxy_set_header Accept $http_accept;
+        proxy_set_header Content-Type $content_type;
+        proxy_set_header Content-Length $content_length;
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host ${RELEASE_APP_HOST};
+        proxy_set_header Authorization $http_authorization;
+    }
+
     location ~ ^/v1(?:/|$) {
         limit_req zone=per_ip burst=40 nodelay;
         proxy_pass_request_headers off;

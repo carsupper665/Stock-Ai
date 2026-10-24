@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { updateAccount } from '../pages/accounts/api.js'
+import { confirm } from './confirm.js'
 import { say } from './toast.js'
 
 // 帳號在群聊的權限：由交易後端強制，Agent 被擋時工具會回 chat_post_disabled / chat_read_disabled
@@ -16,6 +17,10 @@ const current = computed(() => {
 const busy = ref(false)
 async function change(event) {
   const mode = event.target.value
+  if (mode === 'banned' && !await confirm({ title: '停權這個帳號？', ok: '確認停權', lines: ['不能讀取也不能發言', '停權期間被 tag 的訊息不會送進它的 Session 對話'] })) {
+    event.target.value = current.value
+    return
+  }
   busy.value = true
   try {
     const saved = await updateAccount(props.account.id, modes[mode])

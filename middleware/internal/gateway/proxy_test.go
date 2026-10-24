@@ -412,3 +412,48 @@ func TestProxyForwardsTheRunStreamAsEachEventArrives(t *testing.T) {
 		t.Fatalf("POST stream = %d, want 405", recorder.Code)
 	}
 }
+
+func TestProxyForwardsTheChatStreamWithinOneSecond(t *testing.T) {
+	release := make(chan struct{})
+	handler, cookie := proxyFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages/stream" || r.Header.Get("Authorization") != "Bearer "+proxyBackendToken {
+			t.Errorf("upstream = %q %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: created\ndata: {\"id\":\"msg_1\"}\n\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	defer close(release)
+
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/messages/stream", nil)
+	request.AddCookie(cookie)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("stream = %d %q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	event := make(chan string, 1)
+	go func() {
+		lines := bufio.NewReader(response.Body)
+		first, _ := lines.ReadString('\n')
+		data, _ := lines.ReadString('\n')
+		event <- first + data
+	}()
+	select {
+	case got := <-event:
+		if got != "event: created\ndata: {\"id\":\"msg_1\"}\n" {
+			t.Fatalf("event = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the chat event was buffered by the proxy")
+	}
+}

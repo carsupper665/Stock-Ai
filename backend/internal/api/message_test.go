@@ -2,9 +2,13 @@ package api
 
 import (
 	"backend/internal/database"
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -201,7 +205,7 @@ func TestListMessagesOptionalAuth(t *testing.T) {
 
 func TestListMessagesQueryValidation(t *testing.T) {
 	engine, _ := newTestServer(t)
-	for _, bad := range []string{"page=0", "page=abc", "sort=sideways", "tag=%20%20", "limit=10", "order=asc", "page=1&page=2"} {
+	for _, bad := range []string{"page=0", "page=abc", "sort=sideways", "tag=%20%20", "limit=51", "order=asc", "page=1&page=2"} {
 		if status, _ := do(t, engine, http.MethodGet, "/v1/messages?"+bad, "", nil); status != http.StatusBadRequest {
 			t.Fatalf("%s 應回 400，得到 %d", bad, status)
 		}
@@ -392,5 +396,239 @@ func TestChatRateConcurrentPosts(t *testing.T) {
 	}
 	if counts[201] != 3 || counts[429] != 7 {
 		t.Fatalf("concurrent limit: %v", counts)
+	}
+}
+
+func postContents(t *testing.T, engine *gin.Engine, token string, count int) []string {
+	t.Helper()
+	ids := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		tags := []string{}
+		if i%2 == 0 {
+			tags = []string{"BTC-Agent-01"}
+		}
+		status, body := do(t, engine, http.MethodPost, "/v1/messages", token, gin.H{"content": fmt.Sprintf("msg %02d", i), "tags": tags})
+		if status != http.StatusCreated {
+			t.Fatalf("post %d: %d %v", i, status, body)
+		}
+		ids = append(ids, body["id"].(string))
+		time.Sleep(time.Millisecond)
+	}
+	return ids
+}
+
+func messageContents(body map[string]any) []string {
+	items, _ := body["messages"].([]any)
+	out := make([]string, 0, len(items))
+	for _, raw := range items {
+		out = append(out, raw.(map[string]any)["content"].(string))
+	}
+	return out
+}
+
+func TestListMessagesLimit(t *testing.T) {
+	engine, _ := newTestServer(t)
+	createAccountFor(t, engine, "BTC-Agent-01", 100)
+	postContents(t, engine, testUserToken, 60)
+	for _, limit := range []string{"0", "51", "-1", "1.5", "abc"} {
+		if status, body := do(t, engine, http.MethodGet, "/v1/messages?limit="+limit, testUserToken, nil); status != 400 || body["error"] != "invalid_request" {
+			t.Fatalf("limit=%s: %d %v", limit, status, body)
+		}
+	}
+	_, body := do(t, engine, http.MethodGet, "/v1/messages", testUserToken, nil)
+	if got := messageContents(body); len(got) != 10 || got[0] != "msg 59" || body["has_more"] != true {
+		t.Fatalf("預設一頁 10 則: %v", body)
+	}
+	_, body = do(t, engine, http.MethodGet, "/v1/messages?limit=15&page=2", testUserToken, nil)
+	if got := messageContents(body); len(got) != 15 || got[0] != "msg 44" {
+		t.Fatalf("limit 15 第二頁: %v", got)
+	}
+	_, body = do(t, engine, http.MethodGet, "/v1/messages?limit=50", testUserToken, nil)
+	if got := messageContents(body); len(got) != 50 || body["has_more"] != true {
+		t.Fatalf("limit 50: %d %v", len(got), body["has_more"])
+	}
+	_, body = do(t, engine, http.MethodGet, "/v1/messages?limit=1", testUserToken, nil)
+	if got := messageContents(body); len(got) != 1 || got[0] != "msg 59" {
+		t.Fatalf("limit 1: %v", got)
+	}
+}
+
+func TestListMessagesBefore(t *testing.T) {
+	engine, _ := newTestServer(t)
+	createAccountFor(t, engine, "BTC-Agent-01", 100)
+	ids := postContents(t, engine, testUserToken, 25)
+	get := func(query string) (int, map[string]any) {
+		return do(t, engine, http.MethodGet, "/v1/messages?"+query, testUserToken, nil)
+	}
+	_, body := get("before=" + ids[20] + "&limit=5")
+	if got := fmt.Sprint(messageContents(body)); got != "[msg 19 msg 18 msg 17 msg 16 msg 15]" || body["has_more"] != true {
+		t.Fatalf("before desc: %s %v", got, body["has_more"])
+	}
+	_, body = get("before=" + ids[20] + "&limit=5&tag=BTC-Agent-01")
+	if got := fmt.Sprint(messageContents(body)); got != "[msg 18 msg 16 msg 14 msg 12 msg 10]" {
+		t.Fatalf("before + tag: %s", got)
+	}
+	_, body = get("before=" + ids[3] + "&sort=asc")
+	if got := fmt.Sprint(messageContents(body)); got != "[msg 00 msg 01 msg 02]" || body["has_more"] != false {
+		t.Fatalf("before + asc: %s %v", got, body["has_more"])
+	}
+	if status, body := get("before=" + ids[3] + "&after=" + ids[1]); status != 400 || body["error"] != "invalid_request" {
+		t.Fatalf("before + after: %d %v", status, body)
+	}
+	if status, body := get("before=msg_missing"); status != 400 || body["error"] != "invalid_request" {
+		t.Fatalf("missing before: %d %v", status, body)
+	}
+}
+
+func TestClearMessages(t *testing.T) {
+	engine, _ := newTestServer(t)
+	_, token := createAccountFor(t, engine, "BTC-Agent-01", 100)
+	postContents(t, engine, testUserToken, 4)
+	if status, body := do(t, engine, http.MethodDelete, "/v1/messages", token, nil); status != 403 {
+		t.Fatalf("account token clear: %d %v", status, body)
+	}
+	if status, body := do(t, engine, http.MethodDelete, "/v1/messages", "", nil); status != 401 {
+		t.Fatalf("anonymous clear: %d %v", status, body)
+	}
+	if status, body := do(t, engine, http.MethodDelete, "/v1/messages", testUserToken, nil); status != 204 {
+		t.Fatalf("user clear: %d %v", status, body)
+	}
+	for _, query := range []string{"", "?tag=BTC-Agent-01"} {
+		if status, body := do(t, engine, http.MethodGet, "/v1/messages"+query, testUserToken, nil); status != 200 || len(messageContents(body)) != 0 {
+			t.Fatalf("after clear %q: %d %v", query, status, body)
+		}
+	}
+}
+
+type sseEvent struct {
+	name string
+	data map[string]any
+}
+
+// openStream 連上 SSE，回傳讀事件的 channel；ping 註解行不會送出。
+func openStream(t *testing.T, server *httptest.Server, token string) (<-chan sseEvent, context.CancelFunc) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/v1/messages/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "text/event-stream" {
+		cancel()
+		t.Fatalf("stream: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	events := make(chan sseEvent, 16)
+	go func() {
+		defer resp.Body.Close()
+		defer close(events)
+		scanner := bufio.NewScanner(resp.Body)
+		var current sseEvent
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				current.name = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				_ = json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &current.data)
+			case line == "" && current.name != "":
+				events <- current
+				current = sseEvent{}
+			}
+		}
+	}()
+	return events, cancel
+}
+
+func nextEvent(t *testing.T, events <-chan sseEvent) sseEvent {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(2 * time.Second):
+		t.Fatal("沒有收到推播事件")
+	}
+	return sseEvent{}
+}
+
+func TestMessageStreamEvents(t *testing.T) {
+	engine, _ := newTestServer(t)
+	server := httptest.NewServer(engine)
+	t.Cleanup(server.Close)
+	_, token := createAccountFor(t, engine, "BTC-Agent-01", 100)
+
+	resp, err := http.DefaultClient.Do(func() *http.Request {
+		req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/messages/stream", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		return req
+	}())
+	if err != nil || resp.StatusCode != 403 {
+		t.Fatalf("account token stream: %v %v", err, resp)
+	}
+	resp.Body.Close()
+
+	events, cancel := openStream(t, server, testUserToken)
+	defer cancel()
+
+	_, posted := do(t, engine, http.MethodPost, "/v1/messages", token, gin.H{"content": "hi", "tags": []string{"USER"}})
+	created := nextEvent(t, events)
+	_, listed := do(t, engine, http.MethodGet, "/v1/messages", testUserToken, nil)
+	first := listed["messages"].([]any)[0].(map[string]any)
+	if created.name != "created" || fmt.Sprint(created.data) != fmt.Sprint(first) || created.data["id"] != posted["id"] {
+		t.Fatalf("created 應與列表單筆相同: %v vs %v", created, first)
+	}
+
+	_, mine := do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "mine"})
+	if event := nextEvent(t, events); event.name != "created" || event.data["user_name"] != "you" {
+		t.Fatalf("USER 自己的訊息應顯示 you: %v", event)
+	}
+
+	do(t, engine, http.MethodDelete, "/v1/messages/"+mine["id"].(string), testUserToken, nil)
+	if event := nextEvent(t, events); event.name != "deleted" || fmt.Sprint(event.data) != fmt.Sprintf("map[id:%s]", mine["id"]) {
+		t.Fatalf("deleted: %v", event)
+	}
+
+	do(t, engine, http.MethodDelete, "/v1/messages", testUserToken, nil)
+	if event := nextEvent(t, events); event.name != "cleared" || len(event.data) != 0 {
+		t.Fatalf("cleared: %v", event)
+	}
+
+	select {
+	case event := <-events:
+		t.Fatalf("每個動作只應推一次，多了 %v", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestMessageStreamReleasesDisconnectedClients(t *testing.T) {
+	engine, _ := newTestServer(t)
+	server := httptest.NewServer(engine)
+	t.Cleanup(server.Close)
+	http.DefaultClient.CloseIdleConnections()
+	baseline := runtime.NumGoroutine()
+
+	cancels := []context.CancelFunc{}
+	for i := 0; i < 5; i++ {
+		_, cancel := openStream(t, server, testUserToken)
+		cancels = append(cancels, cancel)
+	}
+	if runtime.NumGoroutine() <= baseline {
+		t.Fatal("連線中應有額外的 goroutine")
+	}
+	for _, cancel := range cancels {
+		cancel()
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for runtime.NumGoroutine() > baseline {
+		if time.Now().After(deadline) {
+			t.Fatalf("斷線後 goroutine 沒有回收：baseline %d，現在 %d", baseline, runtime.NumGoroutine())
+		}
+		http.DefaultClient.CloseIdleConnections()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if status, body := do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "沒人聽也不會卡住"}); status != 201 {
+		t.Fatalf("post: %d %v", status, body)
 	}
 }

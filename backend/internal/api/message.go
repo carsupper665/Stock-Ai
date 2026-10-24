@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +23,9 @@ type messageView struct {
 	Tags      []string  `json:"tags"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// ssePingInterval 讓代理與瀏覽器不會把閒置的推播連線當成斷線。
+const ssePingInterval = 25 * time.Second
 
 type postMessageRequest struct {
 	Content    string   `json:"content"`
@@ -59,13 +64,13 @@ func (s *Server) postMessage(c *gin.Context) {
 
 func (s *Server) listMessages(c *gin.Context) {
 	for key, values := range c.Request.URL.Query() {
-		if (key != "page" && key != "sort" && key != "tag" && key != "after") || len(values) != 1 {
-			fail(c, http.StatusBadRequest, "invalid_request", "只接受 page、sort、tag、after 查詢參數")
+		if (key != "page" && key != "limit" && key != "sort" && key != "tag" && key != "after" && key != "before") || len(values) != 1 {
+			fail(c, http.StatusBadRequest, "invalid_request", "只接受 page、limit、sort、tag、after、before 查詢參數")
 			return
 		}
 	}
 
-	q := message.Query{Page: 1, Sort: c.Query("sort"), Tag: c.Query("tag"), After: c.Query("after")}
+	q := message.Query{Page: 1, Sort: c.Query("sort"), Tag: c.Query("tag"), After: c.Query("after"), Before: c.Query("before")}
 	if raw, present := c.GetQuery("page"); present {
 		page, err := strconv.Atoi(strings.TrimSpace(raw))
 		if err != nil || page <= 0 {
@@ -73,6 +78,14 @@ func (s *Server) listMessages(c *gin.Context) {
 			return
 		}
 		q.Page = page
+	}
+	if raw, present := c.GetQuery("limit"); present {
+		limit, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || limit <= 0 {
+			fail(c, http.StatusBadRequest, "invalid_request", message.ErrInvalidLimit.Error())
+			return
+		}
+		q.Limit = limit
 	}
 
 	var requester *auth.Identity
@@ -87,7 +100,7 @@ func (s *Server) listMessages(c *gin.Context) {
 
 	out := make([]messageView, 0, len(views))
 	for _, view := range views {
-		out = append(out, messageView{ID: view.ID, UserName: view.UserName, Content: view.Content, Tags: view.Tags, CreatedAt: view.CreatedAt})
+		out = append(out, toMessageView(view))
 	}
 	c.JSON(http.StatusOK, gin.H{"messages": out, "page": q.Page, "has_more": hasMore})
 }
@@ -101,12 +114,74 @@ func (s *Server) deleteMessage(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (s *Server) clearMessages(c *gin.Context) {
+	if err := s.messages.Clear(c.Request.Context()); err != nil {
+		s.writeMessageError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// streamMessages 是只給 USER 前端的 SSE 推播；第三方用 after 輪詢。
+func (s *Server) streamMessages(c *gin.Context) {
+	events, unsubscribe := s.messages.Subscribe()
+	defer unsubscribe()
+
+	header := c.Writer.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	c.Status(http.StatusOK)
+	c.Writer.Flush()
+
+	ping := time.NewTicker(ssePingInterval)
+	defer ping.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-ping.C:
+			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
+				return
+			}
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := writeEvent(c, event); err != nil {
+				return
+			}
+		}
+		c.Writer.Flush()
+	}
+}
+
+func writeEvent(c *gin.Context, event message.Event) error {
+	var data any = gin.H{}
+	switch event.Name {
+	case message.EventCreated:
+		data = toMessageView(event.Message)
+	case message.EventDeleted:
+		data = gin.H{"id": event.ID}
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Name, raw)
+	return err
+}
+
+func toMessageView(view message.View) messageView {
+	return messageView{ID: view.ID, UserName: view.UserName, Content: view.Content, Tags: view.Tags, CreatedAt: view.CreatedAt}
+}
+
 func (s *Server) writeMessageError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, message.ErrEmptyContent), errors.Is(err, message.ErrContentLong),
 		errors.Is(err, message.ErrInvalidSort), errors.Is(err, message.ErrInvalidPage),
 		errors.Is(err, message.ErrInvalidTag), errors.Is(err, message.ErrInvalidTags),
-		errors.Is(err, message.ErrUnknownTag), errors.Is(err, message.ErrSelfTag), errors.Is(err, message.ErrInvalidAfter):
+		errors.Is(err, message.ErrUnknownTag), errors.Is(err, message.ErrSelfTag), errors.Is(err, message.ErrInvalidAfter),
+		errors.Is(err, message.ErrInvalidLimit), errors.Is(err, message.ErrInvalidBefore):
 		fail(c, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, message.ErrChatPostDisabled):
 		fail(c, http.StatusForbidden, "chat_post_disabled", err.Error())

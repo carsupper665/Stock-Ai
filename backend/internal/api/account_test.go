@@ -18,6 +18,7 @@ import (
 	"backend/internal/logging"
 	"backend/internal/market"
 	"backend/internal/market/stock"
+	"backend/internal/message"
 	"backend/internal/trading"
 
 	"github.com/gin-gonic/gin"
@@ -59,7 +60,7 @@ func newTestServer(t *testing.T) (*gin.Engine, *database.Store) {
 		FeeRateTaker: 0.001,
 	}
 	trader := trading.New(store, prices, cfg.FeeRateMaker, cfg.FeeRateTaker)
-	return New(cfg, store, prices, trader, log), store
+	return New(cfg, store, prices, trader, message.New(store, cfg.UserName), log), store
 }
 
 const testPrice = 60000.0

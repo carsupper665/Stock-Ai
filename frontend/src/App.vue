@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { api } from './core/api.js'
@@ -26,6 +26,14 @@ function toggleSidebar() {
   sidebarHidden.value = !sidebarHidden.value
   try { localStorage.setItem(sidebarKey, sidebarHidden.value ? 'hidden' : 'shown') } catch { /* 只影響下次開啟 */ }
 }
+
+// 群聊頁（meta.immersive）在窄螢幕只顯示聊天，由頁面上的「<」把側欄當抽屜打開
+const drawerOpen = ref(false)
+provide('openSidebar', () => {
+  sidebarHidden.value = false
+  drawerOpen.value = true
+})
+watch(() => route.fullPath, () => { drawerOpen.value = false })
 
 function cycleTheme() {
   const i = themes.findIndex(([v]) => v === theme.value)
@@ -74,7 +82,8 @@ watch(() => [sync.key, isAuthenticated()], probeAll)
 </script>
 
 <template>
-  <div v-if="isAuthenticated()" id="shell">
+  <div v-if="isAuthenticated()" id="shell" :class="{ immersive: route.meta.immersive, drawer: drawerOpen }">
+    <div v-if="drawerOpen" class="drawer-backdrop" @click="drawerOpen = false"></div>
     <aside v-show="!sidebarHidden">
       <div class="row logo"><i class="dot square" data-tone="acc"></i><b>Agent 控制台</b></div>
       <div class="col services">
@@ -163,6 +172,60 @@ main {
 @media (max-width: 900px) {
   #shell {
     flex-direction: column;
+  }
+}
+/* 群聊頁高度限制在螢幕內，訊息區自己捲動 */
+#shell.immersive {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+}
+#shell.immersive main {
+  min-height: 0;
+}
+#shell.immersive > aside {
+  overflow-y: auto;
+}
+.drawer-backdrop {
+  display: none;
+}
+@media (max-width: 900px) {
+  #shell.immersive > aside,
+  #shell.immersive header {
+    display: none;
+  }
+  #shell.immersive.drawer > aside {
+    display: flex;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(300px, 85vw);
+    gap: 14px;
+    padding: 14px 12px;
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+  }
+  #shell.immersive.drawer nav {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow: visible;
+    margin: 0;
+    padding: 12px 0 0;
+  }
+  #shell.immersive.drawer nav a {
+    border-left: 2px solid transparent;
+    border-bottom: 0;
+    border-radius: 0 5px 5px 0;
+  }
+  #shell.immersive.drawer nav a[aria-current='page'] {
+    border-left-color: var(--acc);
+  }
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    background: var(--overlay);
   }
 }
 @media (max-width: 640px) {

@@ -16,6 +16,7 @@ import (
 
 const (
 	PageSize      = 10
+	MaxLimit      = 50
 	MaxContentLen = 500
 
 	You         = "you"
@@ -36,6 +37,10 @@ var (
 	ErrSelfTag      = errors.New("tags 不能是自己")
 	ErrForbidden    = errors.New("只能刪除自己的留言")
 
+	ErrInvalidLimit = errors.New("limit 必須是 1～50 的整數")
+	// ErrInvalidBefore 也涵蓋 before 與 after 同時使用。
+	ErrInvalidBefore = errors.New("before 必須是存在的留言 id，且不能和 after 同時使用")
+
 	ErrChatPostDisabled = errors.New("此帳號已被管理者停用群聊發言權限")
 	ErrChatReadDisabled = errors.New("此帳號已被管理者停用群聊讀取權限")
 	ErrChatMuted        = errors.New("你已被管理者禁言")
@@ -45,10 +50,11 @@ var (
 type Service struct {
 	store    *database.Store
 	userName string
+	streams  *streams
 }
 
 func New(store *database.Store, userName string) *Service {
-	return &Service{store: store, userName: userName}
+	return &Service{store: store, userName: userName, streams: &streams{subscribers: map[chan Event]struct{}{}}}
 }
 
 // Post 由 token 身分決定作者，不接受 client 指定（規格 §14）。
@@ -65,7 +71,18 @@ func (s *Service) Post(ctx context.Context, author auth.Identity, content string
 		posted, err = service.post(ctx, author, content, tags)
 		return err
 	})
-	return posted, err
+	if err != nil {
+		return nil, err
+	}
+	// 推播給 USER，所以用 USER 看到的名稱（規格 §16）。
+	name := You
+	if !author.IsUser() {
+		name = author.UserName
+	}
+	s.streams.publish(Event{Name: EventCreated, Message: View{
+		ID: posted.ID, UserName: name, Content: posted.Content, Tags: posted.Tags, CreatedAt: posted.CreatedAt.UTC(),
+	}})
+	return posted, nil
 }
 
 func (s *Service) post(ctx context.Context, author auth.Identity, content string, tags []string) (*database.Message, error) {
@@ -123,10 +140,14 @@ func (s *Service) post(ctx context.Context, author auth.Identity, content string
 
 type Query struct {
 	Page int
-	Sort string
-	Tag  string
+	// Limit 是每頁筆數，0 表示 PageSize。
+	Limit int
+	Sort  string
+	Tag   string
 	// After 只回傳這則留言之後（依時間與 id）的留言，用來讀「上次讀到之後」的新訊息。
 	After string
+	// Before 只回傳這則留言之前的留言，用來往上載入更早的訊息。
+	Before string
 }
 
 // View 是對外的留言：只有誰說的、說了什麼、什麼時候（規格 §18）。
@@ -145,11 +166,18 @@ func (s *Service) List(ctx context.Context, q Query, requester *auth.Identity) (
 	if err != nil {
 		return nil, false, err
 	}
+	limit := q.Limit
+	if limit == 0 {
+		limit = PageSize
+	}
+	if limit < 1 || limit > MaxLimit {
+		return nil, false, ErrInvalidLimit
+	}
 	page := q.Page
 	if page == 0 {
 		page = 1
 	}
-	if page < 1 || page-1 > math.MaxInt/PageSize {
+	if page < 1 || page-1 > math.MaxInt/limit {
 		return nil, false, ErrInvalidPage
 	}
 	tag := strings.TrimSpace(q.Tag)
@@ -161,8 +189,22 @@ func (s *Service) List(ctx context.Context, q Query, requester *auth.Identity) (
 			return nil, false, err
 		}
 	}
-	query := database.MessageQuery{Desc: desc, Limit: PageSize + 1, Offset: (page - 1) * PageSize, Tag: tag}
-	if after := strings.TrimSpace(q.After); after != "" {
+	after, before := strings.TrimSpace(q.After), strings.TrimSpace(q.Before)
+	if after != "" && before != "" {
+		return nil, false, ErrInvalidBefore
+	}
+	query := database.MessageQuery{Desc: desc, Limit: limit + 1, Offset: (page - 1) * limit, Tag: tag}
+	if before != "" {
+		anchor, err := s.store.MessageByID(ctx, before)
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, false, ErrInvalidBefore
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		query.BeforeID, query.BeforeCreatedAt = anchor.ID, &anchor.CreatedAt
+	}
+	if after != "" {
 		anchor, err := s.store.MessageByID(ctx, after)
 		if errors.Is(err, database.ErrNotFound) {
 			return nil, false, ErrInvalidAfter
@@ -177,9 +219,9 @@ func (s *Service) List(ctx context.Context, q Query, requester *auth.Identity) (
 	if err != nil {
 		return nil, false, err
 	}
-	hasMore := len(messages) > PageSize
+	hasMore := len(messages) > limit
 	if hasMore {
-		messages = messages[:PageSize]
+		messages = messages[:limit]
 	}
 
 	names, err := s.store.AccountNames(ctx, accountIDs(messages))
@@ -208,7 +250,20 @@ func (s *Service) Delete(ctx context.Context, id string, requester auth.Identity
 	if !requester.IsUser() && !(message.AuthorType == database.AuthorAccount && requester.Owns(message.AuthorID)) {
 		return ErrForbidden
 	}
-	return s.store.DeleteMessage(ctx, id)
+	if err := s.store.DeleteMessage(ctx, id); err != nil {
+		return err
+	}
+	s.streams.publish(Event{Name: EventDeleted, ID: id})
+	return nil
+}
+
+// Clear 刪除全部留言與 tag，只給 USER（由路由把關）。
+func (s *Service) Clear(ctx context.Context) error {
+	if err := s.store.ClearMessages(ctx); err != nil {
+		return err
+	}
+	s.streams.publish(Event{Name: EventCleared})
+	return nil
 }
 
 func (s *Service) displayName(m database.Message, names map[string]string, requester *auth.Identity) string {

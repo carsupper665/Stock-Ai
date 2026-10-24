@@ -1,0 +1,284 @@
+[
+  {
+    "width": 1384,
+    "horizontalOverflow": false,
+    "pageFitsScreen": true,
+    "msgsScroll": true,
+    "msgsAtBottom": true,
+    "scroll": [
+      306,
+      932,
+      626
+    ],
+    "chat": {
+      "left": 556,
+      "top": 47.671875,
+      "right": 1384,
+      "bottom": 805
+    },
+    "memberPane": {
+      "left": 216,
+      "top": 47.671875,
+      "right": 556,
+      "bottom": 805
+    },
+    "shellAside": true,
+    "shellHeader": true,
+    "backButton": false,
+    "membersButton": false,
+    "overflowing": [],
+    "dialog": {
+      "open": true,
+      "box": {
+        "left": 472,
+        "top": 106.84375,
+        "right": 912,
+        "bottom": 698.140625
+      },
+      "overflow": false
+    }
+  },
+  {
+    "width": 984,
+    "horizontalOverflow": false,
+    "pageFitsScreen": true,
+    "msgsScroll": true,
+    "msgsAtBottom": true,
+    "scroll": [
+      576,
+      1202,
+      626
+    ],
+    "chat": {
+      "left": 556,
+      "top": 47.671875,
+      "right": 984,
+      "bottom": 805
+    },
+    "memberPane": {
+      "left": 216,
+      "top": 47.671875,
+      "right": 556,
+      "bottom": 805
+    },
+    "shellAside": true,
+    "shellHeader": true,
+    "backButton": false,
+    "membersButton": false,
+    "overflowing": [],
+    "dialog": {
+      "open": true,
+      "box": {
+        "left": 272,
+        "top": 106.84375,
+        "right": 712,
+        "bottom": 698.140625
+      },
+      "overflow": false
+    }
+  },
+  {
+    "width": 885,
+    "horizontalOverflow": false,
+    "pageFitsScreen": true,
+    "msgsScroll": true,
+    "msgsAtBottom": true,
+    "scroll": [
+      205,
+      879,
+      674
+    ],
+    "chat": {
+      "left": 0,
+      "top": 0,
+      "right": 885,
+      "bottom": 805
+    },
+    "memberPane": null,
+    "shellAside": false,
+    "shellHeader": false,
+    "backButton": true,
+    "membersButton": true,
+    "overflowing": [],
+    "drawer": {
+      "visible": true,
+      "position": "fixed",
+      "box": {
+        "left": 0,
+        "top": 0,
+        "right": 300,
+        "bottom": 805
+      },
+      "overflow": false
+    },
+    "drawerClosed": true,
+    "sheet": {
+      "visible": true,
+      "members": 5,
+      "overflow": false
+    },
+    "dialog": {
+      "open": true,
+      "box": {
+        "left": 222.5,
+        "top": 106.84375,
+        "right": 662.5,
+        "bottom": 698.140625
+      },
+      "overflow": false
+    }
+  },
+  {
+    "width": 884,
+    "horizontalOverflow": false,
+    "pageFitsScreen": true,
+    "msgsScroll": true,
+    "msgsAtBottom": true,
+    "scroll": [
+      205,
+      879,
+      674
+    ],
+    "chat": {
+      "left": 0,
+      "top": 0,
+      "right": 884,
+      "bottom": 805
+    },
+    "memberPane": null,
+    "shellAside": false,
+    "shellHeader": false,
+    "backButton": true,
+    "membersButton": true,
+    "overflowing": [],
+    "drawer": {
+      "visible": true,
+      "position": "fixed",
+      "box": {
+        "left": 0,
+        "top": 0,
+        "right": 300,
+        "bottom": 805
+      },
+      "overflow": false
+    },
+    "drawerClosed": true,
+    "sheet": {
+      "visible": true,
+      "members": 5,
+      "overflow": false
+    },
+    "dialog": {
+      "open": true,
+      "box": {
+        "left": 222,
+        "top": 106.84375,
+        "right": 662,
+        "bottom": 698.140625
+      },
+      "overflow": false
+    }
+  },
+  {
+    "width": 584,
+    "horizontalOverflow": false,
+    "pageFitsScreen": true,
+    "msgsScroll": true,
+    "msgsAtBottom": true,
+    "scroll": [
+      272,
+      946,
+      674
+    ],
+    "chat": {
+      "left": 0,
+      "top": 0,
+      "right": 584,
+      "bottom": 805
+    },
+    "memberPane": null,
+    "shellAside": false,
+    "shellHeader": false,
+    "backButton": true,
+    "membersButton": true,
+    "overflowing": [],
+    "drawer": {
+      "visible": true,
+      "position": "fixed",
+      "box": {
+        "left": 0,
+        "top": 0,
+        "right": 300,
+        "bottom": 805
+      },
+      "overflow": false
+    },
+    "drawerClosed": true,
+    "sheet": {
+      "visible": true,
+      "members": 5,
+      "overflow": false
+    },
+    "dialog": {
+      "open": true,
+      "box": {
+        "left": 72,
+        "top": 106.84375,
+        "right": 512,
+        "bottom": 698.140625
+      },
+      "overflow": false
+    }
+  },
+  {
+    "width": 500,
+    "horizontalOverflow": false,
+    "pageFitsScreen": true,
+    "msgsScroll": true,
+    "msgsAtBottom": true,
+    "scroll": [
+      340,
+      1014,
+      674
+    ],
+    "chat": {
+      "left": 0,
+      "top": 0,
+      "right": 500,
+      "bottom": 805
+    },
+    "memberPane": null,
+    "shellAside": false,
+    "shellHeader": false,
+    "backButton": true,
+    "membersButton": true,
+    "overflowing": [],
+    "drawer": {
+      "visible": true,
+      "position": "fixed",
+      "box": {
+        "left": 0,
+        "top": 0,
+        "right": 300,
+        "bottom": 805
+      },
+      "overflow": false
+    },
+    "drawerClosed": true,
+    "sheet": {
+      "visible": true,
+      "members": 5,
+      "overflow": false
+    },
+    "dialog": {
+      "open": true,
+      "box": {
+        "left": 30,
+        "top": 106.84375,
+        "right": 470,
+        "bottom": 698.140625
+      },
+      "overflow": false
+    }
+  }
+]

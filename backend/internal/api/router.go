@@ -26,7 +26,7 @@ type Server struct {
 }
 
 // New 組出 gin engine：套上共用 middleware，然後掛路由。
-func New(cfg *config.Config, store *database.Store, prices *market.Runtime, trader *trading.Service, log *logging.Logger) *gin.Engine {
+func New(cfg *config.Config, store *database.Store, prices *market.Runtime, trader *trading.Service, messages *message.Service, log *logging.Logger) *gin.Engine {
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -41,7 +41,7 @@ func New(cfg *config.Config, store *database.Store, prices *market.Runtime, trad
 		accounts: account.New(store),
 		market:   prices,
 		trading:  trader,
-		messages: message.New(store, cfg.UserName),
+		messages: messages,
 	}
 
 	engine := gin.New()
@@ -109,5 +109,7 @@ func registerRoutes(engine *gin.Engine, s *Server) {
 	// 留言板：讀取公開，帶了 token 就解析身分、帶錯就 401（規格 §17）；發布需要 token
 	v1.GET("/messages", s.optionalAuth(), s.listMessages)
 	v1.POST("/messages", s.requireAny(), s.postMessage)
+	v1.DELETE("/messages", s.requireUser(), s.clearMessages)
+	v1.GET("/messages/stream", s.requireUser(), s.streamMessages)
 	v1.DELETE("/messages/:id", s.requireAny(), s.deleteMessage)
 }

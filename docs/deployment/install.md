@@ -121,6 +121,13 @@
            proxy_pass http://stock_ai_middleware;
        }
 
+       # 群聊推播（SSE）是長連線：不緩衝、拉長讀取逾時。
+       location = /v1/messages/stream {
+           limit_req zone=stock_ai_per_ip burst=40 nodelay;
+           proxy_buffering off;
+           proxy_read_timeout 1h;
+           proxy_pass http://stock_ai_middleware;
+       }
        location ~ ^/v1(?:/|$) {
            limit_req zone=stock_ai_per_ip burst=40 nodelay;
            proxy_pass http://stock_ai_middleware;

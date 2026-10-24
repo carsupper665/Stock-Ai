@@ -111,7 +111,7 @@ def main():
         check("tag 先過濾再固定分頁", len(tagged.get("messages", [])) == 10 and
               all("ETH-Agent-02" in m.get("tags", []) for m in tagged["messages"]), str(tagged))
 
-        for bad in ["page=0", "page=abc", "sort=sideways", "limit=10", "order=asc", "tag=%20%20"]:
+        for bad in ["page=0", "page=abc", "sort=sideways", "limit=51", "order=asc", "tag=%20%20"]:
             status, _, _ = server.request("GET", f"/v1/messages?{bad}")
             check(f"{bad} 回 400", status == 400, f"實際 {status}")
 

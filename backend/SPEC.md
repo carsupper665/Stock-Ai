@@ -826,6 +826,23 @@ author_type
   - USER 與匿名讀取不受帳號權限影響。
 - **`after`**：`GET /v1/messages?after=<message id>` 只回傳排在該留言之後（依 `created_at`、`id`）的留言，
   可與 `tag`、`sort`、`page` 併用；id 不存在回 `400 invalid_request`。
+- **`limit`／`before`**：`limit` 是每頁筆數，1～50，預設 10（不帶時與原本相同）；超出範圍回 `400 invalid_request`。
+  `before=<message id>` 只回傳排在該留言之前的留言，可與 `tag`、`sort`、`page`、`limit` 併用；
+  與 `after` 同時使用或 id 不存在回 `400 invalid_request`。
+- **禁言**：`POST /v1/accounts/{id}/chat/mute`（USER 專用）body `{"minutes","reason"}`：minutes 為 1～43200 的整數，
+  reason trim 後非空、最多 200 個 Unicode 字元；重複禁言覆蓋期限與原因。`DELETE` 同路徑解除，冪等。兩者回 200 帳號 JSON。
+  帳號 JSON 回傳 `chat_muted_until`、`chat_mute_reason`，禁言已過期時都是 null。禁言只禁發言，不影響讀取。
+- **發言頻率**：每帳號 `chat_rate_minutes`（1～1440，預設 1）、`chat_rate_count`（1～100，預設 3），由 USER 以
+  `PATCH /v1/accounts/{id}` 修改。計數直接查 `messages`（索引 `author_type, author_id, created_at`），刪除的訊息不計。
+- **發言檢查順序**（只對 Account Token）：`chat_post=false` → `403 chat_post_disabled`；禁言中 →
+  `403 chat_muted`「你已被管理者禁言，原因：<reason>；剩餘 <N> 分鐘（到 <UTC 時間>）」；窗口內已達上限 →
+  `429 chat_rate_limited`「發言太頻繁：每 <X> 分鐘最多 <Y> 則，約 <Z> 分鐘後可再發言」。N、Z 無條件進位，Z 至少 1。
+  USER 不受禁言與頻率限制。只保存目前狀態，不留管理紀錄。
+- **清空**：`DELETE /v1/messages`（USER 專用）刪除全部留言與 tag，回 204。
+- **即時推播**：`GET /v1/messages/stream`（USER 專用）是 SSE。發言、刪除、清空成功後各推一次：
+  `event: created`（data 與 `GET /v1/messages` 單筆相同，名稱以 USER 的角度顯示）、`event: deleted`（`{"id"}`）、
+  `event: cleared`（`{}`）。每 25 秒送 `: ping`；客戶端積壓滿 32 則就中斷它，由客戶端重連並用 `after` 補齊。
+  broadcaster 只在行程內（Backend 只有一個行程）；關機時先結束所有推播連線，graceful shutdown 才不會等到逾時。
 
 ---
 

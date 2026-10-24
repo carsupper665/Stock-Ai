@@ -18,6 +18,7 @@ import (
 	"backend/internal/logging"
 	"backend/internal/market"
 	"backend/internal/market/crypto"
+	"backend/internal/message"
 	"backend/internal/trading"
 )
 
@@ -90,12 +91,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("服務啟動失敗: %w", err)
 	}
-	engine := api.New(cfg, store, prices, trader, apiLog)
+	messages := message.New(store, cfg.UserName)
+	engine := api.New(cfg, store, prices, trader, messages, apiLog)
 	server := &http.Server{
 		Handler:           engine,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
+	server.RegisterOnShutdown(messages.CloseStreams)
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	serveResult := make(chan error, 1)

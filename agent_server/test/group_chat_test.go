@@ -194,3 +194,43 @@ func TestPostChatPreservesModerationErrorsAndWakeUpShape(t *testing.T) {
 		})
 	}
 }
+
+func TestGetChatAfterChatClearedReadsNewestAgain(t *testing.T) {
+	now := time.Now()
+	fixture := newMessageToolFixture()
+	fixture.message = func(w http.ResponseWriter, request *http.Request, call int) {
+		switch call {
+		case 1:
+			messageFixtureJSON(w, http.StatusOK, map[string]any{"messages": []any{chatMessage("m2", "two", now), chatMessage("m1", "one", now.Add(-time.Second))}, "page": 1, "has_more": false})
+		case 2:
+			if request.URL.RawQuery != "after=m2&page=1&sort=asc" {
+				t.Errorf("read after cursor = %s", request.URL.RawQuery)
+			}
+			// USER 清空群聊後，讀取位置指到的訊息已經不存在。
+			messageFixtureJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request", "message": "after 必須是存在的留言 id"})
+		default:
+			if request.URL.RawQuery != "page=1&sort=desc" {
+				t.Errorf("fallback read = %s", request.URL.RawQuery)
+			}
+			messageFixtureJSON(w, http.StatusOK, map[string]any{"messages": []any{chatMessage("m9", "after clear", now.Add(time.Minute))}, "page": 1, "has_more": false})
+		}
+	}
+	fixture.generate = func(w http.ResponseWriter, request *http.Request, call int) {
+		switch call {
+		case 1:
+			messageToolCall(w, "read-1", "get_chat", map[string]any{})
+		case 2:
+			messageToolCall(w, "read-2", "get_chat", map[string]any{})
+		case 3:
+			result := messageToolResult(t, request, "read-2")
+			if result["ok"] != true || messageIDs(t, result) != "m9" {
+				t.Errorf("read after clear = %#v", result)
+			}
+			messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("read", "read"), "tool_calls": []any{}, "finish_reason": "stop"})
+		}
+	}
+	runtime := fixture.open(t)
+	if _, run := startMessageRun(t, runtime); run.Status != "completed" {
+		t.Fatalf("Run = %+v", run)
+	}
+}

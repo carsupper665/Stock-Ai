@@ -21,6 +21,7 @@ import (
 	"backend/internal/market"
 	"backend/internal/market/crypto"
 	"backend/internal/market/stock"
+	"backend/internal/message"
 	"backend/internal/trading"
 )
 
@@ -67,7 +68,7 @@ func run() error {
 	matcher := trading.NewEngine(trader, cfg.MatchingInterval, logger)
 	matcher.Start()
 	defer matcher.Stop()
-	handler := api.New(cfg, store, prices, trader, logger)
+	handler := api.New(cfg, store, prices, trader, message.New(store, cfg.UserName), logger)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

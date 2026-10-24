@@ -1,6 +1,6 @@
 import { expire, session } from './session.js'
 
-const base = import.meta.env.VITE_API_BASE ?? ''
+export const base = import.meta.env.VITE_API_BASE ?? ''
 
 // 三個服務三種錯誤信封：交易後端 {error, message}、Agent Server {status_code, error, msg}、LLM Server {error: {code, message}}
 const codeOf = (d) => (typeof d.error === 'string' ? d.error : d.error?.code)

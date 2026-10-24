@@ -123,7 +123,7 @@ def check_routes(manual):
     for methods, path in re.findall(r'\| ([A-Z /]+) \| `([^`]+)` \|', table):
         documented_user.update((method.strip(), path) for method in methods.split("/"))
     assert documented_user == user_routes, documented_user ^ user_routes
-    assert len(user_routes) == 14
+    assert len(user_routes) == 16
     return account_routes
 
 
@@ -144,8 +144,11 @@ def check_release(baseline, package, output):
     for module in ("backend", "agent_server", "llm_provider_server", "middleware"):
         assert not git("diff", baseline + "...HEAD", "--", module + "/go.mod", module + "/go.sum")
     assert not git("diff", baseline + "...HEAD", "--", "frontend/package.json", "frontend/package-lock.json")
-    assert git("diff", "--name-only", baseline + "...HEAD", "--", "middleware", "deploy", "docker").splitlines() == ["middleware/VERSION"]
-    output.append("PASS TestChangeScope: no new dependencies; middleware only VERSION; deployment unchanged")
+    # 群聊推播：middleware 只多一個測試，nginx 多一條 SSE 路由
+    assert set(git("diff", "--name-only", baseline + "...HEAD", "--", "middleware", "deploy", "docker").splitlines()) <= {
+        "middleware/VERSION", "middleware/internal/gateway/proxy_test.go",
+        "deploy/nginx/release-edge.conf.template", "deploy/nginx/test-edge.conf.template"}
+    output.append("PASS TestChangeScope: no new dependencies; middleware code unchanged; deployment only adds the chat stream route")
     if package is None:
         return
 
@@ -176,7 +179,7 @@ def main():
     args = parser.parse_args()
     manual = MANUAL.read_text()
     check_routes(manual)
-    output = ["PASS TestAccountApiManualRoutes: 17 account routes, 14 USER routes"]
+    output = ["PASS TestAccountApiManualRoutes: 17 account routes, 16 USER routes"]
     if args.windows_package:
         assert args.baseline, "--windows-package requires --baseline"
     if args.baseline:
@@ -236,7 +239,7 @@ def main():
                 token = account["token"]
                 sample_env = env | {"BASE": base, "TOKEN": token}
                 blocks = re.findall(r'```bash\n(curl [\s\S]*?)\n```', manual)
-                assert len(blocks) == 18, len(blocks)
+                assert len(blocks) == 19, len(blocks)
                 responses = {}
                 for index, command in enumerate(blocks, 1):
                     completed = subprocess.run(["bash", "-c", command + " -w '\\n%{http_code}'"], cwd=work, env=sample_env, capture_output=True, text=True, timeout=20)
@@ -271,10 +274,11 @@ def main():
                 if args.record:
                     MANUAL.write_text(refreshed)
                 # Real token path through middleware, including USER-only and private services.
-                for path in ("/v1/accounts", "/agent/api/v1/sessions", "/llm/v1/models"):
-                    status, body = request(base, path, token)
+                for method, path in (("GET", "/v1/accounts"), ("DELETE", "/v1/messages"), ("GET", "/v1/messages/stream"),
+                                     ("GET", "/agent/api/v1/sessions"), ("GET", "/llm/v1/models")):
+                    status, body = request(base, path, token, method)
                     assert status == 403 and body["error"] == "forbidden", (path, status, body)
-                    output.append(f"PASS AccountTokenForbidden {path}: HTTP {status} {json.dumps(body, ensure_ascii=False)}")
+                    output.append(f"PASS AccountTokenForbidden {method} {path}: HTTP {status} {json.dumps(body, ensure_ascii=False)}")
                 code = re.search(r'```python\n([\s\S]*?)\n```', manual)[1]
                 script = work / "account-example.py"
                 script.write_text(code)
@@ -292,7 +296,7 @@ def main():
                 assert request(base, "/v1/orders", token)[1] == orders_before, "example traded despite existing position"
                 assert request(base, "/v1/positions/" + short["position_id"] + "/close", token, "POST", {})[0] == 200
                 output.append("PASS TestAccountApiPythonRejectsExistingPosition: fails before trading")
-                output.append("PASS TestAccountApiCurlExamples: 18/18")
+                output.append("PASS TestAccountApiCurlExamples: 19/19")
         finally:
             for process in reversed(processes):
                 if process.poll() is None:

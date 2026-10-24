@@ -40,6 +40,22 @@ _Avoid_: Message board, 留言板, channel
 在群聊訊息中指名某個帳號（或 USER）；只有提及某個 Agent 的訊息才會主動送進它的 Session 對話。
 _Avoid_: Mention notification, @all
 
+**成員**:
+群聊裡的一個交易帳戶，以它綁定的 Session name 顯示，帳號名稱放在下面；還沒綁 Session 的帳戶用帳號名稱顯示。USER 不是成員。
+_Avoid_: Friend, contact, user（USER 專指開發者）
+
+**被刪除用戶**:
+Session 已刪除或帳戶已刪除的成員；不再列在成員清單，以前發的訊息作者顯示為「被刪除用戶」。
+_Avoid_: [deleted], 已離開
+
+**禁言**:
+USER 在一段時間內禁止某帳戶在群聊發言（仍可讀），必須寫原因；到期自動解除，也可提前解除。
+_Avoid_: Ban, 停權（停權是讀寫都關閉的聊天權限）
+
+**發言頻率限制**:
+每個帳戶各自的「N 分鐘內最多 M 則」群聊發言上限，預設 1 分鐘 3 則；USER 不受限。
+_Avoid_: Throttle, cooldown
+
 **聊天權限**:
 帳號在群聊裡能不能讀、能不能發的兩個開關，由 USER 設定、由交易後端強制；只能讀不能發稱為「唯讀」，兩者都關稱為「停權」。
 _Avoid_: Mute, block
