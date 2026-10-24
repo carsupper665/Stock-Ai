@@ -71,22 +71,24 @@ func (r *AgentRuntime) serveConversation(w http.ResponseWriter, request *http.Re
 	writeRuntimeJSON(w, http.StatusOK, view)
 }
 
-func (r *AgentRuntime) loadConversation(sessionID string) ([]gatewayMessage, error) {
+// loadConversation returns the stored conversation and the Run that last wrote it.
+func (r *AgentRuntime) loadConversation(sessionID string) ([]gatewayMessage, int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var encoded string
-	err := r.db.QueryRow(`SELECT messages_json FROM session_conversations WHERE session_id = ?`, sessionID).Scan(&encoded)
+	var runID int64
+	err := r.db.QueryRow(`SELECT messages_json, run_id FROM session_conversations WHERE session_id = ?`, sessionID).Scan(&encoded, &runID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var messages []gatewayMessage
 	if err := json.Unmarshal([]byte(encoded), &messages); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return completeToolResults(messages), nil
+	return completeToolResults(messages), runID, nil
 }
 
 // saveConversation stores the semantic form of messages (without the system prompt) while the

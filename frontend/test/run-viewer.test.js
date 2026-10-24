@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
 
-import { conversation } from '../src/shared/run.js'
+import { contextUse, conversation } from '../src/shared/run.js'
 import Runs from '../src/pages/session-detail/Runs.vue'
 import { session } from '../src/core/session.js'
 
@@ -249,32 +249,83 @@ it('labels a unified position_close trigger with identity and only an evidenced 
   expect(document.body.textContent).not.toContain('TP_hit')
 })
 
-it('shows the inbox delivered at Run start and the full initial context', async () => {
+it('shows the wake-up message on the right with its tags and the full message on demand', async () => {
   const root = mountRuns({ run_id: 7, status: 'completed', trigger: 'event', progress: [], start_time: '2026-10-23T01:00:00Z',
-    initial_context: { trigger: 'event', inbox: { messages: [
+    initial_context: { trigger: 'event', account_snapshot: { ok: true, user_name: '1000u_p3', balance: 990 }, inbox: { messages: [
       { id: 'msg_1', user_name: 'car', content: '看得到這則嗎？', tags: ['1000u_p3'], created_at: '2026-10-23T00:58:00Z' },
     ] } } })
   await nextTick()
 
-  expect(root.textContent).toContain('1 則')
-  expect(root.textContent).toContain('car → @1000u_p3')
-  expect(root.textContent).toContain('看得到這則嗎？')
-  expect(root.querySelector('.context pre').textContent).toContain('"inbox"')
+  const wake = root.querySelector('.bubble.in')
+  expect(wake.textContent).toContain('喚醒訊息')
+  expect(wake.textContent).toContain('1000u_p3 · balance 990')
+  expect(wake.textContent).toContain('car → @1000u_p3')
+  expect(wake.textContent).toContain('看得到這則嗎？')
+  expect(wake.querySelector('.context pre').textContent).toContain('"inbox"')
 })
 
-it('says when a Run had no inbox, could not read it, or has no initial context recorded', async () => {
+it('says when a Run had no tags, could not read them, or has no wake-up message recorded', async () => {
   const root = mountRuns({ run_id: 8, status: 'completed', trigger: 'event', progress: [], initial_context: { trigger: 'event' } })
   await nextTick()
-  expect(root.textContent).toContain('沒有上一個 Run 之後 tag 給這個帳號的留言')
+  expect(root.textContent).toContain('沒有上一個 Run 之後 tag 給這個帳號的群聊訊息')
   app.unmount()
 
   const failed = mountRuns({ run_id: 9, status: 'completed', trigger: 'event', progress: [],
     initial_context: { inbox: { ok: false, error: { code: 'BACKEND_UNAVAILABLE', message: 'Backend message request failed' } } } })
   await nextTick()
-  expect(failed.textContent).toContain('讀取失敗 · BACKEND_UNAVAILABLE')
+  expect(failed.textContent).toContain('群聊 tag 讀取失敗 · BACKEND_UNAVAILABLE')
   app.unmount()
 
   const old = mountRuns({ run_id: 10, status: 'completed', trigger: 'event', progress: [], initial_context: null })
   await nextTick()
   expect(old.textContent).toContain('這個 Run 沒有記錄喚醒訊息。')
+})
+
+it('puts messages brought to the model on the right, decisions on the left and notices in the middle', () => {
+  const items = conversation({ status: 'completed', trigger: 'session_restart', initial_context: { trigger: 'session_restart' }, progress: [
+    { type: 'conversation_resume', result: { ok: true, result: { from_run_id: 3, messages: 12, estimated_tokens: 4200 } } },
+    { type: 'model_call', iteration: 1, content: 'checking', tool_calls: [{ id: 'a', name: 'get_account' }], ended_at: 'x' },
+    { type: 'tool_call', tool_call_id: 'a', tool_name: 'get_account', result: { ok: true, result: {} }, ended_at: 'x' },
+    { type: 'chat_mention', content: JSON.stringify({ messages: [{ id: 'm', user_name: 'car', content: 'hi', tags: ['me'], created_at: 'x' }] }), started_at: 'x' },
+    { type: 'context_compaction', result: { ok: true, result: { stage: 'rules' } } },
+    { type: 'instruction', content: 'Terminal instruction (x)' },
+  ] })
+  expect(items.map((item) => `${item.kind}:${item.side}`)).toEqual(['resume:in', 'wake:in', 'model:llm', 'mention:in', 'notice:notice', 'notice:notice'])
+  expect(items[0]).toMatchObject({ fromRun: 3, messages: 12, tokens: 4200 })
+  expect(items[3].messages[0].content).toBe('hi')
+})
+
+it('shows what the agent posted to the group chat as a chat bubble', async () => {
+  const root = mountRuns({ run_id: 11, status: 'completed', trigger: 'event', initial_context: { trigger: 'event' }, progress: [
+    { type: 'model_call', iteration: 1, content: null, tool_calls: [{ id: 'p', name: 'post_chat' }], ended_at: 'x' },
+    { type: 'tool_call', tool_call_id: 'p', tool_name: 'post_chat', arguments: { content: '回報：get_ohlcv 一直逾時', tags: ['USER'] }, result: { ok: true, result: { id: 'msg_9' } }, ended_at: 'x' },
+  ] })
+  await nextTick()
+  const posted = root.querySelector('.bubble.llm .posted')
+  expect(posted.textContent).toContain('在群聊說（@USER）')
+  expect(posted.textContent).toContain('回報：get_ohlcv 一直逾時')
+})
+
+it('folds the same tool failing the same way in a row into one line with a count', () => {
+  const progress = []
+  for (let n = 1; n <= 5; n++) {
+    progress.push({ type: 'model_call', iteration: n, content: null, tool_calls: [{ id: `b${n}`, name: 'bogus_tool' }], ended_at: 'x' })
+    progress.push({ type: 'tool_call', tool_call_id: `b${n}`, tool_name: 'bogus_tool', result: { ok: false, error: { code: 'UNKNOWN_TOOL', message: 'no' } }, ended_at: 'x' })
+  }
+  progress.push({ type: 'model_call', iteration: 6, content: 'giving up', tool_calls: [], ended_at: 'x' })
+  const items = conversation({ status: 'completed', progress })
+  expect(items).toHaveLength(2)
+  expect(items[0].tools).toHaveLength(1)
+  expect(items[0].tools[0].repeated).toBe(5)
+  expect(items[1].content).toBe('giving up')
+})
+
+it('measures how full the context is from the last model call, preferring reported usage', () => {
+  const call = (extra) => ({ type: 'model_call', context_tokens: 30000, context_window: 100000, ...extra })
+  expect(contextUse({ progress: [call({ usage: { input_tokens: 40000, output_tokens: 2000 } })] })).toMatchObject({ tokens: 42000, percent: 42, estimated: false, warn: false })
+  expect(contextUse({ progress: [call({})] })).toMatchObject({ tokens: 30000, percent: 30, estimated: true })
+  // A CLI Harness reports usage summed over its own turns; past the window the estimate is used.
+  expect(contextUse({ progress: [call({ usage: { input_tokens: 400000, output_tokens: 10 } })] })).toMatchObject({ tokens: 30000, estimated: true })
+  expect(contextUse({ progress: [call({ context_tokens: 85000 }), { type: 'context_compaction' }] })).toMatchObject({ warn: true, compactions: 1 })
+  expect(contextUse({ progress: [{ type: 'model_call' }] })).toBeNull()
 })

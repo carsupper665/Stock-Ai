@@ -45,13 +45,13 @@ it('uses the live text for the model call that is still streaming and the stored
     { type: 'model_resolution' },
     { type: 'model_call', iteration: 1, started_at: 'x' },
   ]), live)
-  expect(streaming[0]).toMatchObject({ content: 'Look', reasoning: 'Check the\nprice', thinking: true })
+  expect(streaming.find((item) => item.kind === 'model')).toMatchObject({ content: 'Look', reasoning: 'Check the\nprice', thinking: true })
 
   const ended = conversation(runningRun([
     { type: 'model_resolution' },
     { type: 'model_call', iteration: 1, started_at: 'x', ended_at: 'y', content: 'Final text', tool_calls: [] },
   ]), live)
-  expect(ended[0]).toMatchObject({ content: 'Final text', reasoning: '', thinking: false })
+  expect(ended.find((item) => item.kind === 'model')).toMatchObject({ content: 'Final text', reasoning: '', thinking: false })
 })
 
 it('streams the open model call into the Run view and asks for a refresh when the Run ends', async () => {

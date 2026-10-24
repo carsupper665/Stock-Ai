@@ -91,11 +91,23 @@ func TestTagArrivingDuringRunIsDeliveredBeforeTheNextDecisionOnce(t *testing.T) 
 		messageFixtureJSON(w, http.StatusOK, map[string]any{"content": finalizationContent("seen", "seen"), "tool_calls": []any{}, "finish_reason": "stop"})
 	}
 	runtime := fixture.open(t)
-	if _, run := startMessageRun(t, runtime); run.Status != "completed" {
+	_, run := startMessageRun(t, runtime)
+	if run.Status != "completed" {
 		t.Fatalf("Run = %+v", run)
 	}
 	if len(mentions) != 3 || mentions[0] != 0 || mentions[1] != 1 || mentions[2] != 1 {
 		t.Fatalf("mention occurrences per request = %v, want 0,1,1", mentions)
+	}
+	var trace []map[string]any
+	_ = json.Unmarshal(run.Progress, &trace)
+	recorded := 0
+	for _, entry := range trace {
+		if content, _ := entry["content"].(string); entry["type"] == "chat_mention" && strings.Contains(content, "please check ETH") && !strings.HasPrefix(content, "[Group chat]") {
+			recorded++
+		}
+	}
+	if recorded != 1 {
+		t.Fatalf("the delivered tag must be recorded once in the Run trace: %s", run.Progress)
 	}
 }
 

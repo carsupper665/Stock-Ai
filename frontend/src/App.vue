@@ -18,6 +18,15 @@ const active = computed(() => route.meta.parent ?? route.name)
 
 const themes = [['', '跟系統'], ['light', '亮色'], ['dark', '暗色']]
 const theme = ref(localStorage.getItem('theme') ?? '')
+// 側欄可收起，讓內容區（例如 Run 明細）更寬；瀏覽器不能存設定時每次都從展開開始
+const sidebarKey = 'sidebar'
+const sidebarHidden = ref(false)
+try { sidebarHidden.value = localStorage.getItem(sidebarKey) === 'hidden' } catch { /* 無法讀取就維持展開 */ }
+function toggleSidebar() {
+  sidebarHidden.value = !sidebarHidden.value
+  try { localStorage.setItem(sidebarKey, sidebarHidden.value ? 'hidden' : 'shown') } catch { /* 只影響下次開啟 */ }
+}
+
 function cycleTheme() {
   const i = themes.findIndex(([v]) => v === theme.value)
   theme.value = themes[(i + 1) % themes.length][0]
@@ -66,7 +75,7 @@ watch(() => [sync.key, isAuthenticated()], probeAll)
 
 <template>
   <div v-if="isAuthenticated()" id="shell">
-    <aside>
+    <aside v-show="!sidebarHidden">
       <div class="row logo"><i class="dot square" data-tone="acc"></i><b>Agent 控制台</b></div>
       <div class="col services">
         <div class="eyebrow">服務狀態</div>
@@ -99,6 +108,7 @@ watch(() => [sync.key, isAuthenticated()], probeAll)
     <main>
       <header>
         <div class="row grow">
+          <button class="text" :aria-expanded="!sidebarHidden" :aria-label="sidebarHidden ? '展開側欄' : '收起側欄'" :title="sidebarHidden ? '展開側欄' : '收起側欄'" @click="toggleSidebar">☰</button>
           <h2>{{ route.meta.title }}</h2>
           <span class="note ellipsis">{{ route.meta.sub }}</span>
         </div>

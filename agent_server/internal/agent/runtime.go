@@ -177,7 +177,11 @@ type traceEntry struct {
 	ContextOriginalBytes  int             `json:"context_original_bytes,omitempty"`
 	ContextProjectedBytes int             `json:"context_projected_bytes,omitempty"`
 	ContextCompacted      int             `json:"context_compacted_messages,omitempty"`
-	CountsAsDecision      bool            `json:"counts_as_decision,omitempty"`
+	// ContextTokens estimates the request this model call sent; with ContextWindow it shows how
+	// full the context is.
+	ContextTokens    int   `json:"context_tokens,omitempty"`
+	ContextWindow    int64 `json:"context_window,omitempty"`
+	CountsAsDecision bool  `json:"counts_as_decision,omitempty"`
 }
 
 func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {

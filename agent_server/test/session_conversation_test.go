@@ -27,9 +27,21 @@ func TestNextRunContinuesTheSessionConversationWithReadResultsAsDigests(t *testi
 	runtime, _, _ := fixture.open(t, "")
 	session := createStoppedSession(t, runtime, nil)
 	startSessionForTest(t, runtime, session.ID)
-	waitForRunStatus(t, runtime, session.ID, 1, "completed")
+	first := waitForRunStatus(t, runtime, session.ID, 1, "completed")
 	restartSessionRun(t, runtime, session.ID)
-	waitForRunStatus(t, runtime, session.ID, 2, "completed")
+	second := waitForRunStatus(t, runtime, session.ID, 2, "completed")
+
+	var firstTrace, secondTrace []map[string]any
+	_ = json.Unmarshal(first.Progress, &firstTrace)
+	_ = json.Unmarshal(second.Progress, &secondTrace)
+	if firstTrace[0]["type"] != "model_call" || firstTrace[0]["context_tokens"] == nil || firstTrace[0]["context_window"] != float64(128000) {
+		t.Fatalf("Run 1 must start with a model call recording its context use: %+v", firstTrace[0])
+	}
+	resume, _ := secondTrace[0]["result"].(map[string]any)
+	detail, _ := resume["result"].(map[string]any)
+	if secondTrace[0]["type"] != "conversation_resume" || detail["from_run_id"] != float64(1) || detail["messages"] != float64(5) {
+		t.Fatalf("Run 2 must record which conversation it continued: %+v", secondTrace[0])
+	}
 
 	script.mu.Lock()
 	defer script.mu.Unlock()

@@ -116,7 +116,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 	encodedContext, _ := json.Marshal(contextBody)
 	userPrompt := string(encodedContext)
 	// The Run continues the Session conversation: earlier Runs, then this Run's wake-up message.
-	conversation, err := r.loadConversation(session.ID)
+	conversation, fromRunID, err := r.loadConversation(session.ID)
 	if err != nil {
 		r.handleRunPersistenceError(session.ID, runID, err)
 		return
@@ -124,6 +124,11 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 	messages := append([]gatewayMessage{{Role: "system", Content: &systemPrompt}}, conversation...)
 	messages = append(messages, gatewayMessage{Role: "user", Content: &userPrompt})
 	progress := make([]traceEntry, 0)
+	if len(conversation) != 0 {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		progress = append(progress, traceEntry{Type: "conversation_resume", StartedAt: now, EndedAt: &now,
+			Result: tools.SuccessResult(map[string]any{"from_run_id": fromRunID, "messages": len(conversation), "estimated_tokens": estimateTokens(conversation)})})
+	}
 	modelCalls, toolCalls, decisions := 0, 0, 0
 	finalizing, finalizationAttempts := false, 0
 	continuation := &continuationState{}
@@ -193,7 +198,16 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		if !finalizing && decisions > 0 && accountErr == nil {
 			if mention := r.chatMentions(ctx, session.ID, runID, account); mention != nil {
 				messages = append(messages, *mention)
+				now := time.Now().UTC().Format(time.RFC3339Nano)
+				delivered := strings.TrimPrefix(*mention.Content, chatMentionHeader+"\n")
+				progress = append(progress, traceEntry{Type: "chat_mention", Content: &delivered, StartedAt: now, EndedAt: &now})
 				if !saveConversation() {
+					return
+				}
+				if updated, err := r.updateRunProgress(session.ID, runID, modelCalls, toolCalls, progress); err != nil {
+					r.handleRunPersistenceError(session.ID, runID, err)
+					return
+				} else if !updated {
 					return
 				}
 			}
@@ -426,6 +440,10 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 		}
 		return gatewayResponse{}, 0, false
 	}
+	contextTokens, window := estimateContextTokens(projection.Messages, definitions), model.ContextWindow
+	if window <= 0 {
+		window = defaultContextWindow
+	}
 	for attempt := 1; attempt <= attemptLimit; attempt++ {
 		if ctx.Err() != nil {
 			return gatewayResponse{}, attempt - 1, false
@@ -446,7 +464,7 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 			ProviderID: model.ProviderID, Model: model.Model,
 			StartedAt: started.UTC().Format(time.RFC3339Nano), ConversationID: session.ID + "/" + strconv.FormatInt(runID, 10),
 			ContextOriginalBytes: projection.OriginalBytes, ContextProjectedBytes: projection.ProjectedBytes,
-			ContextCompacted: projection.Compacted,
+			ContextCompacted: projection.Compacted, ContextTokens: contextTokens, ContextWindow: window,
 		})
 		updated, updateErr := r.updateRunProgress(session.ID, runID, *modelCalls, toolCalls, *progress)
 		if updateErr != nil {

@@ -3,7 +3,7 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { downloadHistory, getRun, retryRun, runStreamURL } from './api.js'
 
 import { duration, fmtClock, tone } from '../../shared/format.js'
-import { conversation, explainError } from '../../shared/run.js'
+import { contextUse, conversation, explainError, shortTokens } from '../../shared/run.js'
 import { say } from '../../shared/toast.js'
 
 const props = defineProps({ session: Object, runs: Array, page: Number, initial: String })
@@ -147,22 +147,10 @@ async function saveHistory() {
   catch (e) { if (request === historyRequest) historyError.value = e.message }
   finally { if (request === historyRequest) historyLoading.value = false }
 }
-// event Run 帶 triggers[]（最多 10 個）；其他 Run 只有一個 trigger 字串
-// initial_context 是這個 Run 的喚醒訊息（接在 Session 對話尾端）；inbox 是 Run 開始時 tag 給這個帳號的新留言，
-// 讀取失敗時會是 Tool Error（{ok:false,error}）
-const contextOf = (r) => (r.initial_context && typeof r.initial_context === 'object' ? r.initial_context : null)
-const inboxOf = (r) => contextOf(r)?.inbox ?? null
-const contextText = (r) => JSON.stringify(contextOf(r), null, 2)
 const triggersOf = (r) => (Array.isArray(r.triggers) && r.triggers.length ? r.triggers : null)
 const triggerLabel = (r) => triggersOf(r)?.map((t) => t.type).join(' · ') ?? r.trigger
-const meanings = { session_start: '第一次啟動', session_restart: '停止後重新啟動', server_recovery: 'Server 重啟後恢復', manual_retry: '使用者對失敗的 Run 重試', event: 'Event 觸發' }
-function matchedText(t) {
-  const m = t.matched ?? {}
-  if (t.type === 'timer') return `at ${fmtClock(m.at)}`
-  if (t.type === 'position_close') return [`position ${m.position_id}`, m.symbol, m.product, m.side, m.close_reason ? `reason ${m.close_reason}` : null].filter(Boolean).join(' · ')
-  const parts = [m.condition, m.price != null ? `price ${m.price}` : null, m.change_pct != null ? `change ${m.change_pct.toFixed(2)}%` : null]
-  return parts.filter(Boolean).join(' · ')
-}
+const usage = computed(() => contextUse(run.value))
+const conversationLink = computed(() => ({ name: 'session-detail', params: { id: props.session.id }, query: { tab: 'conversation' } }))
 </script>
 
 <template>
@@ -214,40 +202,40 @@ function matchedText(t) {
       </div>
 
       <div ref="chat" class="chat">
-        <div class="wake">
-          <span class="eyebrow">喚醒原因</span>
-          <template v-if="triggersOf(run)">
-            <div v-for="(t, i) in triggersOf(run)" :key="i" class="row trigger">
-              <span class="mono type" data-tone="acc">{{ t.type }}</span>
-              <span class="mono grow" data-tone="dim">{{ matchedText(t) }} · 由 Run #{{ t.created_run_id }} 建立 · {{ fmtClock(t.fired_at) }}</span>
+        <template v-for="item in history" :key="item.key">
+          <p v-if="item.kind === 'notice'" class="notice" :data-tone="item.tone">{{ item.text }}</p>
+          <article v-else-if="item.kind === 'resume'" class="bubble in">
+            <div class="who"><b>接續上段對話</b></div>
+            <div class="text">接在 Run #{{ item.fromRun }} 之後，帶入 {{ item.messages }} 則訊息、約 {{ shortTokens(item.tokens ?? 0) }} tokens。<RouterLink :to="conversationLink">查看對話</RouterLink></div>
+          </article>
+          <article v-else-if="item.kind === 'wake'" class="bubble in">
+            <div class="who"><b>喚醒訊息</b><span v-if="item.account" class="mono small" data-tone="mute">{{ item.account }}</span></div>
+            <div v-for="(reason, i) in item.reasons" :key="i" class="row reason">
+              <span class="mono" data-tone="acc">{{ reason.type }}</span>
+              <span class="mono small" data-tone="dim">{{ reason.text }}</span>
             </div>
-          </template>
-          <div v-else class="row trigger">
-            <span class="mono type" data-tone="acc">{{ run.trigger }}</span>
-            <span data-tone="dim">{{ meanings[run.trigger] ?? '' }}</span>
-          </div>
-          <template v-if="contextOf(run)">
-            <div class="row trigger">
-              <span class="mono type" data-tone="acc">inbox</span>
-              <span v-if="!inboxOf(run)" data-tone="dim">沒有上一個 Run 之後 tag 給這個帳號的留言</span>
-              <span v-else-if="inboxOf(run).error" data-tone="neg">讀取失敗 · {{ inboxOf(run).error.code }} · {{ inboxOf(run).error.message }}</span>
-              <span v-else data-tone="dim">{{ inboxOf(run).messages.length }} 則{{ inboxOf(run).has_more ? '（還有更多未送進來）' : '' }}</span>
-            </div>
-            <div v-for="m in inboxOf(run)?.messages ?? []" :key="m.id" class="inbox-message">
+            <p v-if="!item.inbox" class="small" data-tone="mute">這個 Run 沒有記錄喚醒訊息。</p>
+            <p v-else-if="item.inbox.error" class="small" data-tone="neg">群聊 tag 讀取失敗 · {{ item.inbox.error.code }} · {{ item.inbox.error.message }}</p>
+            <p v-else-if="!item.inbox.messages.length" class="small" data-tone="mute">沒有上一個 Run 之後 tag 給這個帳號的群聊訊息</p>
+            <div v-for="m in item.inbox?.messages ?? []" :key="m.id" class="chat-line">
               <span class="mono small" data-tone="mute">{{ fmtClock(m.created_at) }} · {{ m.user_name }} → {{ m.tags.map((t) => '@' + t).join(' ') }}</span>
               <div>{{ m.content }}</div>
             </div>
-            <details class="context">
-              <summary>喚醒訊息（這個 Run 接在 Session 對話尾端的訊息）</summary>
-              <pre class="mono small">{{ contextText(run) }}</pre>
+            <p v-if="item.inbox?.more" class="small" data-tone="mute">還有更多 tag 未送進來</p>
+            <details v-if="item.full" class="context">
+              <summary>完整喚醒訊息</summary>
+              <pre class="mono small">{{ item.full }}</pre>
             </details>
-          </template>
-          <p v-else class="note">這個 Run 沒有記錄喚醒訊息。</p>
-        </div>
-
-        <template v-for="item in history" :key="item.key">
-          <p v-if="item.kind === 'notice'" class="notice" :data-tone="item.tone">{{ item.text }}</p>
-          <article v-else class="message">
+          </article>
+          <article v-else-if="item.kind === 'mention'" class="bubble in">
+            <div class="who"><b>群聊 tag</b><span class="mono small" data-tone="mute">{{ fmtClock(item.at) }} · Run 進行中送進來</span></div>
+            <div v-for="m in item.messages" :key="m.id" class="chat-line">
+              <span class="mono small" data-tone="mute">{{ fmtClock(m.created_at) }} · {{ m.user_name }} → {{ m.tags.map((t) => '@' + t).join(' ') }}</span>
+              <div>{{ m.content }}</div>
+            </div>
+            <div v-if="item.raw" class="text">{{ item.raw }}</div>
+          </article>
+          <article v-else class="bubble llm message">
             <div class="who"><span class="avatar" aria-hidden="true">AI</span><b>{{ item.title }}</b><span data-tone="mute">{{ item.meta }}</span></div>
             <div v-if="item.error" class="callout" data-tone="neg"><span class="mono">{{ item.error.code }}</span> · {{ item.error.message }}</div>
             <details v-if="item.reasoning" class="reasoning">
@@ -259,25 +247,39 @@ function matchedText(t) {
               <span class="eyebrow">最終決策</span>
               <dl class="kv"><template v-for="(field, index) in item.envelope" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl>
             </div>
-            <details v-for="tool in item.tools" :key="tool.key" class="tool" :data-status="tool.status" :data-action="tool.action ? '' : null">
+            <template v-for="tool in item.tools" :key="tool.key">
+            <div v-if="tool.chat" class="posted" :data-status="tool.status">
+              <span class="mono small" data-tone="mute">在群聊說{{ tool.chat.tags.length ? '（' + tool.chat.tags.map((t) => '@' + t).join(' ') + '）' : '' }}</span>
+              <div>{{ tool.chat.content }}</div>
+              <span v-if="tool.chat.error" class="mono small" data-tone="neg">沒有送出 · {{ tool.chat.error }}</span>
+            </div>
+            <details v-else class="tool" :data-status="tool.status" :data-action="tool.action ? '' : null">
               <summary>
                 <span v-if="tool.status === 'running'" class="spinner" aria-label="執行中"></span>
                 <span v-else class="icon" aria-hidden="true">{{ icons[tool.status] }}</span>
                 <b>{{ tool.label }}</b>
                 <span class="mono" data-tone="mute">{{ tool.name }}</span>
+                <span v-if="tool.repeated > 1" class="tag" data-tone="neg">×{{ tool.repeated }}</span>
                 <span class="grow"></span>
                 <span v-if="tool.duration != null" class="mono small" data-tone="mute">{{ tool.duration }} ms</span>
               </summary>
               <div class="tool-body">
                 <div v-if="tool.args.length"><span class="eyebrow">參數</span><dl class="kv"><template v-for="(field, index) in tool.args" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl></div>
                 <div v-if="tool.result.length"><span class="eyebrow">結果</span><dl class="kv"><template v-for="(field, index) in tool.result" :key="index"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></template></dl></div>
+                <p v-if="tool.repeated > 1" class="note">同樣的錯誤連續發生 {{ tool.repeated }} 次，只顯示第一次。</p>
               </div>
             </details>
+            </template>
             <div v-if="item.thinking" class="thinking" role="status"><span>思考中</span><i></i><i></i><i></i></div>
             <p v-if="!item.thinking && !item.error && !item.reasoning && !item.content && !item.envelope && !item.tools.length" class="note">這次模型回應沒有可顯示的內容。</p>
           </article>
         </template>
         <p v-if="!history.length" class="note">還沒有任何模型呼叫。</p>
+        <div v-if="usage" class="context-use" :data-warn="usage.warn ? '' : null" :title="usage.estimated ? 'Agent Server 的估計值' : 'Provider 回報的用量'">
+          <svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15" class="track" /><circle cx="18" cy="18" r="15" class="fill" :stroke-dasharray="`${usage.percent * 0.9425} 94.25`" /></svg>
+          <span class="mono small">{{ shortTokens(usage.tokens) }} / {{ shortTokens(usage.window) }}（{{ usage.percent }}%）{{ usage.estimated ? ' 估' : '' }}</span>
+          <span v-if="usage.compactions" class="mono small" data-tone="mute">已壓縮 {{ usage.compactions }} 次</span>
+        </div>
       </div>
     </section>
     <div v-else class="card detail note" :role="runError ? 'alert' : null">{{ runError || (selected ? '載入選定 Run…' : '左邊選一個 Run 看明細') }}</div>
@@ -334,19 +336,10 @@ function matchedText(t) {
   overflow: auto;
   padding: 4px 8px 12px 2px;
 }
-.wake {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px dashed var(--line2);
-  border-radius: 8px;
+.reason {
+  gap: 8px;
 }
-.trigger {
-  padding: 2px 0;
-}
-.inbox-message {
-  margin-left: 140px;
+.chat-line {
   padding: 4px 0 4px 10px;
   border-left: 2px solid var(--line2);
 }
@@ -362,15 +355,69 @@ function matchedText(t) {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.type {
-  width: 132px;
-  flex: none;
-}
-.message {
+/* 聊天室：LLM 在左，帶進給它的訊息在右 */
+.bubble {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 780px;
+  max-width: 82%;
+  min-width: 0;
+}
+.bubble.llm {
+  align-self: flex-start;
+}
+.bubble.in {
+  align-self: flex-end;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px 12px 4px 12px;
+  background: var(--accw);
+}
+.posted {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 12px 12px 12px 4px;
+  background: var(--surf2);
+  border: 1px solid var(--acc);
+}
+.posted[data-status='error'],
+.posted[data-status='denied'] {
+  border-color: var(--neg);
+}
+.context-use {
+  position: sticky;
+  bottom: 0;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surf);
+}
+.context-use svg {
+  width: 18px;
+  height: 18px;
+  transform: rotate(-90deg);
+}
+.context-use circle {
+  fill: none;
+  stroke-width: 4;
+}
+.context-use .track {
+  stroke: var(--line2);
+}
+.context-use .fill {
+  stroke: var(--acc);
+}
+.context-use[data-warn] .fill {
+  stroke: var(--warn);
+}
+.context-use[data-warn] > span:first-of-type {
+  color: var(--warn);
 }
 .who {
   display: flex;
@@ -533,8 +580,8 @@ function matchedText(t) {
   }
 }
 @media (max-width: 640px) {
-  .inbox-message {
-    margin-left: 0;
+  .bubble {
+    max-width: 100%;
   }
 }
 </style>
