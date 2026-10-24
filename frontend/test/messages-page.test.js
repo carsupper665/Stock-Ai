@@ -410,6 +410,25 @@ it('F7 單則刪除、多選刪除與清空（要輸入「清空」才送出）�
   expect(messageCalls()).toHaveLength(1)
 })
 
+it('成員資料還沒回來時顯示載入中，不會先說沒有帳戶', async () => {
+  let release
+  const accounts = new Promise((resolve) => { release = resolve })
+  const original = fetch.getMockImplementation()
+  fetch.mockImplementation((url, request) => url === '/v1/accounts' ? accounts.then(() => original(url, request)) : original(url, request))
+  const Confirm = (await import('../src/shared/Confirm.vue')).default
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: page }, { path: '/sessions/:id', name: 'session-detail', component: { render: () => null } }] })
+  root = document.createElement('div')
+  document.body.append(root)
+  app = createApp(defineComponent({ render: () => [h(page), h(Confirm)] }))
+  app.use(router)
+  app.mount(root)
+  await nextTick()
+  expect(document.querySelector('.member-pane').textContent).toContain('載入中…')
+  expect(document.querySelector('.member-pane').textContent).not.toContain('還沒有交易帳戶')
+  release()
+  await vi.waitFor(() => expect(document.querySelector('.member-pane .member')).toBeTruthy())
+})
+
 it('E2 點成員與右鍵「管理使用者」打開同一個彈窗，顯示名稱、帳號、Session 與帳戶狀態', async () => {
   await mount()
   const names = [...document.querySelectorAll('.member-pane .member b')].map((el) => el.textContent)

@@ -209,6 +209,7 @@ async function clearAll() {
     <div class="member-pane">
       <div class="pane-title">成員 <span class="mono" data-tone="mute">{{ everyone.length }}</span></div>
       <p v-if="error" class="callout" data-tone="neg">{{ error.message }}</p>
+      <p v-else-if="!data" class="note loading">載入中…</p>
       <MemberList v-else :members="directory.members" :unbound="directory.unbound" @open="openMember" />
     </div>
 
@@ -245,6 +246,7 @@ async function clearAll() {
 
       <div v-if="membersOpen" class="member-sheet narrow-only">
         <p v-if="error" class="callout" data-tone="neg">{{ error.message }}</p>
+        <p v-else-if="!data" class="note loading">載入中…</p>
         <MemberList v-else :members="directory.members" :unbound="directory.unbound" @open="openMember" />
       </div>
 
@@ -304,7 +306,7 @@ async function clearAll() {
 .messages-page { flex: 1; min-height: 0; padding: 0; gap: 0; display: grid; grid-template-columns: 340px minmax(0, 1fr); overflow: hidden; }
 .member-pane { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; background: var(--surf); border-right: 1px solid var(--line); }
 .pane-title { padding: 16px 16px 8px; font-weight: 700; font-size: 17px; }
-.member-pane .callout { margin: 0 16px; }
+.member-pane .callout, .loading { margin: 0 16px; }
 .chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); position: relative; }
 .chat-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surf); border-bottom: 1px solid var(--line); }
 .title { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 4px; }
