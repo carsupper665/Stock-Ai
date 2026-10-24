@@ -145,7 +145,8 @@ def check_release(baseline, package, output):
         assert not git("diff", baseline + "...HEAD", "--", module + "/go.mod", module + "/go.sum")
     assert not git("diff", baseline + "...HEAD", "--", "frontend/package.json", "frontend/package-lock.json")
     # 群聊推播：middleware 只多一個測試，nginx 多一條 SSE 路由
-    assert set(git("diff", "--name-only", baseline + "...HEAD", "--", "middleware", "deploy", "docker").splitlines()) <= {
+    deployment_changes = git("diff", "--name-only", baseline + "...HEAD", "--", "middleware", "deploy", "docker").splitlines()
+    assert set(deployment_changes) <= {
         "middleware/VERSION", "middleware/internal/gateway/proxy_test.go",
         "deploy/nginx/release-edge.conf.template", "deploy/nginx/test-edge.conf.template"}
     output.append("PASS TestChangeScope: no new dependencies; middleware code unchanged; deployment only adds the chat stream route")
@@ -165,7 +166,7 @@ def check_release(baseline, package, output):
     report = {"windows_package": str(package), "versions": {name: (ROOT / name / "VERSION").read_text().splitlines()[0]
               for name in ("backend", "agent_server", "frontend")}, "executables": executables,
               "web_files_equal": True, "web_file_count": len(hashes(package / "web")), "public_api_fields_additive": True,
-              "no_dependency_changes": True, "middleware_deployment_changes": ["middleware/VERSION (dependency versions only)"]}
+              "no_dependency_changes": True, "middleware_deployment_changes": deployment_changes}
     (ROOT / "docs/api/windows-test-package.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     output.append("PASS TestWindowsPackageMatchesBuild: all web hashes match; four valid Windows executables")
 
