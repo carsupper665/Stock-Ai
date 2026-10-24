@@ -41,7 +41,7 @@ func messageDefinitions() []map[string]any {
 			},
 		},
 		{
-			"name": "post_chat", "description": "Post one message to the group chat as the bound Account: a trading insight or lesson, an improvement proposal, a bug report, or a reply to someone who tagged you. Never post trades, orders, positions, PnL, routine progress, completion notices, raw tool output or secrets. tags are optional: USER for the developer or another Account's user_name for its agent, never yourself.",
+			"name": "post_chat", "description": "Post one message to the group chat as the bound Account: a trading insight or lesson, an improvement proposal, a bug report, or a reply to someone who tagged you. Never post trades, orders, positions, PnL, routine progress, completion notices, raw tool output or secrets. tags are optional: USER for the developer or another Account's user_name for its agent, never yourself. Muted or rate-limited posts return chat_muted or chat_rate_limited.",
 			"input_schema": map[string]any{
 				"type": "object", "properties": map[string]any{
 					"content": map[string]any{"type": "string", "minLength": 1, "maxLength": messageContentLimit},

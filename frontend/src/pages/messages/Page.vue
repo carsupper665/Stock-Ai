@@ -1,4 +1,5 @@
 <script setup>
+import Members from './Members.vue'
 import { computed, onUnmounted, ref } from 'vue'
 
 import { useLoad } from '../../core/load.js'
@@ -17,10 +18,20 @@ const selectedIds = ref([])
 const bulkDeleting = ref(false)
 let listGeneration = 0
 let disposed = false
+let accountGeneration = 0
+const now = ref(Date.now())
+const clock = setInterval(() => { now.value = Date.now() }, 30000)
 const { data, error, loading, reload } = useLoad(async () => {
   const [messages, accounts] = await Promise.all([listMessages({ tag: tagFilter.value, sort: sort.value }), listAccounts()])
   return { ...messages, accounts: accounts.accounts ?? [] }
 })
+function accountChanged(account) {
+  now.value = Date.now()
+  accountGeneration++
+  if (!data.value) return
+  data.value.accounts = data.value.accounts.map((item) => item.id === account.id ? account : item)
+}
+
 const all = computed(() => [...(data.value?.messages ?? []), ...extra.value])
 
 function exitSelection() {
@@ -57,6 +68,10 @@ async function loadMore() {
 
 // 群聊每 5 秒重抓第一頁；翻頁、選取或操作中就先不動，避免畫面跳動
 const poll = setInterval(async () => {
+  const accountRequest = accountGeneration
+  listAccounts().then((accounts) => {
+    if (!disposed && data.value && accountRequest === accountGeneration) data.value.accounts = accounts.accounts ?? []
+  }).catch(() => {})
   if (page.value !== 1 || extra.value.length || selectionMode.value || busy.value || bulkDeleting.value || deleting.value || loading.value || !data.value) return
   const generation = listGeneration
   try {
@@ -69,7 +84,7 @@ const poll = setInterval(async () => {
   }
 }, 5000)
 
-onUnmounted(() => { disposed = true; listGeneration++; clearInterval(poll) })
+onUnmounted(() => { disposed = true; listGeneration++; clearInterval(poll); clearInterval(clock) })
 
 function kind(message) {
   if (message.user_name === 'you') return { label: 'you · USER', tone: 'acc', mark: 'acc' }
@@ -175,7 +190,7 @@ async function remove(message) {
 </script>
 
 <template>
-  <article>
+  <article class="messages-page">
     <div class="col board">
       <section class="card col compose">
         <textarea v-model="draft" :disabled="bulkDeleting" placeholder="以 USER 身分在群聊發言…"></textarea>
@@ -239,14 +254,22 @@ async function remove(message) {
         <button v-if="data.has_more" :disabled="loadingMore || loading || bulkDeleting" @click="loadMore">{{ loadingMore ? '載入中…' : '載入下一頁（每頁 10 則）' }}</button>
       </template>
     </div>
+    <Members v-if="data" :accounts="data.accounts" :now="now" @changed="accountChanged" />
   </article>
 </template>
 
 <style scoped>
+.messages-page { display: grid; grid-template-columns: minmax(0, 760px) minmax(280px, 360px); gap: 18px; align-items: start; }
+.messages-page > * { min-width: 0; }
+@media (max-width: 900px) {
+  .messages-page { grid-template-columns: minmax(0, 1fr); }
+  .members { order: -1; }
+}
 .board {
   max-width: 760px;
   width: 100%;
   gap: 11px;
+  min-width: 0;
 }
 .compose,
 .msg {
@@ -254,6 +277,16 @@ async function remove(message) {
 }
 .tags {
   gap: 10px;
+}
+.tags label {
+  overflow-wrap: anywhere;
+}
+.board label,
+.board select {
+  max-width: 100%;
+}
+.board select {
+  min-width: 0;
 }
 .msg b {
   font-size: 12.5px;

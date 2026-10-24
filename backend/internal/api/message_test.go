@@ -1,12 +1,61 @@
 package api
 
 import (
+	"backend/internal/database"
+	"context"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+func TestChatMutedPostAndExpiry(t *testing.T) {
+	engine, store := newTestServer(t)
+	id, token := createAccountFor(t, engine, "muted", 100)
+	_, muted := do(t, engine, "POST", "/v1/accounts/"+id+"/chat/mute", testUserToken, gin.H{"minutes": 10, "reason": "洗版 😀"})
+	status, body := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "hi"})
+	text, _ := body["message"].(string)
+	until, _ := time.Parse(time.RFC3339Nano, muted["chat_muted_until"].(string))
+	if status != 403 || body["error"] != "chat_muted" || !strings.Contains(text, "洗版 😀") || !strings.Contains(text, "剩餘 10 分鐘") || !strings.Contains(text, until.UTC().Format(time.RFC3339)) {
+		t.Fatalf("muted post: %d %v", status, body)
+	}
+	acc, _ := store.AccountByID(context.Background(), id)
+	past := time.Now().Add(-time.Second)
+	acc.ChatMutedUntil = &past
+	if err := store.SaveAccount(context.Background(), acc); err != nil {
+		t.Fatal(err)
+	}
+	if status, body = do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "after expiry"}); status != 201 {
+		t.Fatalf("expiry: %d %v", status, body)
+	}
+	status, body = do(t, engine, "GET", "/v1/account", token, nil)
+	if status != 200 || body["chat_muted_until"] != nil || body["chat_mute_reason"] != nil {
+		t.Fatalf("expired view: %d %v", status, body)
+	}
+}
+
+func TestChatRateDefault(t *testing.T) {
+	engine, _ := newTestServer(t)
+	_, token := createAccountFor(t, engine, "rate", 100)
+	status, body := do(t, engine, "GET", "/v1/account", token, nil)
+	if status != 200 || body["chat_rate_minutes"] != float64(1) || body["chat_rate_count"] != float64(3) {
+		t.Fatalf("defaults: %d %v", status, body)
+	}
+	for i := 0; i < 3; i++ {
+		if status, body := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "hi"}); status != 201 {
+			t.Fatalf("allowed %d: %d %v", i, status, body)
+		}
+	}
+	status, body = do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "fourth"})
+	text, _ := body["message"].(string)
+	if status != 429 || body["error"] != "chat_rate_limited" || !strings.Contains(text, "每 1 分鐘最多 3 則") || !strings.Contains(text, "約 1 分鐘後") {
+		t.Fatalf("rate: %d %v", status, body)
+	}
+}
 
 func messageNames(body map[string]any) []string {
 	items, _ := body["messages"].([]any)
@@ -164,8 +213,9 @@ func TestListMessagesQueryValidation(t *testing.T) {
 
 func TestMessagesPageFilterAndDeleteAuthorization(t *testing.T) {
 	engine, _ := newTestServer(t)
-	_, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
+	id, alpha := createAccountFor(t, engine, "BTC-Agent-01", 100)
 	_, beta := createAccountFor(t, engine, "ETH-Agent-02", 100)
+	do(t, engine, http.MethodPatch, "/v1/accounts/"+id, testUserToken, gin.H{"chat_rate_count": 100})
 	ids := make([]string, 0, 12)
 	for index := 0; index < 12; index++ {
 		status, body := do(t, engine, http.MethodPost, "/v1/messages", alpha, gin.H{
@@ -243,5 +293,104 @@ func TestListMessagesAfterReturnsOnlyLaterMessages(t *testing.T) {
 	}
 	if status, _ := do(t, engine, http.MethodGet, "/v1/messages?after=msg_missing", alpha, nil); status != http.StatusBadRequest {
 		t.Fatalf("不存在的 after 應回 400: %d", status)
+	}
+}
+
+func TestChatRateWindowDeletionAndIsolation(t *testing.T) {
+	engine, store := newTestServer(t)
+	id, token := createAccountFor(t, engine, "limited", 100)
+	_, other := createAccountFor(t, engine, "other", 100)
+	status, body := do(t, engine, "PATCH", "/v1/accounts/"+id, testUserToken, gin.H{"chat_rate_minutes": 2, "chat_rate_count": 1})
+	if status != 200 {
+		t.Fatal(status, body)
+	}
+	_, first := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "first"})
+	status, body = do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "second"})
+	if status != 429 || !strings.Contains(body["message"].(string), "每 2 分鐘最多 1 則，約 2 分鐘後") {
+		t.Fatalf("custom: %d %v", status, body)
+	}
+	if status, body := do(t, engine, "POST", "/v1/messages", other, gin.H{"content": "independent"}); status != 201 {
+		t.Fatalf("other: %d %v", status, body)
+	}
+	if status, body := do(t, engine, "DELETE", "/v1/messages/"+first["id"].(string), token, nil); status != 204 {
+		t.Fatal(status, body)
+	}
+	if status, body := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "after deletion"}); status != 201 {
+		t.Fatalf("deleted excluded: %d %v", status, body)
+	}
+	// Move the existing fixture outside the window without waiting two minutes.
+	rows, err := store.ListMessages(context.Background(), database.MessageQuery{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.AuthorID == id {
+			if err := store.DeleteMessage(context.Background(), row.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	err = store.CreateMessage(context.Background(), &database.Message{ID: "old", AuthorType: database.AuthorAccount, AuthorID: id, Content: "old", CreatedAt: time.Now().UTC().Add(-2*time.Minute - time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "after window"}); status != 201 {
+		t.Fatalf("window expired: %d %v", status, body)
+	}
+}
+
+func TestChatPostingRestrictionOrderAndUserExemption(t *testing.T) {
+	engine, _ := newTestServer(t)
+	id, token := createAccountFor(t, engine, "restricted", 100)
+	for i := 0; i < 3; i++ {
+		if status, body := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "fill window"}); status != 201 {
+			t.Fatal(status, body)
+		}
+	}
+	path := "/v1/accounts/" + id
+	do(t, engine, "POST", path+"/chat/mute", testUserToken, gin.H{"minutes": 1, "reason": "原因"})
+	do(t, engine, "PATCH", path, testUserToken, gin.H{"chat_post": false})
+	status, body := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "all three"})
+	if status != 403 || body["error"] != "chat_post_disabled" {
+		t.Fatalf("permission first: %d %v", status, body)
+	}
+	do(t, engine, "PATCH", path, testUserToken, gin.H{"chat_post": true})
+	status, body = do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "mute and rate"})
+	if status != 403 || body["error"] != "chat_muted" {
+		t.Fatalf("mute second: %d %v", status, body)
+	}
+	for i := 0; i < 5; i++ {
+		if status, body := do(t, engine, "POST", "/v1/messages", testUserToken, gin.H{"content": "USER"}); status != 201 {
+			t.Fatalf("USER exempt: %d %v", status, body)
+		}
+	}
+	do(t, engine, "DELETE", path+"/chat/mute", testUserToken, nil)
+	status, body = do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "rate only"})
+	if status != 429 || body["error"] != "chat_rate_limited" {
+		t.Fatalf("rate third: %d %v", status, body)
+	}
+}
+
+func TestChatRateConcurrentPosts(t *testing.T) {
+	engine, _ := newTestServer(t)
+	_, token := createAccountFor(t, engine, "concurrent", 100)
+	var wg sync.WaitGroup
+	statuses := make(chan int, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			status, _ := do(t, engine, "POST", "/v1/messages", token, gin.H{"content": "parallel"})
+			statuses <- status
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	counts := map[int]int{}
+	for status := range statuses {
+		counts[status]++
+	}
+	if counts[201] != 3 || counts[429] != 7 {
+		t.Fatalf("concurrent limit: %v", counts)
 	}
 }

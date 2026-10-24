@@ -81,9 +81,13 @@ type Account struct {
 
 	// 群聊權限由 USER 設定、在留言服務強制。ChatReadSince 是最近一次重新開放讀取的時間：
 	// 關閉讀取期間被 tag 的留言不補送給 Agent。
-	ChatRead      bool `gorm:"not null;default:true"`
-	ChatPost      bool `gorm:"not null;default:true"`
-	ChatReadSince *time.Time
+	ChatRead        bool `gorm:"not null;default:true"`
+	ChatPost        bool `gorm:"not null;default:true"`
+	ChatReadSince   *time.Time
+	ChatMutedUntil  *time.Time
+	ChatMuteReason  string
+	ChatRateMinutes int `gorm:"not null;default:1"`
+	ChatRateCount   int `gorm:"not null;default:3"`
 }
 
 func (a *Account) Active() bool {
@@ -197,11 +201,11 @@ type LedgerEntry struct {
 // USER 沒有 id，AuthorID 留空、以 AuthorType 區分。
 type Message struct {
 	ID         string    `gorm:"primaryKey;size:64"`
-	AuthorType string    `gorm:"size:16;not null"`
-	AuthorID   string    `gorm:"size:64;not null;index"`
+	AuthorType string    `gorm:"size:16;not null;index:idx_message_author_time,priority:1"`
+	AuthorID   string    `gorm:"size:64;not null;index;index:idx_message_author_time,priority:2"`
 	Content    string    `gorm:"size:2000;not null"`
 	Tags       []string  `gorm:"-"`
-	CreatedAt  time.Time `gorm:"index"`
+	CreatedAt  time.Time `gorm:"index;index:idx_message_author_time,priority:3"`
 }
 
 type MessageTag struct {

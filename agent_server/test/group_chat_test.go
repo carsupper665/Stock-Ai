@@ -144,3 +144,53 @@ func TestTagsFromWhileReadingWasDisabledAreNotDelivered(t *testing.T) {
 		t.Fatalf("Run = %+v", run)
 	}
 }
+
+func TestPostChatPreservesModerationErrorsAndWakeUpShape(t *testing.T) {
+	for _, tc := range []struct {
+		code    string
+		status  int
+		message string
+	}{
+		{"chat_muted", 403, "你已被管理者禁言，原因：洗版；剩餘 10 分鐘（到 2026-10-25T00:10:00Z）"},
+		{"chat_rate_limited", 429, "發言太頻繁：每 1 分鐘最多 3 則，約 1 分鐘後可再發言"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			fixture := newMessageToolFixture()
+			fixture.accountExtra = map[string]any{"chat_muted_until": "2026-10-25T00:10:00Z", "chat_mute_reason": "洗版", "chat_rate_minutes": 1, "chat_rate_count": 3}
+			fixture.message = func(w http.ResponseWriter, r *http.Request, _ int) {
+				if r.Method != "POST" {
+					t.Errorf("method = %s", r.Method)
+				}
+				messageFixtureJSON(w, tc.status, map[string]any{"error": tc.code, "message": tc.message})
+			}
+			fixture.generate = func(w http.ResponseWriter, r *http.Request, call int) {
+				if call == 1 {
+					body := decodeMessageGatewayRequest(t, r)
+					tool := messageToolByName(t, body, "post_chat")
+					description, _ := tool["description"].(string)
+					if !strings.Contains(description, "chat_muted") || !strings.Contains(description, "chat_rate_limited") {
+						t.Error("post_chat must describe moderation errors")
+					}
+					messageToolCall(w, "moderated", "post_chat", map[string]any{"content": "hi"})
+					return
+				}
+				result := messageToolResult(t, r, "moderated")
+				failure, _ := result["error"].(map[string]any)
+				if len(result) != 2 || result["ok"] != false || len(failure) != 3 || failure["code"] != tc.code || failure["message"] != tc.message || failure["outcome"] != "not_executed" {
+					t.Errorf("result = %#v", result)
+				}
+				messageFixtureJSON(w, 200, map[string]any{"content": finalizationContent("observed", "observed"), "tool_calls": []any{}, "finish_reason": "stop"})
+			}
+			runtime := fixture.open(t)
+			_, run := startMessageRun(t, runtime)
+			if run.Status != "completed" {
+				t.Fatalf("Run=%+v", run)
+			}
+			for _, field := range []string{"chat_muted_until", "chat_mute_reason", "chat_rate_minutes", "chat_rate_count"} {
+				if strings.Contains(string(run.InitialContext), field) {
+					t.Fatalf("wake-up added %s: %s", field, run.InitialContext)
+				}
+			}
+		})
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -265,5 +266,85 @@ func TestListReturnsTokensForUser(t *testing.T) {
 		if token, _ := item["token"].(string); token == "" {
 			t.Fatalf("USER 列出帳號時每一筆都該帶 token: %v", item)
 		}
+	}
+}
+
+func TestChatMuteLifecycle(t *testing.T) {
+	engine, _ := newTestServer(t)
+	id, token := createAccountFor(t, engine, "muted", 100)
+	path := "/v1/accounts/" + id + "/chat/mute"
+	before := time.Now().UTC()
+	status, body := do(t, engine, http.MethodPost, path, testUserToken, gin.H{"minutes": 10, "reason": "洗版"})
+	if status != 200 || body["chat_mute_reason"] != "洗版" {
+		t.Fatalf("mute: %d %v", status, body)
+	}
+	until, err := time.Parse(time.RFC3339Nano, body["chat_muted_until"].(string))
+	if err != nil || until.Sub(before.Add(10*time.Minute)) < 0 || until.Sub(before.Add(10*time.Minute)) > 5*time.Second {
+		t.Fatalf("expiry: %v %v", until, err)
+	}
+	status, body = do(t, engine, http.MethodGet, "/v1/messages", token, nil)
+	if status != 200 {
+		t.Fatalf("muted account can read: %d %v", status, body)
+	}
+	status, body = do(t, engine, http.MethodDelete, path, testUserToken, nil)
+	if status != 200 || body["chat_muted_until"] != nil || body["chat_mute_reason"] != nil {
+		t.Fatalf("unmute: %d %v", status, body)
+	}
+	if status, body := do(t, engine, http.MethodPost, "/v1/messages", token, gin.H{"content": "解除後"}); status != 201 {
+		t.Fatalf("post after unmute: %d %v", status, body)
+	}
+	if status, body := do(t, engine, http.MethodDelete, path, testUserToken, nil); status != 200 {
+		t.Fatalf("idempotent: %d %v", status, body)
+	}
+}
+
+func TestChatMuteValidationAndAuthorization(t *testing.T) {
+	engine, _ := newTestServer(t)
+	id, token := createAccountFor(t, engine, "validation", 100)
+	path := "/v1/accounts/" + id + "/chat/mute"
+	_, original := do(t, engine, "POST", path, testUserToken, gin.H{"minutes": 10, "reason": "原文"})
+	for _, input := range []gin.H{
+		{"minutes": 0, "reason": "a"}, {"minutes": 43201, "reason": "a"}, {"minutes": 1.5, "reason": "a"}, {"reason": "a"},
+		{"minutes": 1, "reason": ""}, {"minutes": 1, "reason": "　 \t"}, {"minutes": 1, "reason": strings.Repeat("字", 201)},
+	} {
+		status, body := do(t, engine, "POST", path, testUserToken, input)
+		if status != 400 || body["error"] != "invalid_request" {
+			t.Fatalf("invalid %v: %d %v", input, status, body)
+		}
+		_, current := do(t, engine, "GET", "/v1/accounts/"+id, testUserToken, nil)
+		if current["chat_muted_until"] != original["chat_muted_until"] || current["chat_mute_reason"] != "原文" {
+			t.Fatalf("invalid request changed state: %v", current)
+		}
+	}
+	for _, method := range []string{"POST", "DELETE"} {
+		if status, body := do(t, engine, method, path, token, gin.H{"minutes": 1, "reason": "a"}); status != 403 {
+			t.Fatalf("account token %s: %d %v", method, status, body)
+		}
+		if status, body := do(t, engine, method, "/v1/accounts/missing/chat/mute", testUserToken, gin.H{"minutes": 1, "reason": "a"}); status != 404 {
+			t.Fatalf("missing %s: %d %v", method, status, body)
+		}
+	}
+	status, body := do(t, engine, "POST", path, testUserToken, gin.H{"minutes": 43200, "reason": strings.Repeat("字", 200)})
+	if status != 200 || body["chat_muted_until"] == original["chat_muted_until"] || body["chat_mute_reason"] != strings.Repeat("字", 200) {
+		t.Fatalf("overwrite/boundary: %d %v", status, body)
+	}
+}
+
+func TestChatRateValidation(t *testing.T) {
+	engine, _ := newTestServer(t)
+	id, _ := createAccountFor(t, engine, "validation", 100)
+	path := "/v1/accounts/" + id
+	for _, input := range []gin.H{{"chat_rate_minutes": 0}, {"chat_rate_minutes": 1441}, {"chat_rate_count": 0}, {"chat_rate_count": 101}, {"chat_rate_count": 1.5}} {
+		status, body := do(t, engine, "PATCH", path, testUserToken, input)
+		if status != 400 || body["error"] != "invalid_request" {
+			t.Fatalf("invalid %v: %d %v", input, status, body)
+		}
+		_, body = do(t, engine, "GET", path, testUserToken, nil)
+		if body["chat_rate_minutes"] != float64(1) || body["chat_rate_count"] != float64(3) {
+			t.Fatalf("invalid patch changed state: %v", body)
+		}
+	}
+	if status, body := do(t, engine, "PATCH", path, testUserToken, gin.H{"chat_rate_minutes": 1440, "chat_rate_count": 100}); status != 200 || body["chat_rate_minutes"] != float64(1440) || body["chat_rate_count"] != float64(100) {
+		t.Fatalf("upper bounds: %d %v", status, body)
 	}
 }

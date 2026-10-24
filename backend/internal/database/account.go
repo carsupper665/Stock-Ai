@@ -89,11 +89,13 @@ func (s *Store) ListMaxDDAccounts(ctx context.Context) ([]Account, error) {
 // token rotation are separate mutations and must not be overwritten by a stale Account value.
 // AccountFields 是 USER 可以修改的帳號欄位；nil 表示不改。
 type AccountFields struct {
-	UserName      *string
-	Status        *string
-	ChatRead      *bool
-	ChatPost      *bool
-	ChatReadSince *time.Time
+	UserName        *string
+	Status          *string
+	ChatRead        *bool
+	ChatPost        *bool
+	ChatReadSince   *time.Time
+	ChatRateMinutes *int
+	ChatRateCount   *int
 }
 
 func (s *Store) UpdateAccountFields(ctx context.Context, id string, in AccountFields) error {
@@ -112,6 +114,12 @@ func (s *Store) UpdateAccountFields(ctx context.Context, id string, in AccountFi
 	}
 	if in.ChatReadSince != nil {
 		fields["chat_read_since"] = *in.ChatReadSince
+	}
+	if in.ChatRateMinutes != nil {
+		fields["chat_rate_minutes"] = *in.ChatRateMinutes
+	}
+	if in.ChatRateCount != nil {
+		fields["chat_rate_count"] = *in.ChatRateCount
 	}
 	if len(fields) == 0 {
 		return nil
@@ -137,6 +145,18 @@ func (s *Store) UpdateAccountToken(ctx context.Context, id, token string) error 
 		fields["token_hash"] = &hash
 	}
 	result := s.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Updates(fields)
+	if result.Error != nil {
+		return translate(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateChatMute(ctx context.Context, id string, until *time.Time, reason string) error {
+	result := s.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).
+		Updates(map[string]any{"chat_muted_until": until, "chat_mute_reason": reason})
 	if result.Error != nil {
 		return translate(result.Error)
 	}

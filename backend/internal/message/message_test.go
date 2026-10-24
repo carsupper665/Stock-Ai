@@ -158,7 +158,11 @@ func TestDeletedAccountShowsPlaceholder(t *testing.T) {
 }
 
 func TestFixedPaginationSortAndTagFilter(t *testing.T) {
-	s, _ := newTestService(t)
+	s, store := newTestService(t)
+	count := 100
+	if err := store.UpdateAccountFields(context.Background(), alpha.AccountID, database.AccountFields{ChatRateCount: &count}); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 25; i++ {
 		tags := []string{}
 		if i%2 == 0 {

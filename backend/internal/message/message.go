@@ -38,6 +38,8 @@ var (
 
 	ErrChatPostDisabled = errors.New("此帳號已被管理者停用群聊發言權限")
 	ErrChatReadDisabled = errors.New("此帳號已被管理者停用群聊讀取權限")
+	ErrChatMuted        = errors.New("你已被管理者禁言")
+	ErrChatRateLimited  = errors.New("發言太頻繁")
 )
 
 type Service struct {
@@ -51,6 +53,22 @@ func New(store *database.Store, userName string) *Service {
 
 // Post 由 token 身分決定作者，不接受 client 指定（規格 §14）。
 func (s *Service) Post(ctx context.Context, author auth.Identity, content string, tags []string) (*database.Message, error) {
+	var posted *database.Message
+	err := s.store.Tx(ctx, func(tx *database.Store) error {
+		if !author.IsUser() {
+			if err := tx.LockAccount(ctx, author.AccountID); err != nil {
+				return err
+			}
+		}
+		service := &Service{store: tx, userName: s.userName}
+		var err error
+		posted, err = service.post(ctx, author, content, tags)
+		return err
+	})
+	return posted, err
+}
+
+func (s *Service) post(ctx context.Context, author auth.Identity, content string, tags []string) (*database.Message, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, ErrEmptyContent
@@ -58,10 +76,27 @@ func (s *Service) Post(ctx context.Context, author auth.Identity, content string
 	if utf8.RuneCountInString(content) > MaxContentLen {
 		return nil, ErrContentLong
 	}
-	if err := s.checkPermission(ctx, author, func(a *database.Account) bool { return a.ChatPost }, ErrChatPostDisabled); err != nil {
+	account, err := s.checkPermission(ctx, author, func(a *database.Account) bool { return a.ChatPost }, ErrChatPostDisabled)
+	if err != nil {
 		return nil, err
 	}
-	tags, err := s.normalizeTags(tags)
+	if account != nil {
+		now := time.Now().UTC()
+		if account.ChatMutedUntil != nil && account.ChatMutedUntil.After(now) {
+			return nil, fmt.Errorf("%w，原因：%s；剩餘 %d 分鐘（到 %s）", ErrChatMuted, account.ChatMuteReason,
+				int(math.Ceil(account.ChatMutedUntil.Sub(now).Minutes())), account.ChatMutedUntil.UTC().Format(time.RFC3339))
+		}
+		window := time.Duration(account.ChatRateMinutes) * time.Minute
+		count, oldest, err := s.store.AccountMessageWindow(ctx, account.ID, now.Add(-window))
+		if err != nil {
+			return nil, err
+		}
+		if count >= int64(account.ChatRateCount) {
+			wait := max(1, int(math.Ceil(oldest.Add(window).Sub(now).Minutes())))
+			return nil, fmt.Errorf("%w：每 %d 分鐘最多 %d 則，約 %d 分鐘後可再發言", ErrChatRateLimited, account.ChatRateMinutes, account.ChatRateCount, wait)
+		}
+	}
+	tags, err = s.normalizeTags(tags)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +157,7 @@ func (s *Service) List(ctx context.Context, q Query, requester *auth.Identity) (
 		return nil, false, ErrInvalidTag
 	}
 	if requester != nil {
-		if err := s.checkPermission(ctx, *requester, func(a *database.Account) bool { return a.ChatRead }, ErrChatReadDisabled); err != nil {
+		if _, err := s.checkPermission(ctx, *requester, func(a *database.Account) bool { return a.ChatRead }, ErrChatReadDisabled); err != nil {
 			return nil, false, err
 		}
 	}
@@ -230,18 +265,18 @@ func (s *Service) normalizeTags(tags []string) ([]string, error) {
 }
 
 // checkPermission 擋下被 USER 停用群聊權限的帳號；USER 本身不受限。
-func (s *Service) checkPermission(ctx context.Context, who auth.Identity, allowed func(*database.Account) bool, denied error) error {
+func (s *Service) checkPermission(ctx context.Context, who auth.Identity, allowed func(*database.Account) bool, denied error) (*database.Account, error) {
 	if who.IsUser() {
-		return nil
+		return nil, nil
 	}
 	account, err := s.store.AccountByID(ctx, who.AccountID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !allowed(account) {
-		return denied
+		return nil, denied
 	}
-	return nil
+	return account, nil
 }
 
 // checkRecipients 檢查 tag（選填）：只能是 USER 或另一個帳號的名稱，不能 tag 自己。

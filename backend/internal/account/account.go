@@ -7,17 +7,20 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"backend/internal/database"
 )
 
 // 業務規則違反時回傳的錯誤，handler 依此對應到 HTTP 狀態碼。
 var (
-	ErrInvalidName    = errors.New("user_name 不可為空，長度上限 64")
-	ErrInvalidBalance = errors.New("initial_balance 必須大於 0")
-	ErrInvalidStatus  = errors.New("status 只能是 active 或 disabled")
-	ErrInvalidMaxDD   = errors.New("max_dd 必須是 0 與 100 之間（含 100）的有限數值")
-	ErrNameTaken      = errors.New("user_name 已被使用")
+	ErrInvalidName     = errors.New("user_name 不可為空，長度上限 64")
+	ErrInvalidBalance  = errors.New("initial_balance 必須大於 0")
+	ErrInvalidStatus   = errors.New("status 只能是 active 或 disabled")
+	ErrInvalidMaxDD    = errors.New("max_dd 必須是 0 與 100 之間（含 100）的有限數值")
+	ErrNameTaken       = errors.New("user_name 已被使用")
+	ErrInvalidChatMute = errors.New("minutes 必須是 1～43200 的整數，reason 必須非空且最多 200 字")
+	ErrInvalidChatRate = errors.New("chat_rate_minutes 必須是 1～1440 的整數，chat_rate_count 必須是 1～100 的整數")
 	// ErrTradingNotStopped 是解除停止時帳號未處於 max_dd 停止狀態（未停止、
 	// 未啟用 max_dd、或已經解除過）：重試不會再移動 baseline。
 	ErrTradingNotStopped = errors.New("帳號未處於 max_dd 風控停止狀態，不需要解除")
@@ -81,6 +84,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*database.Account
 		Status:              database.AccountActive,
 		MaxDD:               maxDD,
 		MaxDDBaselineEquity: baseline,
+		ChatRateMinutes:     1,
+		ChatRateCount:       3,
 	}
 	if err := s.store.CreateAccount(ctx, acc); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
@@ -101,13 +106,19 @@ func (s *Service) Get(ctx context.Context, id string) (*database.Account, error)
 
 // UpdateInput 只帶要修改的欄位，nil 表示不動。
 type UpdateInput struct {
-	UserName *string
-	Status   *string
-	ChatRead *bool
-	ChatPost *bool
+	UserName        *string
+	Status          *string
+	ChatRead        *bool
+	ChatPost        *bool
+	ChatRateMinutes *int
+	ChatRateCount   *int
 }
 
 func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*database.Account, error) {
+	if (in.ChatRateMinutes != nil && (*in.ChatRateMinutes < 1 || *in.ChatRateMinutes > 1440)) ||
+		(in.ChatRateCount != nil && (*in.ChatRateCount < 1 || *in.ChatRateCount > 100)) {
+		return nil, ErrInvalidChatRate
+	}
 	var userName *string
 	if in.UserName != nil {
 		name, err := cleanName(*in.UserName)
@@ -134,7 +145,7 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*datab
 		if err != nil {
 			return err
 		}
-		fields := database.AccountFields{UserName: userName, Status: status, ChatRead: in.ChatRead, ChatPost: in.ChatPost}
+		fields := database.AccountFields{UserName: userName, Status: status, ChatRead: in.ChatRead, ChatPost: in.ChatPost, ChatRateMinutes: in.ChatRateMinutes, ChatRateCount: in.ChatRateCount}
 		// 重新開放讀取時記下時間，關閉期間被 tag 的留言就不會補送。
 		if in.ChatRead != nil && *in.ChatRead && !current.ChatRead {
 			now := time.Now().UTC()
@@ -167,6 +178,34 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		}
 		return tx.DeleteAccount(ctx, id)
 	})
+}
+
+func (s *Service) MuteChat(ctx context.Context, id string, minutes int, reason string) (*database.Account, error) {
+	if minutes < 1 || minutes > 43200 || strings.TrimSpace(reason) == "" || utf8.RuneCountInString(reason) > 200 {
+		return nil, ErrInvalidChatMute
+	}
+	until := time.Now().UTC().Add(time.Duration(minutes) * time.Minute)
+	return s.setChatMute(ctx, id, &until, reason)
+}
+
+func (s *Service) UnmuteChat(ctx context.Context, id string) (*database.Account, error) {
+	return s.setChatMute(ctx, id, nil, "")
+}
+
+func (s *Service) setChatMute(ctx context.Context, id string, until *time.Time, reason string) (*database.Account, error) {
+	var acc *database.Account
+	err := s.store.Tx(ctx, func(tx *database.Store) error {
+		if err := tx.LockAccount(ctx, id); err != nil {
+			return err
+		}
+		if err := tx.UpdateChatMute(ctx, id, until, reason); err != nil {
+			return err
+		}
+		var err error
+		acc, err = tx.AccountByID(ctx, id)
+		return err
+	})
+	return acc, err
 }
 
 // ResetToken 換發 Account Token，舊 token 立即失效。

@@ -15,6 +15,18 @@ type MessageQuery struct {
 	AfterID        string
 }
 
+func (s *Store) AccountMessageWindow(ctx context.Context, accountID string, since time.Time) (int64, time.Time, error) {
+	query := s.db.WithContext(ctx).Model(&Message{}).
+		Where("author_type = ? AND author_id = ? AND created_at > ?", AuthorAccount, accountID, since)
+	var count int64
+	if err := translate(query.Count(&count).Error); err != nil || count == 0 {
+		return count, time.Time{}, err
+	}
+	var oldest Message
+	err := translate(query.Order("created_at asc").First(&oldest).Error)
+	return count, oldest.CreatedAt, err
+}
+
 func (s *Store) CreateMessage(ctx context.Context, message *Message) error {
 	return s.Tx(ctx, func(tx *Store) error {
 		if err := translate(tx.db.Create(message).Error); err != nil {

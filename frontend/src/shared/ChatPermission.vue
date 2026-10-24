@@ -18,9 +18,9 @@ async function change(event) {
   const mode = event.target.value
   busy.value = true
   try {
-    await updateAccount(props.account.id, modes[mode])
+    const saved = await updateAccount(props.account.id, modes[mode])
     say(`群聊權限：${labels[mode]}`)
-    emit('changed')
+    emit('changed', saved)
   } catch (e) {
     event.target.value = current.value
     say(e.message, 'neg')

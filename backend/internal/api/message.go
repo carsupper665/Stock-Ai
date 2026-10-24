@@ -112,6 +112,10 @@ func (s *Server) writeMessageError(c *gin.Context, err error) {
 		fail(c, http.StatusForbidden, "chat_post_disabled", err.Error())
 	case errors.Is(err, message.ErrChatReadDisabled):
 		fail(c, http.StatusForbidden, "chat_read_disabled", err.Error())
+	case errors.Is(err, message.ErrChatMuted):
+		fail(c, http.StatusForbidden, "chat_muted", err.Error())
+	case errors.Is(err, message.ErrChatRateLimited):
+		fail(c, http.StatusTooManyRequests, "chat_rate_limited", err.Error())
 	case errors.Is(err, message.ErrForbidden):
 		fail(c, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, database.ErrNotFound):

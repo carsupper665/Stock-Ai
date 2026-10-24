@@ -24,6 +24,10 @@ func TestTicket26ActualBackendPublishesWithBoundAccountAndReadsRequesterIdentity
 	backendURL := startTicket26Backend(t)
 	bound := createTicket26Account(t, backendURL, "Bound Message Agent")
 	other := createTicket26Account(t, backendURL, "Other Message Agent")
+	for _, account := range []ticket26Account{bound, other} {
+		ticket26BackendRequest(t, http.MethodPatch, backendURL+"/v1/accounts/"+account.ID, messageBackendToken,
+			map[string]any{"chat_rate_count": 100}, http.StatusOK)
+	}
 	posted := make([]ticket26MessageView, 0, 35)
 	for index := 0; index < 35; index++ {
 		token, tag := messageBackendToken, "Other Message Agent"

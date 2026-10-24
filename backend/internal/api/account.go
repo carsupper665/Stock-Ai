@@ -31,9 +31,13 @@ type accountView struct {
 	MaxDDLossLimit      *float64   `json:"max_dd_loss_limit"`
 	MaxDDEquityFloor    *float64   `json:"max_dd_equity_floor"`
 
-	ChatRead      bool       `json:"chat_read"`
-	ChatPost      bool       `json:"chat_post"`
-	ChatReadSince *time.Time `json:"chat_read_since"`
+	ChatRead        bool       `json:"chat_read"`
+	ChatPost        bool       `json:"chat_post"`
+	ChatReadSince   *time.Time `json:"chat_read_since"`
+	ChatMutedUntil  *time.Time `json:"chat_muted_until"`
+	ChatMuteReason  *string    `json:"chat_mute_reason"`
+	ChatRateMinutes int        `json:"chat_rate_minutes"`
+	ChatRateCount   int        `json:"chat_rate_count"`
 }
 
 func viewAccount(a *database.Account, includeToken bool) accountView {
@@ -50,6 +54,13 @@ func viewAccount(a *database.Account, includeToken bool) accountView {
 		ChatRead:            a.ChatRead,
 		ChatPost:            a.ChatPost,
 		ChatReadSince:       a.ChatReadSince,
+		ChatRateMinutes:     a.ChatRateMinutes,
+		ChatRateCount:       a.ChatRateCount,
+	}
+	if a.ChatMutedUntil != nil && a.ChatMutedUntil.After(time.Now()) {
+		until := a.ChatMutedUntil.UTC()
+		v.ChatMutedUntil = &until
+		v.ChatMuteReason = &a.ChatMuteReason
 	}
 	if a.MaxDD != nil && a.MaxDDBaselineEquity != nil {
 		limits := trading.DrawdownLimits(a.InitialBalance, *a.MaxDDBaselineEquity, *a.MaxDD)
@@ -111,10 +122,12 @@ func (s *Server) getAccount(c *gin.Context) {
 }
 
 type updateAccountRequest struct {
-	UserName *string `json:"user_name"`
-	Status   *string `json:"status"`
-	ChatRead *bool   `json:"chat_read"`
-	ChatPost *bool   `json:"chat_post"`
+	UserName        *string `json:"user_name"`
+	Status          *string `json:"status"`
+	ChatRead        *bool   `json:"chat_read"`
+	ChatPost        *bool   `json:"chat_post"`
+	ChatRateMinutes *int    `json:"chat_rate_minutes"`
+	ChatRateCount   *int    `json:"chat_rate_count"`
 }
 
 func (s *Server) updateAccount(c *gin.Context) {
@@ -123,16 +136,18 @@ func (s *Server) updateAccount(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
 		return
 	}
-	if req.UserName == nil && req.Status == nil && req.ChatRead == nil && req.ChatPost == nil {
+	if req.UserName == nil && req.Status == nil && req.ChatRead == nil && req.ChatPost == nil && req.ChatRateMinutes == nil && req.ChatRateCount == nil {
 		fail(c, http.StatusBadRequest, "invalid_request", "沒有任何要修改的欄位")
 		return
 	}
 
 	acc, err := s.accounts.Update(c.Request.Context(), c.Param("id"), account.UpdateInput{
-		UserName: req.UserName,
-		Status:   req.Status,
-		ChatRead: req.ChatRead,
-		ChatPost: req.ChatPost,
+		UserName:        req.UserName,
+		Status:          req.Status,
+		ChatRead:        req.ChatRead,
+		ChatPost:        req.ChatPost,
+		ChatRateMinutes: req.ChatRateMinutes,
+		ChatRateCount:   req.ChatRateCount,
 	})
 	if err != nil {
 		s.writeAccountError(c, err)
@@ -147,6 +162,32 @@ func (s *Server) deleteAccount(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) muteAccountChat(c *gin.Context) {
+	var req struct {
+		Minutes int    `json:"minutes"`
+		Reason  string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "invalid_request", "請求內容不是合法的 JSON")
+		return
+	}
+	acc, err := s.accounts.MuteChat(c.Request.Context(), c.Param("id"), req.Minutes, req.Reason)
+	if err != nil {
+		s.writeAccountError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, viewAccount(acc, true))
+}
+
+func (s *Server) unmuteAccountChat(c *gin.Context) {
+	acc, err := s.accounts.UnmuteChat(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		s.writeAccountError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, viewAccount(acc, true))
 }
 
 func (s *Server) resetAccountToken(c *gin.Context) {
@@ -220,6 +261,8 @@ func (s *Server) writeAccountError(c *gin.Context, err error) {
 	case errors.Is(err, account.ErrInvalidName),
 		errors.Is(err, account.ErrInvalidBalance),
 		errors.Is(err, account.ErrInvalidStatus),
+		errors.Is(err, account.ErrInvalidChatMute),
+		errors.Is(err, account.ErrInvalidChatRate),
 		errors.Is(err, account.ErrInvalidMaxDD):
 		fail(c, http.StatusBadRequest, "invalid_request", err.Error())
 	default:
