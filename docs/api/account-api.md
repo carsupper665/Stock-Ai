@@ -721,8 +721,8 @@ USER 的 `PATCH /v1/accounts/:id` 可設 `chat_rate_minutes`（1～1440）、`ch
 
 ## 完整 Python 範例
 
-需已安裝 `requests`。以一個有足夠可用餘額的帳號執行，環境變數沿用 BASE／TOKEN；這會實際下單和平倉。
-不設 source，所有操作歸於此 token 的帳號。群聊若被 USER 限制，最後一步會帶原始錯誤結束。
+需已安裝 `requests`。以一個有足夠可用餘額、沒有 BTCUSDT futures 持倉的獨立測試帳號執行，環境變數沿用 BASE／TOKEN；這會實際下單和平倉。
+執行期間請讓此測試帳號只由本範例操作。不設 source，所有操作歸於此 token 的帳號。群聊若被 USER 限制，最後一步會帶原始錯誤結束。
 將此段存為 `account-example.py`，執行 `python3 account-example.py`：
 
 ```python
@@ -741,6 +741,9 @@ def call(method, path, **kwargs):
 
 price = call("GET", "/v1/market/price", params={"market": "crypto", "symbol": "BTCUSDT"})
 print("price", price["price"])
+existing = call("GET", "/v1/positions", params={"product": "futures"})["positions"]
+if any(p["market"] == "crypto" and p["symbol"] == "BTCUSDT" for p in existing):
+    raise RuntimeError("請使用沒有 BTCUSDT futures 持倉的獨立測試帳號")
 order = call("POST", "/v1/orders", json={
     "market": "crypto", "symbol": "BTCUSDT", "product": "futures",
     "side": "buy", "type": "market", "quantity": 0.001, "leverage": 1,
@@ -754,7 +757,7 @@ stops = call("PATCH", f"/v1/positions/{position_id}", json={
 print("stops", stops["stop_loss"], stops["take_profit"])
 positions = call("GET", "/v1/positions", params={"product": "futures"})
 print("positions", len(positions["positions"]))
-# Only close this example's quantity if the account already had a BTC position.
+# Close the quantity opened by this example.
 closed = call("POST", f"/v1/positions/{position_id}/close", json={"quantity": 0.001})
 assert closed["status"] == "filled", closed
 print("close", closed["status"])

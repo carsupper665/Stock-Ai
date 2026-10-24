@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -126,14 +127,60 @@ def check_routes(manual):
     return account_routes
 
 
+def check_release(baseline, package, output):
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=ROOT, text=True)
+
+    def views(source):
+        return {name: set(re.findall(r'json:"([^",]+)', body))
+                for name, body in re.findall(r'type (\w+View) struct \{(.*?)\n\}', source, re.S)}
+
+    for path in ("backend/internal/api/account.go", "backend/internal/api/views.go", "backend/internal/api/message.go"):
+        previous = views(git("show", baseline + ":" + path))
+        current = views((ROOT / path).read_text())
+        for name, fields in previous.items():
+            assert fields <= current[name], (path, name, fields - current[name])
+    output.append("PASS TestPublicApiFieldsRemainAdditive")
+    for module in ("backend", "agent_server", "llm_provider_server", "middleware"):
+        assert not git("diff", baseline + "...HEAD", "--", module + "/go.mod", module + "/go.sum")
+    assert not git("diff", baseline + "...HEAD", "--", "frontend/package.json", "frontend/package-lock.json")
+    assert git("diff", "--name-only", baseline + "...HEAD", "--", "middleware", "deploy", "docker").splitlines() == ["middleware/VERSION"]
+    output.append("PASS TestChangeScope: no new dependencies; middleware only VERSION; deployment unchanged")
+    if package is None:
+        return
+
+    def hashes(folder):
+        return {str(path.relative_to(folder)): hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in folder.rglob("*") if path.is_file()}
+
+    assert hashes(ROOT / "frontend/dist") == hashes(package / "web"), "Windows frontend differs from the build"
+    executables = {}
+    for name in ("backend.exe", "agent-server.exe", "llm-provider-server.exe", "middleware.exe"):
+        data = (package / name).read_bytes()
+        assert data[:2] == b"MZ" and len(data) > 1_000_000, name
+        executables[name] = hashlib.sha256(data).hexdigest()
+    report = {"windows_package": str(package), "versions": {name: (ROOT / name / "VERSION").read_text().splitlines()[0]
+              for name in ("backend", "agent_server", "frontend")}, "executables": executables,
+              "web_files_equal": True, "web_file_count": len(hashes(package / "web")), "public_api_fields_additive": True,
+              "no_dependency_changes": True, "middleware_deployment_changes": ["middleware/VERSION (dependency versions only)"]}
+    (ROOT / "docs/api/windows-test-package.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    output.append("PASS TestWindowsPackageMatchesBuild: all web hashes match; four valid Windows executables")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--record", action="store_true", help="refresh the manual's response examples")
     parser.add_argument("--output", type=Path, default=ROOT / "docs/api/account-api-smoke.txt")
+    parser.add_argument("--baseline", help="commit used for the release compatibility audit")
+    parser.add_argument("--windows-package", type=Path, help="also compare a rebuilt Windows test package")
     args = parser.parse_args()
     manual = MANUAL.read_text()
     check_routes(manual)
     output = ["PASS TestAccountApiManualRoutes: 17 account routes, 14 USER routes"]
+    if args.windows_package:
+        assert args.baseline, "--windows-package requires --baseline"
+    if args.baseline:
+        check_release(args.baseline, args.windows_package, output)
     processes = []
     ports = []
     with tempfile.TemporaryDirectory(prefix="account-api-") as folder:
@@ -235,6 +282,16 @@ def main():
                 assert completed.returncode == 0, completed.stderr
                 output.extend(["PASS TestAccountApiPythonFlow", completed.stdout.strip()])
                 assert request(base, "/v1/positions", token)[1]["positions"] == []
+                status, short = request(base, "/v1/orders", token, "POST", {
+                    "symbol": "BTCUSDT", "product": "futures", "side": "sell", "quantity": 0.001,
+                })
+                assert status == 201 and short["position_id"], short
+                orders_before = request(base, "/v1/orders", token)[1]
+                completed = subprocess.run(["python3", str(script)], env=sample_env, capture_output=True, text=True, timeout=30)
+                assert completed.returncode != 0 and "沒有 BTCUSDT futures 持倉" in completed.stderr
+                assert request(base, "/v1/orders", token)[1] == orders_before, "example traded despite existing position"
+                assert request(base, "/v1/positions/" + short["position_id"] + "/close", token, "POST", {})[0] == 200
+                output.append("PASS TestAccountApiPythonRejectsExistingPosition: fails before trading")
                 output.append("PASS TestAccountApiCurlExamples: 18/18")
         finally:
             for process in reversed(processes):

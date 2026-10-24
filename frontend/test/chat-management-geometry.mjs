@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 
 const browser = process.env.CHROME_PATH ?? '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe'
@@ -18,7 +18,7 @@ async function inspect() {
   const panel = document.querySelector('.members'), board = document.querySelector('.board');
   if (!panel || !board) { setTimeout(inspect,100); return; }
   const p = panel.getBoundingClientRect(), b = board.getBoundingClientRect();
-  const report = { width: innerWidth, panel: {left:p.left,top:p.top,right:p.right,bottom:p.bottom}, board: {left:b.left,top:b.top,right:b.right,bottom:b.bottom}, horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+  const report = { width: innerWidth, panel: {left:p.left,top:p.top,right:p.right,bottom:p.bottom}, board: {left:b.left,top:b.top,right:b.right,bottom:b.bottom}, horizontalOverflow: document.documentElement.scrollWidth > innerWidth, boardOverflow: board.scrollWidth > board.clientWidth,
     overflowing: [...document.querySelectorAll('body *')].filter(el=>el.getBoundingClientRect().right>innerWidth).slice(0,10).map(el=>el.tagName+'.'+el.className) };
   panel.querySelector('summary').click();
   await new Promise(resolve => requestAnimationFrame(resolve));
@@ -40,7 +40,7 @@ const server = createServer((request, response) => {
   const path = new URL(request.url, 'http://localhost').pathname
   if (path === '/oauth2/me') return json(response, { user_name: 'USER', expires_at: new Date(Date.now() + 3600000).toISOString() })
   if (path === '/v1/accounts') return json(response, { accounts: [account] })
-  if (path === '/v1/messages') return json(response, { messages: [], page: 1, has_more: false })
+  if (path === '/v1/messages') return json(response, { messages: [{ id: 'm', user_name: account.user_name, tags: [account.user_name], content: 'Message'.repeat(60), created_at: new Date().toISOString() }], page: 1, has_more: false })
   if (path.endsWith('health') || path.endsWith('healthz')) return json(response, { status: 'ok', version: 'test' })
   const file = path.startsWith('/assets/') ? join(dist, 'assets', basename(path)) : join(dist, 'index.html')
   try {
@@ -52,9 +52,10 @@ const server = createServer((request, response) => {
 })
 
 async function inspect(origin, width) {
-  const profile = mkdtempSync(join(tmpdir(), 'chat-browser-'))
   const windows = browser.endsWith('.exe')
-  const browserProfile = windows ? `\\\\wsl.localhost\\${process.env.WSL_DISTRO_NAME}\\${profile.slice(1).replaceAll('/', '\\')}` : profile
+  // Chrome's SQLite profile databases require native Windows file locking.
+  const profile = mkdtempSync(join(windows ? '/mnt/c/Windows/Temp' : tmpdir(), 'chat-browser-'))
+  const browserProfile = windows ? `${profile[5].toUpperCase()}:\\${profile.slice(7).replaceAll('/', '\\')}` : profile
   try {
     return await new Promise((resolveReport, reject) => {
       const child = spawn(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -76,12 +77,14 @@ async function inspect(origin, width) {
 
 await new Promise((resolveReady) => server.listen(0, '0.0.0.0', resolveReady))
 try {
-  // Windows Chrome reaches WSL via localhost forwarding, like the Windows test package.
-  const origin = `http://127.0.0.1:${server.address().port}`
+  const host = browser.endsWith('.exe') ? networkInterfaces().eth0?.find((item) => item.family === 'IPv4')?.address : '127.0.0.1'
+  assert.ok(host, 'Windows Chrome needs a reachable WSL eth0 address')
+  const origin = `http://${host}:${server.address().port}`
   const reports = []
-  for (const width of [1400, 900, 899, 600, 500]) {
+  for (const width of [1400, 1000, 917, 916, 899, 600, 500]) {
     const report = await inspect(origin, width)
     assert.equal(report.horizontalOverflow, false, JSON.stringify(report))
+    assert.equal(report.boardOverflow, false, JSON.stringify(report))
     assert.equal(report.collapsed, true)
     assert.equal(report.reopened, true)
     assert.ok(report.collapsedHeight < 100, 'Collapsed panel should show only its summary')

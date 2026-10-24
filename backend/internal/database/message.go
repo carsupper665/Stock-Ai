@@ -16,15 +16,16 @@ type MessageQuery struct {
 }
 
 func (s *Store) AccountMessageWindow(ctx context.Context, accountID string, since time.Time) (int64, time.Time, error) {
-	query := s.db.WithContext(ctx).Model(&Message{}).
-		Where("author_type = ? AND author_id = ? AND created_at > ?", AuthorAccount, accountID, since)
-	var count int64
-	if err := translate(query.Count(&count).Error); err != nil || count == 0 {
-		return count, time.Time{}, err
+	var window struct {
+		Count     int64
+		CreatedAt time.Time
 	}
-	var oldest Message
-	err := translate(query.Order("created_at asc").First(&oldest).Error)
-	return count, oldest.CreatedAt, err
+	// 同一個 snapshot 讀取數量與最早時間，避免刪除與兩次查詢交錯造成誤判。
+	err := s.db.WithContext(ctx).Model(&Message{}).
+		Select("created_at, COUNT(*) OVER () AS count").
+		Where("author_type = ? AND author_id = ? AND created_at > ?", AuthorAccount, accountID, since).
+		Order("created_at asc").Limit(1).Scan(&window).Error
+	return window.Count, window.CreatedAt, translate(err)
 }
 
 func (s *Store) CreateMessage(ctx context.Context, message *Message) error {

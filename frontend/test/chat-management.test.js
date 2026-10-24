@@ -115,3 +115,27 @@ it('多欄位確認擴充保留既有單欄位輸入與一般確認的回傳值'
  await nextTick(); document.querySelector('dialog form').dispatchEvent(new Event('submit',{cancelable:true}))
  await expect(simple).resolves.toBe(true)
 })
+
+it('延遲的篩選重載不會覆蓋剛成功的禁言狀態', async () => {
+ let finishReload
+ let reads = 0
+ const muted = { ...account, chat_muted_until: new Date(Date.now()+600000).toISOString(), chat_mute_reason:'新原因' }
+ vi.spyOn(globalThis,'fetch').mockImplementation(async (url,request)=>{
+  if (url === '/v1/accounts') return respond({accounts:[account]})
+  if (request.method === 'POST') return respond(muted)
+  if (++reads === 2) return new Promise((resolve)=>{finishReload=resolve})
+  return respond({messages:[],page:1,has_more:false})
+ })
+ mount(); await vi.waitFor(()=>expect(button('禁言')).toBeTruthy())
+ const filter=document.querySelector('.board select')
+ filter.value='USER'; filter.dispatchEvent(new Event('change',{bubbles:true}))
+ await vi.waitFor(()=>expect(finishReload).toBeTypeOf('function'))
+ button('禁言').click(); await nextTick()
+ const form=document.querySelector('dialog form')
+ input(form.querySelector('input[type=number]'),'10'); input(form.querySelector('input[type=text]'),'新原因')
+ await nextTick(); form.dispatchEvent(new Event('submit',{cancelable:true}))
+ await vi.waitFor(()=>expect(document.querySelector('.member').textContent).toContain('禁言中 · 剩 10 分鐘 · 新原因'))
+ finishReload(respond({messages:[{id:'reloaded',user_name:'you',content:'重載完成',tags:[],created_at:new Date().toISOString()}],page:1,has_more:false}))
+ await vi.waitFor(()=>expect(document.querySelector('.msg')?.textContent).toContain('重載完成'))
+ expect(document.querySelector('.member').textContent).toContain('禁言中 · 剩 10 分鐘 · 新原因')
+})

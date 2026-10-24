@@ -11,29 +11,73 @@
       "left": 236,
       "top": 67.671875,
       "right": 986,
-      "bottom": 351.140625
+      "bottom": 483.359375
     },
     "horizontalOverflow": false,
+    "boardOverflow": false,
     "overflowing": [],
     "collapsed": true,
     "collapsedHeight": 46.84375,
     "reopened": true
   },
   {
-    "width": 884,
+    "width": 984,
+    "panel": {
+      "left": 604,
+      "top": 67.671875,
+      "right": 964,
+      "bottom": 500.59375
+    },
+    "board": {
+      "left": 236,
+      "top": 67.671875,
+      "right": 586,
+      "bottom": 794.53125
+    },
+    "horizontalOverflow": false,
+    "boardOverflow": false,
+    "overflowing": [],
+    "collapsed": true,
+    "collapsedHeight": 46.84375,
+    "reopened": true
+  },
+  {
+    "width": 901,
+    "panel": {
+      "left": 506,
+      "top": 67.671875,
+      "right": 866,
+      "bottom": 500.59375
+    },
+    "board": {
+      "left": 236,
+      "top": 67.671875,
+      "right": 488,
+      "bottom": 923.546875
+    },
+    "horizontalOverflow": false,
+    "boardOverflow": false,
+    "overflowing": [],
+    "collapsed": true,
+    "collapsedHeight": 46.84375,
+    "reopened": true
+  },
+  {
+    "width": 900,
     "panel": {
       "left": 12,
       "top": 375.796875,
-      "right": 857,
+      "right": 873,
       "bottom": 670.65625
     },
     "board": {
       "left": 12,
       "top": 688.65625,
       "right": 772,
-      "bottom": 972.125
+      "bottom": 1104.34375
     },
     "horizontalOverflow": false,
+    "boardOverflow": false,
     "overflowing": [],
     "collapsed": true,
     "collapsedHeight": 46.84375,
@@ -51,9 +95,10 @@
       "left": 12,
       "top": 688.65625,
       "right": 772,
-      "bottom": 972.125
+      "bottom": 1104.34375
     },
     "horizontalOverflow": false,
+    "boardOverflow": false,
     "overflowing": [],
     "collapsed": true,
     "collapsedHeight": 46.84375,
@@ -71,9 +116,10 @@
       "left": 12,
       "top": 617.59375,
       "right": 557,
-      "bottom": 989.671875
+      "bottom": 1165.40625
     },
     "horizontalOverflow": false,
+    "boardOverflow": false,
     "overflowing": [],
     "collapsed": true,
     "collapsedHeight": 46.84375,
@@ -91,9 +137,10 @@
       "left": 12,
       "top": 673.578125,
       "right": 473,
-      "bottom": 1069.59375
+      "bottom": 1326.140625
     },
     "horizontalOverflow": false,
+    "boardOverflow": false,
     "overflowing": [],
     "collapsed": true,
     "collapsedHeight": 46.84375,

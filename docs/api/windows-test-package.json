@@ -1,0 +1,21 @@
+{
+  "windows_package": "/mnt/c/stock-ai-win-test",
+  "versions": {
+    "backend": "0.1.3-b0r0",
+    "agent_server": "0.1.4-b0r0",
+    "frontend": "0.1.4-b0r0"
+  },
+  "executables": {
+    "backend.exe": "0db8f18ee3dfe148ec0b837b6648e5e74e923451feecb137cb1579002f7cf3c3",
+    "agent-server.exe": "3e8081348aef9762e125aaf56f2e83815d4e527b46569650910ac979f0c5de61",
+    "llm-provider-server.exe": "a147031893912438a77f5d6552c4af7de4accc17c960bfc4c455b71d99d1bcfb",
+    "middleware.exe": "9bf245c2681dcf4d9b7d2a058bb10da13422bae76a500aef4344315289f586bc"
+  },
+  "web_files_equal": true,
+  "web_file_count": 26,
+  "public_api_fields_additive": true,
+  "no_dependency_changes": true,
+  "middleware_deployment_changes": [
+    "middleware/VERSION (dependency versions only)"
+  ]
+}

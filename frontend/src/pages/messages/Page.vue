@@ -22,8 +22,9 @@ let accountGeneration = 0
 const now = ref(Date.now())
 const clock = setInterval(() => { now.value = Date.now() }, 30000)
 const { data, error, loading, reload } = useLoad(async () => {
+  const accountRequest = accountGeneration
   const [messages, accounts] = await Promise.all([listMessages({ tag: tagFilter.value, sort: sort.value }), listAccounts()])
-  return { ...messages, accounts: accounts.accounts ?? [] }
+  return { ...messages, accounts: accountRequest === accountGeneration ? accounts.accounts ?? [] : data.value?.accounts ?? [] }
 })
 function accountChanged(account) {
   now.value = Date.now()
@@ -290,6 +291,12 @@ async function remove(message) {
 }
 .msg b {
   font-size: 12.5px;
+}
+.msg b,
+.msg .tag {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .selection-actions {
   justify-content: flex-end;
