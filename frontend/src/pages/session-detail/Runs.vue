@@ -168,32 +168,36 @@ const conversationLink = computed(() => ({ name: 'session-detail', params: { id:
 
 <template>
   <div class="run-layout">
-    <div class="card flush list">
-      <div class="list-scroll">
-        <table>
-          <thead>
-            <tr><th>Run</th><th>Status</th><th>Trigger</th><th class="num">Dur</th><th class="num">Tool</th><th class="num">Decision</th><th class="num">Model attempts</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in runs" :key="r.run_id" data-click :data-active="r.run_id === selected ? '' : null" @click="selected = r.run_id">
-              <td class="mono" data-tone="acc">#{{ r.run_id }}</td>
-              <td><span class="tag" :data-tone="tone(r.status)">{{ r.status }}</span></td>
-              <td class="mono small" data-tone="dim">{{ triggerLabel(r) }}</td>
-              <td class="num" data-tone="dim">{{ duration(r.start_time, r.end_time) }}</td>
-              <td class="num" data-tone="dim">{{ r.tool_call_count }}</td>
-              <td class="num" data-tone="dim">{{ r.decision_count }}</td>
-              <td class="num" data-tone="dim">{{ r.model_call_count }}</td>
-            </tr>
-            <tr v-if="!runs.length"><td colspan="7" class="note">這一頁沒有 Run</td></tr>
-          </tbody>
-        </table>
+    <div class="run-left">
+      <slot name="current" />
+      <div class="card flush list">
+        <div class="list-scroll">
+          <table>
+            <thead>
+              <tr><th>Run</th><th>Status</th><th>Trigger</th><th class="num">Dur</th><th class="num">Tool</th><th class="num">Decision</th><th class="num">Model attempts</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in runs" :key="r.run_id" data-click :data-active="r.run_id === selected ? '' : null" @click="selected = r.run_id">
+                <td class="mono" data-tone="acc">#{{ r.run_id }}</td>
+                <td><span class="tag" :data-tone="tone(r.status)">{{ r.status }}</span></td>
+                <td class="mono small" data-tone="dim">{{ triggerLabel(r) }}</td>
+                <td class="num" data-tone="dim">{{ duration(r.start_time, r.end_time) }}</td>
+                <td class="num" data-tone="dim">{{ r.tool_call_count }}</td>
+                <td class="num" data-tone="dim">{{ r.decision_count }}</td>
+                <td class="num" data-tone="dim">{{ r.model_call_count }}</td>
+              </tr>
+              <tr v-if="!runs.length"><td colspan="7" class="note">這一頁沒有 Run</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="row pager mono" data-tone="mute">
+          <span>第 {{ page }} 頁</span>
+          <span class="grow"></span>
+          <button :disabled="page <= 1" @click="$emit('page', page - 1)">‹ 上一頁</button>
+          <button :disabled="runs.length < 100" @click="$emit('page', page + 1)">下一頁 ›</button>
+        </div>
       </div>
-      <div class="row pager mono" data-tone="mute">
-        <span>第 {{ page }} 頁</span>
-        <span class="grow"></span>
-        <button :disabled="page <= 1" @click="$emit('page', page - 1)">‹ 上一頁</button>
-        <button :disabled="runs.length < 100" @click="$emit('page', page + 1)">下一頁 ›</button>
-      </div>
+
     </div>
 
     <section v-if="run" class="card col detail">
@@ -309,6 +313,12 @@ const conversationLink = computed(() => ({ name: 'session-detail', params: { id:
   grid-template-columns: minmax(360px, 0.7fr) minmax(520px, 1.6fr);
   gap: 12px;
   align-items: start;
+}
+.run-left {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 .list {
   min-width: 0;
