@@ -9,7 +9,7 @@
 只用一層 Nginx，裝在跑 Docker 的同一台主機上。DNS 直接指到這台主機。Docker 內的 Nginx
 （`compose.release.yaml`、`compose.test-edge.yaml`）只留給測試，不要在主機 Nginx 後面再疊一層。
 
-外部第三方交易程式請參閱[交易帳號 API 手冊](../api/account-api.md)。
+外部第三方交易程式請參閱[交易帳號 API 手冊](../api/account-api-public.md)。
 
 ## 前置
 
