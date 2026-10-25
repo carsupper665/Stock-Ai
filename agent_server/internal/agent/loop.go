@@ -12,6 +12,7 @@ import (
 	"math"
 	"mime"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,13 @@ import (
 
 func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger string, runID int64, active *activeRun) {
 	defer r.finishActive(session.ID, active)
+	defer func() {
+		if recover() != nil {
+			// Panic values may contain credentials or provider response bodies.
+			r.logOperational("run_panic", session.ID, runID, "RUN_PANIC\n"+string(debug.Stack()))
+			r.persistRunFailure(session.ID, runID, "RUN_PANIC: unexpected Run failure")
+		}
+	}()
 	r.logOperational("run_start", session.ID, runID, trigger)
 	contextBody := map[string]any{
 		"trigger": trigger, "session_name": session.Name, "account_id": session.AccountID,

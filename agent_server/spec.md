@@ -3103,6 +3103,14 @@ creation/expiry/outcome timestamps and present nullable state/outcome-Run/detail
 Unknown additional fields and optional facts inside trace entries remain forward/migration
 compatible. Invalid files are never served and startup rewrites them from SQLite.
 
+Run 內的 panic 僅令該 Run `failed`，不終止 Server；保留既有字串 `error`
+（`"RUN_PANIC: unexpected Run failure"`），Run JSON 新增選填 `error_code`，
+由 error 的大寫代碼前綴推導；沒有可辨識代碼時省略。例如
+`{"status":"failed","error":"RUN_PANIC: unexpected Run failure","error_code":"RUN_PANIC"}`。
+不生成 summary/output；既有 active 釋放與 pending trigger 派發照常執行。
+operational log 的 `run_panic` 包含 session_id、run_id 及 stack，刻意不記錄 panic 值，
+以免外部結果或憑證洩漏。此欄位不新增 DB 欄位，也不改既有 History 合約。
+
 ## 66.3 History trace projection and filtering
 
 `iterations` is the persisted ordered Run progress. Every model entry includes its visible

@@ -448,6 +448,9 @@ func scanRun(row scanner) (Run, error) {
 	run.Summary = nullStringPointer(summary)
 	run.Output = nullStringPointer(output)
 	run.Error = nullStringPointer(runError)
+	if run.Error != nil {
+		run.ErrorCode = compactErrorCode(*run.Error)
+	}
 	run.EndedAt = nullStringPointer(endedAt)
 	if retryOf.Valid {
 		run.RetryOfRunID = &retryOf.Int64

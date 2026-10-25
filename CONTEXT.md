@@ -12,6 +12,7 @@ _Avoid_: Agent instance, bot
 
 **Run**:
 Agent 被喚醒後的一次連續工作，是 Session 對話裡的一段，不是獨立的對話。
+Run 發生 panic 時以 `RUN_PANIC` 失敗；Server 與其他 Session 繼續執行。
 _Avoid_: Job, episode, turn
 
 **Session 對話**:

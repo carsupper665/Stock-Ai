@@ -99,6 +99,7 @@ type Run struct {
 	Summary        *string         `json:"summary"`
 	Output         *string         `json:"output"`
 	Error          *string         `json:"error"`
+	ErrorCode      string          `json:"error_code,omitempty"`
 	Progress       json.RawMessage `json:"progress"`
 	InitialContext json.RawMessage `json:"initial_context"`
 	ModelCalls     int             `json:"model_call_count"`
