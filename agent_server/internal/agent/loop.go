@@ -37,6 +37,28 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		"model_name": session.ModelName, "model_level": session.ModelLevel,
 		"max_loop": session.MaxLoop, "max_tool_call": session.MaxToolCall,
 	}
+	chatWake := false
+	if trigger == "event" {
+		triggers, err := r.runTriggers(session.ID, runID)
+		if err != nil {
+			r.handleRunPersistenceError(session.ID, runID, err)
+			return
+		}
+		contextBody["triggers"] = triggers
+		var payloads []struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(triggers, &payloads); err != nil {
+			r.handleRunPersistenceError(session.ID, runID, err)
+			return
+		}
+		for _, payload := range payloads {
+			if payload.Type == "chat_mention" {
+				chatWake = true
+				break
+			}
+		}
+	}
 	accountContext, cancelAccount := context.WithTimeout(ctx, r.config.RequestTimeout)
 	account, accountErr := r.fetchAccount(accountContext, session.AccountID)
 	cancelAccount()
@@ -53,7 +75,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			"ok": true, "id": account.ID, "user_name": account.UserName, "status": account.Status,
 			"initial_balance": account.InitialBalance, "balance": account.Balance,
 		}
-		inbox, err := r.inbox(ctx, session.ID, runID, account)
+		inbox, err := r.inbox(ctx, session.ID, runID, account, chatWake)
 		if ctx.Err() != nil {
 			return
 		}
@@ -77,14 +99,6 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 			return
 		}
 		contextBody["restart_context"] = restartContext
-	}
-	if trigger == "event" {
-		triggers, err := r.runTriggers(session.ID, runID)
-		if err != nil {
-			r.handleRunPersistenceError(session.ID, runID, err)
-			return
-		}
-		contextBody["triggers"] = triggers
 	}
 	if trigger == "server_recovery" {
 		recovery, err := r.recoveryContext(session.ID, runID)

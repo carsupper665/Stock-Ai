@@ -3,6 +3,7 @@ package test
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -320,5 +321,77 @@ func TestChatWakeMigrationAndAtomicClaim(t *testing.T) {
 	}
 	if err := runtime.Close(); err == nil {
 		t.Fatal("claim persistence error not latched")
+	}
+}
+
+func TestChatWakeFindsAndDeliversUserBeyondOnePage(t *testing.T) {
+	for _, seeded := range []bool{false, true} {
+		t.Run(fmt.Sprint("seeded=", seeded), func(t *testing.T) {
+			fixture := newMessageToolFixture()
+			chat := &wakeChat{}
+			if seeded {
+				chat.add("seed", "Other Agent", time.Now().Add(-time.Minute))
+			}
+			fixture.inbox = func(w http.ResponseWriter, r *http.Request, n int) { chat.serve(t, w, r, n) }
+			script := newLLMScript(respondStop("initial"), respondStop("USER read"))
+			fixture.generate = func(w http.ResponseWriter, r *http.Request, _ int) { script.handler(t)(w, r) }
+			runtime := openWakeRuntime(t, fixture, filepath.Join(t.TempDir(), "agent.db"))
+			session, _ := startMessageRun(t, runtime)
+			script.next(t, "initial")
+			clock := newEventClock()
+			if !seeded {
+				chat.add("user", "USER", clock.Now())
+			}
+			for i := 0; i < 11; i++ {
+				chat.add("agent-"+jsonNumber(int64(i)), "Other Agent", clock.Now())
+				clock.Advance(time.Millisecond)
+			}
+			if seeded {
+				if err := runtime.ChatWakeTask(clock).Run(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				chat.add("user", "USER", clock.Now())
+			}
+			clock.Advance(10 * time.Second)
+			if err := runtime.ChatWakeTask(clock).Run(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			wake := script.next(t, "USER beyond one page")
+			if !strings.Contains(contextText(wake), "text-user") {
+				t.Fatalf("trigger woke without USER content: %s", contextText(wake))
+			}
+			waitForMessageRunID(t, runtime, session.ID, 2)
+		})
+	}
+}
+
+func TestChatWakeDeletedCursorDoesNotRewake(t *testing.T) {
+	fixture := newMessageToolFixture()
+	chat := &wakeChat{}
+	fixture.inbox = func(w http.ResponseWriter, r *http.Request, n int) { chat.serve(t, w, r, n) }
+	script := newLLMScript(respondStop("initial"), respondStop("wake"))
+	fixture.generate = func(w http.ResponseWriter, r *http.Request, _ int) { script.handler(t)(w, r) }
+	runtime := openWakeRuntime(t, fixture, filepath.Join(t.TempDir(), "agent.db"))
+	session, _ := startMessageRun(t, runtime)
+	script.next(t, "initial")
+	waitForMessageRunID(t, runtime, session.ID, 1)
+	clock := newEventClock()
+	chat.add("m1", "USER", clock.Now())
+	chat.add("m2", "USER", clock.Now())
+	clock.Advance(10 * time.Second)
+	if err := runtime.ChatWakeTask(clock).Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	script.next(t, "wake")
+	waitForMessageRunID(t, runtime, session.ID, 2)
+	chat.mu.Lock()
+	chat.messages = slices.DeleteFunc(chat.messages, func(m map[string]any) bool { return m["id"] == "m2" })
+	chat.mu.Unlock()
+	clock.Advance(10 * time.Second)
+	if err := runtime.ChatWakeTask(clock).Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := getWakeSession(t, runtime, session.ID).CurrentRunID; got != 2 {
+		t.Fatalf("delivered tag woke Run %d after its cursor message was deleted", got)
 	}
 }

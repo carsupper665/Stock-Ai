@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"net/url"
 	"time"
 
@@ -64,21 +63,8 @@ func (r *AgentRuntime) ChatWakeTask(clock eventloop.Clock) server.BackgroundTask
 				cancel()
 				continue
 			}
-			page, failure, err := r.fetchAfter(requestCtx, session.ID, wakeCursor, account.Token, url.Values{"tag": {account.UserName}})
+			page, failure, err := r.fetchAfter(requestCtx, session.ID, wakeCursor, account.Token, url.Values{"tag": {account.UserName}}, true)
 			messages := page.Result.Messages
-			for err == nil && failure == nil && page.Result.HasMore && len(page.Result.Messages) != 0 {
-				after := page.Result.Messages[len(page.Result.Messages)-1].ID
-				raw := r.sendMessageRequest(requestCtx, account.Token, http.MethodGet, url.Values{"tag": {account.UserName}, "after": {after}, "page": {"1"}, "sort": {"asc"}}, nil)
-				if json.Unmarshal(raw, &page) != nil || !page.OK {
-					failure = raw
-					break
-				}
-				if len(page.Result.Messages) != 0 && page.Result.Messages[len(page.Result.Messages)-1].ID == after {
-					failure = raw
-					break
-				}
-				messages = append(messages, page.Result.Messages...)
-			}
 			cancel()
 			if err != nil {
 				return err
@@ -102,9 +88,10 @@ func (r *AgentRuntime) ChatWakeTask(clock eventloop.Clock) server.BackgroundTask
 }
 
 func (r *AgentRuntime) claimChatWake(tx *sql.Tx, sessionID string, account backendAccount, messages []tools.MessageView, now time.Time) ([]string, error) {
-	var status, created, delivered string
-	err := tx.QueryRow(`SELECT s.status, s.created_at, COALESCE(c.mention_after, '') FROM sessions s
-		LEFT JOIN session_chat_cursors c ON c.session_id = s.id WHERE s.id = ?`, sessionID).Scan(&status, &created, &delivered)
+	var status, start, delivered string
+	err := tx.QueryRow(`SELECT s.status, COALESCE((SELECT start_time FROM runs WHERE session_id = s.id ORDER BY run_id DESC LIMIT 1), s.created_at),
+		COALESCE(c.mention_after, '') FROM sessions s
+		LEFT JOIN session_chat_cursors c ON c.session_id = s.id WHERE s.id = ?`, sessionID).Scan(&status, &start, &delivered)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && status != "running") {
 		return nil, nil
 	}
@@ -127,7 +114,13 @@ func (r *AgentRuntime) claimChatWake(tx *sql.Tx, sessionID string, account backe
 		}
 		last = delivered
 	} else {
-		since, _ := time.Parse(time.RFC3339Nano, created)
+		// Tags after the delivered cursor are new. Without it (none yet, or its message was
+		// deleted) the read restarts from the oldest tag, and only tags since the latest Run start
+		// are new: older ones were delivered by that Run's inbox.
+		var since time.Time
+		if consumed < 0 {
+			since, _ = time.Parse(time.RFC3339Nano, start)
+		}
 		if account.ChatReadSince != nil {
 			if enabled, err := time.Parse(time.RFC3339Nano, *account.ChatReadSince); err == nil && enabled.After(since) {
 				since = enabled

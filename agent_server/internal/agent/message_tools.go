@@ -76,7 +76,8 @@ type chatPage struct {
 
 // fetchAfter reads the messages after a stored cursor, oldest first. Without a cursor (or when
 // its message was deleted) it reads the newest page instead and returns it oldest first.
-func (r *AgentRuntime) fetchAfter(ctx context.Context, sessionID, cursor, token string, query url.Values) (chatPage, json.RawMessage, error) {
+// Wake polling and its inbox read all pages oldest first so a USER tag cannot hide behind backlog.
+func (r *AgentRuntime) fetchAfter(ctx context.Context, sessionID, cursor, token string, query url.Values, all bool) (chatPage, json.RawMessage, error) {
 	after, err := r.chatCursor(sessionID, cursor)
 	if err != nil {
 		return chatPage{}, nil, err
@@ -84,6 +85,9 @@ func (r *AgentRuntime) fetchAfter(ctx context.Context, sessionID, cursor, token 
 	query.Set("page", "1")
 	for {
 		query.Set("sort", "desc")
+		if all {
+			query.Set("sort", "asc")
+		}
 		query.Del("after")
 		if after != "" {
 			query.Set("sort", "asc")
@@ -98,9 +102,25 @@ func (r *AgentRuntime) fetchAfter(ctx context.Context, sessionID, cursor, token 
 		if json.Unmarshal(raw, &page) != nil || !page.OK {
 			return chatPage{}, raw, nil
 		}
-		if after == "" {
+		if after == "" && !all {
 			slices.Reverse(page.Result.Messages)
 		}
+		messages := page.Result.Messages
+		for all && page.Result.HasMore && len(page.Result.Messages) != 0 {
+			last := page.Result.Messages[len(page.Result.Messages)-1].ID
+			query.Set("after", last)
+			query.Set("sort", "asc")
+			raw := r.sendMessageRequest(ctx, token, http.MethodGet, query, nil)
+			page = chatPage{}
+			if json.Unmarshal(raw, &page) != nil || !page.OK {
+				return chatPage{}, raw, nil
+			}
+			if len(page.Result.Messages) != 0 && page.Result.Messages[len(page.Result.Messages)-1].ID == last {
+				return chatPage{}, tools.ErrorResult("BACKEND_RESPONSE_INVALID", "chat paging did not advance", "unknown"), nil
+			}
+			messages = append(messages, page.Result.Messages...)
+		}
+		page.Result.Messages = messages
 		return page, nil, nil
 	}
 }
@@ -117,7 +137,7 @@ func (r *AgentRuntime) readUnreadChat(ctx context.Context, session Session, quer
 		}
 		return tools.ErrorResult(dependencyReasonCode(err), dependencyReason(err), "not_executed")
 	}
-	page, failure, err := r.fetchAfter(toolContext, session.ID, readCursor, token, query)
+	page, failure, err := r.fetchAfter(toolContext, session.ID, readCursor, token, query, false)
 	if err != nil {
 		return tools.ErrorResult("INTERNAL_ERROR", "unable to read the chat read position", "not_executed")
 	}
@@ -136,7 +156,7 @@ func (r *AgentRuntime) readUnreadChat(ctx context.Context, session Session, quer
 // Each is delivered once: at Run start through the wake-up message, or during a Run through
 // chatMentions. Tags from a period when the developer disabled reading are never delivered.
 // nil means nothing new; a failed read returns the Tool Error so the model can retry.
-func (r *AgentRuntime) inbox(ctx context.Context, sessionID string, runID int64, account backendAccount) (any, error) {
+func (r *AgentRuntime) inbox(ctx context.Context, sessionID string, runID int64, account backendAccount, chatWake bool) (any, error) {
 	if account.UserName == "" || (account.ChatRead != nil && !*account.ChatRead) { // an empty tag would read the whole chat
 		return nil, nil
 	}
@@ -146,7 +166,7 @@ func (r *AgentRuntime) inbox(ctx context.Context, sessionID string, runID int64,
 	}
 	toolContext, cancel := context.WithTimeout(ctx, r.config.ToolTimeout)
 	defer cancel()
-	page, failure, err := r.fetchAfter(toolContext, sessionID, mentionCursor, account.Token, url.Values{"tag": {account.UserName}})
+	page, failure, err := r.fetchAfter(toolContext, sessionID, mentionCursor, account.Token, url.Values{"tag": {account.UserName}}, chatWake)
 	if err != nil || failure != nil {
 		return failure, err
 	}
@@ -198,7 +218,7 @@ func (r *AgentRuntime) previousRunStart(ctx context.Context, sessionID string, r
 // chatMentions delivers tags that arrived during a Run as one user message, or nil. Failures
 // leave the cursor alone and deliver nothing; the next step tries again.
 func (r *AgentRuntime) chatMentions(ctx context.Context, sessionID string, runID int64, account backendAccount) *gatewayMessage {
-	delivered, err := r.inbox(ctx, sessionID, runID, account)
+	delivered, err := r.inbox(ctx, sessionID, runID, account, false)
 	if err != nil || delivered == nil {
 		return nil
 	}

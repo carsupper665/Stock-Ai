@@ -3739,6 +3739,11 @@ the Backend enforces each Account's chat permissions (`backend/SPEC.md` §18.1).
   and enqueues `{"type":"chat_mention","message_ids":["msg_1","msg_2"]}` in pending_triggers.
   Existing pending admission starts one event Run; trigger carries IDs only, inbox supplies
   content once. Other agents never wake a Session. Stopped/deleted Sessions are not polled.
+  Wake polling reads every page oldest first, including when no wake cursor exists yet;
+  a `chat_mention`-triggered Run likewise drains its inbox pages so USER content cannot hide
+  behind more than 10 older Agent tags. Ordinary Run inbox and in-Run steer retain one-page reads.
+  When mention_after is not in the read (no cursor yet, or its message was deleted), only USER
+  tags posted after the latest Run started can wake; older ones were delivered by its inbox.
   The additive cursor migration preserves read_after/mention_after and initializes wake_after
   from mention_after, so previously delivered tags do not wake after upgrading.
   During a Run, polling acknowledges only tags already delivered through mention_after;
