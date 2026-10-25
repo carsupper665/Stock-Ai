@@ -12,7 +12,7 @@ USER 管理 API 為 `POST /v1/accounts`、`POST /v1/accounts/:id/token/reset`，
 ## 共通規則
 
 - 每個請求帶 `Authorization: Bearer <帳號 token>`。有 body 時帶 `Content-Type: application/json`，JSON 數字使用 number，布林使用 true/false。
-- 時間回應為 UTC 的 RFC3339（`Z`；可含小數秒）。時間參數接受 RFC3339，建議一律傳 UTC。
+- 時間回應是 RFC3339（可含小數秒）。大多是 UTC（`Z`），但 `GET /v1/market/price` 的 `updated_at` 帶伺服器時區的偏移（例如 `+08:00`），請用支援時區偏移的 RFC3339 解析器。時間參數接受 RFC3339，建議一律傳 UTC。
 - `/v1/messages` 可匿名讀取；帶錯 token 仍回 401，不會降為匿名。其他本手冊端點均需 token。
 - 帳號停用或 token 重設後，舊 token 回 401。管理 API 對有效帳號 token 回 403。
 - 主機 nginx 對每 IP 限每秒 10 個請求、同時 30 條連線；`/v1` 有 burst=40 的突發容許。

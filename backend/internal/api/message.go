@@ -27,6 +27,10 @@ type messageView struct {
 // ssePingInterval 讓代理與瀏覽器不會把閒置的推播連線當成斷線。
 const ssePingInterval = 25 * time.Second
 
+// sseWriteTimeout 限制每次寫入：客戶端不讀時寫入會卡住，handler 就收不到訂閱被中斷或關機；
+// 要比 graceful shutdown 的 15 秒短。測試會調小。
+var sseWriteTimeout = 10 * time.Second
+
 type postMessageRequest struct {
 	Content    string   `json:"content"`
 	Tags       []string `json:"tags"`
@@ -131,27 +135,32 @@ func (s *Server) streamMessages(c *gin.Context) {
 	header.Set("Content-Type", "text/event-stream")
 	header.Set("Cache-Control", "no-cache")
 	c.Status(http.StatusOK)
-	c.Writer.Flush()
+	writer := http.NewResponseController(c.Writer)
+	send := func(write func() error) bool {
+		if err := writer.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil {
+			return false
+		}
+		return write() == nil && writer.Flush() == nil
+	}
+	if !send(func() error { return nil }) {
+		return
+	}
 
 	ping := time.NewTicker(ssePingInterval)
 	defer ping.Stop()
 	for {
+		var ok bool
 		select {
 		case <-c.Request.Context().Done():
 			return
 		case <-ping.C:
-			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
-				return
-			}
-		case event, ok := <-events:
-			if !ok {
-				return
-			}
-			if err := writeEvent(c, event); err != nil {
-				return
-			}
+			ok = send(func() error { _, err := fmt.Fprint(c.Writer, ": ping\n\n"); return err })
+		case event, open := <-events:
+			ok = open && send(func() error { return writeEvent(c, event) })
 		}
-		c.Writer.Flush()
+		if !ok {
+			return
+		}
 	}
 }
 

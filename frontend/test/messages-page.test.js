@@ -143,6 +143,8 @@ async function mount() {
   app = createApp(defineComponent({ render: () => [h(page), h(Confirm)] }))
   app.use(router)
   app.mount(root)
+  // 第一次載入等 SSE 連上才開始
+  if (source().readyState === 0) source().open()
   await vi.waitFor(() => expect(document.querySelectorAll('.msg').length).toBeGreaterThan(0))
   await vi.waitFor(() => expect(document.querySelector('.member-pane .member')).toBeTruthy())
 }
@@ -205,7 +207,6 @@ it('F1 第一次只發一次 limit=15，捲到頂才發 before=最舊&limit=15�
 it('F2 SSE 事件下一次 render 就更新；重連只發一次 after= 補齊；連線被拒才自己重連；沒有任何定時輪詢', async () => {
   const intervals = vi.spyOn(globalThis, 'setInterval')
   await mount()
-  source().open()
   source().emit('created', { id: 'live', user_name: 'acct-wait', content: '即時訊息', tags: [], created_at: at(100) })
   await nextTick()
   expect(contents().at(-1)).toBe('即時訊息')
@@ -219,7 +220,7 @@ it('F2 SSE 事件下一次 render 就更新；重連只發一次 after= 補齊�
   source().drop(false)
   source().open()
   await vi.waitFor(() => expect(contents().at(-1)).toBe('斷線時的訊息'))
-  expect(messageCalls().filter((url) => url.includes('after='))).toEqual(['/v1/messages?after=live&sort=asc&limit=50'])
+  expect(messageCalls().filter((url) => url.includes('after='))).toEqual(['/v1/messages?after=m25&sort=asc&limit=50'])
   expect(contents().filter((text) => text === '即時訊息')).toHaveLength(1)
 
   vi.useFakeTimers()
@@ -234,6 +235,88 @@ it('F2 SSE 事件下一次 render 就更新；重連只發一次 after= 補齊�
   expect(document.querySelectorAll('.msg')).toHaveLength(0)
   expect(document.body.textContent).toContain('群聊還沒有訊息')
   expect(intervals).not.toHaveBeenCalled()
+})
+
+it('SSE 連上之前不讀列表，連上後才讀第一頁；推播被拒時仍先顯示訊息', async () => {
+  const Confirm = (await import('../src/shared/Confirm.vue')).default
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: page }, { path: '/sessions/:id', name: 'session-detail', component: { render: () => null } }] })
+  root = document.createElement('div')
+  document.body.append(root)
+  app = createApp(defineComponent({ render: () => [h(page), h(Confirm)] }))
+  app.use(router)
+  app.mount(root)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(messageCalls()).toEqual([])
+  source().drop(true)
+  await vi.waitFor(() => expect(contents()).toHaveLength(15))
+  expect(messageCalls()).toEqual(['/v1/messages?limit=15'])
+})
+
+it('重連的補齊游標取回應尾端，不被重讀期間推來的訊息帶走', async () => {
+  await mount()
+  for (let i = 0; i < 60; i++) backend.messages.push({ id: `x${String(i).padStart(2, '0')}`, user_name: 'acct-run', content: `missed ${i}`, tags: [], created_at: at(100 + i) })
+  const original = fetch.getMockImplementation()
+  let pushed = false
+  fetch.mockImplementation(async (url, request) => {
+    const response = await original(url, request)
+    if (!pushed && url.includes('after=')) {
+      pushed = true
+      const live = { id: 'live', user_name: 'acct-wait', content: '重讀時推來的', tags: [], created_at: at(300) }
+      backend.messages.push(live)
+      source().emit('created', live)
+    }
+    return response
+  })
+  source().drop(false)
+  source().open()
+  await vi.waitFor(() => expect(messageCalls().filter((url) => url.includes('after='))).toHaveLength(2))
+  await vi.waitFor(() => expect(contents()).toHaveLength(76))
+  expect(messageCalls().filter((url) => url.includes('after='))).toEqual(['/v1/messages?after=m25&sort=asc&limit=50', '/v1/messages?after=x35&sort=asc&limit=50'])
+  expect(contents().slice(15)).toEqual([...Array.from({ length: 60 }, (_, i) => `missed ${i}`), '重讀時推來的'])
+})
+
+it('重連時去掉斷線期間被刪的訊息；最舊那則也被刪了就整份重新載入', async () => {
+  await mount()
+  backend.messages = backend.messages.filter((message) => message.id !== 'm30')
+  source().drop(false)
+  source().open()
+  await vi.waitFor(() => expect(contents()).not.toContain('message 30'))
+  expect(contents()).toHaveLength(14)
+
+  backend.messages = backend.messages.filter((message) => message.id !== 'm25')
+  source().drop(false)
+  source().open()
+  await vi.waitFor(() => expect(messageCalls().at(-1)).toBe('/v1/messages?limit=15'))
+  await vi.waitFor(() => expect(contents()).toHaveLength(15))
+  expect(contents()[0]).toBe('message 23')
+  expect(contents()).not.toContain('message 25')
+})
+
+it('清空或刪除比進行中的載入晚到時，舊回應不會把訊息加回去', async () => {
+  await mount()
+  const original = fetch.getMockImplementation()
+  let release
+  fetch.mockImplementation((url, request) => url.includes('before=')
+    ? new Promise((resolve) => { release = () => resolve(original(url, request)) })
+    : original(url, request))
+  const scroller = document.querySelector('.msgs')
+  const box = scrollable(scroller)
+  box.top = 0
+  scroller.dispatchEvent(new Event('scroll'))
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  source().emit('deleted', { id: 'm20' })
+  release()
+  await vi.waitFor(() => expect(contents()).toHaveLength(29))
+  expect(contents()).not.toContain('message 20')
+
+  release = undefined
+  box.top = 0
+  scroller.dispatchEvent(new Event('scroll'))
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  source().emit('cleared', {})
+  release()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(document.querySelectorAll('.msg')).toHaveLength(0)
 })
 
 it('F3 原本在底部才跟著新訊息捲，不在底部時捲動位置不變', async () => {

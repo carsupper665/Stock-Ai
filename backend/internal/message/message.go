@@ -104,12 +104,12 @@ func (s *Service) post(ctx context.Context, author auth.Identity, content string
 				int(math.Ceil(account.ChatMutedUntil.Sub(now).Minutes())), account.ChatMutedUntil.UTC().Format(time.RFC3339))
 		}
 		window := time.Duration(account.ChatRateMinutes) * time.Minute
-		count, oldest, err := s.store.AccountMessageWindow(ctx, account.ID, now.Add(-window))
+		count, blocking, err := s.store.AccountMessageWindow(ctx, account.ID, now.Add(-window), account.ChatRateCount)
 		if err != nil {
 			return nil, err
 		}
 		if count >= int64(account.ChatRateCount) {
-			wait := max(1, int(math.Ceil(oldest.Add(window).Sub(now).Minutes())))
+			wait := max(1, int(math.Ceil(blocking.Add(window).Sub(now).Minutes())))
 			return nil, fmt.Errorf("%w：每 %d 分鐘最多 %d 則，約 %d 分鐘後可再發言", ErrChatRateLimited, account.ChatRateMinutes, account.ChatRateCount, wait)
 		}
 	}

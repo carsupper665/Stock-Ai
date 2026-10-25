@@ -836,12 +836,15 @@ author_type
   `PATCH /v1/accounts/{id}` 修改。計數直接查 `messages`（索引 `author_type, author_id, created_at`），刪除的訊息不計。
 - **發言檢查順序**（只對 Account Token）：`chat_post=false` → `403 chat_post_disabled`；禁言中 →
   `403 chat_muted`「你已被管理者禁言，原因：<reason>；剩餘 <N> 分鐘（到 <UTC 時間>）」；窗口內已達上限 →
-  `429 chat_rate_limited`「發言太頻繁：每 <X> 分鐘最多 <Y> 則，約 <Z> 分鐘後可再發言」。N、Z 無條件進位，Z 至少 1。
+  `429 chat_rate_limited`「發言太頻繁：每 <X> 分鐘最多 <Y> 則，約 <Z> 分鐘後可再發言」。N、Z 無條件進位，Z 至少 1；
+  Z 是窗口內由新到舊第 Y 則離開窗口的時間（上限調低後窗口內可能超過 Y 則）。
   USER 不受禁言與頻率限制。只保存目前狀態，不留管理紀錄。
 - **清空**：`DELETE /v1/messages`（USER 專用）刪除全部留言與 tag，回 204。
 - **即時推播**：`GET /v1/messages/stream`（USER 專用）是 SSE。發言、刪除、清空成功後各推一次：
   `event: created`（data 與 `GET /v1/messages` 單筆相同，名稱以 USER 的角度顯示）、`event: deleted`（`{"id"}`）、
-  `event: cleared`（`{}`）。每 25 秒送 `: ping`；客戶端積壓滿 32 則就中斷它，由客戶端重連並用 `after` 補齊。
+  `event: cleared`（`{}`）。訂閱在送出回應標頭前完成。每 25 秒送 `: ping`；客戶端積壓滿 32 則、或單次寫入超過 10 秒
+  （客戶端不讀）就中斷它。前端第一次讀列表等連上之後才開始；重連後從快取最舊的一則用 `after` 往後整段重讀，
+  補上新訊息也去掉斷線期間被刪的。
   broadcaster 只在行程內（Backend 只有一個行程）；關機時先結束所有推播連線，graceful shutdown 才不會等到逾時。
 
 ---

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -630,5 +631,71 @@ func TestMessageStreamReleasesDisconnectedClients(t *testing.T) {
 	}
 	if status, body := do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": "沒人聽也不會卡住"}); status != 201 {
 		t.Fatalf("post: %d %v", status, body)
+	}
+}
+
+func TestMessageStreamDropsClientThatStopsReading(t *testing.T) {
+	previous := sseWriteTimeout
+	sseWriteTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { sseWriteTimeout = previous })
+	engine, _ := newTestServer(t)
+	server := httptest.NewUnstartedServer(engine)
+	server.Listener = smallSendBuffer{server.Listener}
+	server.Start()
+	t.Cleanup(server.Close)
+	baseline := runtime.NumGoroutine()
+
+	// 真的 TCP 連線、兩端緩衝都很小，送出請求後就不再讀：伺服器的寫入會因回壓卡住
+	conn, err := net.Dial("tcp", strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.(*net.TCPConn).SetReadBuffer(1024)
+	fmt.Fprintf(conn, "GET /v1/messages/stream HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer %s\r\n\r\n", testUserToken)
+	time.Sleep(100 * time.Millisecond)
+
+	content := strings.Repeat("字", 500)
+	for i := 0; i < 400; i++ {
+		if status, body := do(t, engine, http.MethodPost, "/v1/messages", testUserToken, gin.H{"content": content}); status != 201 {
+			t.Fatalf("post %d: %d %v", i, status, body)
+		}
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for runtime.NumGoroutine() > baseline {
+		if time.Now().After(deadline) {
+			t.Fatalf("不讀資料的客戶端沒有被中斷：baseline %d，現在 %d", baseline, runtime.NumGoroutine())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// smallSendBuffer 把伺服器端 socket 的送出緩衝調小，回壓才不會被 kernel 緩衝吸收掉
+type smallSendBuffer struct{ net.Listener }
+
+func (l smallSendBuffer) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.SetWriteBuffer(4096)
+	}
+	return conn, err
+}
+
+func TestChatRateWaitUsesTheMessageThatMustLeaveTheWindow(t *testing.T) {
+	engine, store := newTestServer(t)
+	id, token := createAccountFor(t, engine, "lowered", 100)
+	now := time.Now().UTC()
+	for _, message := range []database.Message{
+		{ID: "nine", AuthorType: database.AuthorAccount, AuthorID: id, Content: "9 分鐘前", CreatedAt: now.Add(-9 * time.Minute)},
+		{ID: "one", AuthorType: database.AuthorAccount, AuthorID: id, Content: "1 分鐘前", CreatedAt: now.Add(-time.Minute)},
+	} {
+		if err := store.CreateMessage(context.Background(), &message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	do(t, engine, http.MethodPatch, "/v1/accounts/"+id, testUserToken, gin.H{"chat_rate_minutes": 10, "chat_rate_count": 1})
+	status, body := do(t, engine, http.MethodPost, "/v1/messages", token, gin.H{"content": "hi"})
+	if status != 429 || !strings.Contains(body["message"].(string), "每 10 分鐘最多 1 則，約 9 分鐘後") {
+		t.Fatalf("上限調低後要等較新的那則離開窗口: %d %v", status, body)
 	}
 }

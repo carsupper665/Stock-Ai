@@ -18,16 +18,18 @@ type MessageQuery struct {
 	BeforeID        string
 }
 
-func (s *Store) AccountMessageWindow(ctx context.Context, accountID string, since time.Time) (int64, time.Time, error) {
+// AccountMessageWindow 回傳帳號在 since 之後的訊息數，以及由新到舊第 limit 則的時間：
+// 要等這則離開窗口，數量才會低於 limit。數量不到 limit 時回 0。
+func (s *Store) AccountMessageWindow(ctx context.Context, accountID string, since time.Time, limit int) (int64, time.Time, error) {
 	var window struct {
 		Count     int64
 		CreatedAt time.Time
 	}
-	// 同一個 snapshot 讀取數量與最早時間，避免刪除與兩次查詢交錯造成誤判。
+	// 同一個 snapshot 讀取數量與時間，避免刪除與兩次查詢交錯造成誤判。
 	err := s.db.WithContext(ctx).Model(&Message{}).
 		Select("created_at, COUNT(*) OVER () AS count").
 		Where("author_type = ? AND author_id = ? AND created_at > ?", AuthorAccount, accountID, since).
-		Order("created_at asc").Limit(1).Scan(&window).Error
+		Order("created_at desc").Offset(limit - 1).Limit(1).Scan(&window).Error
 	return window.Count, window.CreatedAt, translate(err)
 }
 
