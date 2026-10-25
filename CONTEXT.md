@@ -22,6 +22,7 @@ _Avoid_: Run history（指稽核用的歷史紀錄）, transcript
 
 **喚醒訊息**:
 每個 Run 開始時接在 Session 對話尾端的那則訊息，說明這次為何被喚醒與當下狀態。
+後續 Run 從累積 Session 對話讀取先前 Run 的最終 JSON summary，不另帶摘要欄位。
 _Avoid_: Initial context, run context
 
 **語意保留**:

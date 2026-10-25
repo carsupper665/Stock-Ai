@@ -541,9 +541,9 @@ Before deciding, read memory_index and bring_back_memories. Use memory_list to f
 Save as soon as you learn something worth keeping, not only at the end: lessons from outcomes, strategy rules that worked or failed, account constraints, your plan for the next Run, and instructions from the user. Prefer memory_edit to correct or extend an existing memory over saving a duplicate; when the cabinet is full, edit the least useful one. Set bring_back=true only for rules you must recall at the start of every Run (all bring_back msgs together may hold at most 3000 characters).
 Do not store trades, orders, positions, prices or routine status: your trades are already recorded in the ledger (get_trades, get_ledger) and live state comes from tools.
 
-When your work is normally complete, finish with finish_reason "stop" and content containing exactly one JSON object:
+When your work is normally complete, end with a response that calls no tool and whose content is exactly one JSON object:
 {"status":"completed","output":"human-readable final decision","summary":"short summary for the next Run (max 500 Unicode characters)"}
-output and summary are required; summary is given to the next Run as recent_run_summary. Use status "completed" when the requested work succeeded or a deliberate no-action decision was reached. If a required tool or dependency is unavailable and prevents the work, use status "failed" and explain the blocker in output. Never claim completion merely because you produced a final response. Do not include extra fields, credentials or hidden reasoning. Tool calls continue to use the structured tool channel; do not put this final object in a tool call.`
+output and summary are required; summary is what later Runs read first to recall this Run. Use status "completed" when the requested work succeeded or a deliberate no-action decision was reached. If a required tool or dependency is unavailable and prevents the work, use status "failed" and explain the blocker in output. Never claim completion merely because you produced a final response. Do not include extra fields, credentials or hidden reasoning. Tool calls continue to use the structured tool channel; do not put this final object in a tool call.`
 
 type Finalization struct {
 	Status  string `json:"status,omitempty"`

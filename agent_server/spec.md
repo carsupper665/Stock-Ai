@@ -3024,6 +3024,11 @@ A normal completion consumes only the existing counted Generate decision. It req
 `finish_reason:"stop"`, no Tool calls, and `content` containing exactly one JSON object with
 no unknown/trailing data:
 
+模型收尾 prompt 使用：`When your work is normally complete, end with a response that calls
+no tool and whose content is exactly one JSON object:`，以及
+`summary is what later Runs read first to recall this Run.`。
+API 的 finish reason 仍由 Runtime 核對，不在 system prompt 要求模型設定。
+
 ```json
 {"status":"completed","output":"human-readable final decision","summary":"short summary for the next Run"}
 ```
@@ -3756,5 +3761,6 @@ the Backend enforces each Account's chat permissions (`backend/SPEC.md` §18.1).
 - **Compaction.** A delivered chat message folds into a `chat:` line.
 
 The group chat system prompt explains USER-only idle wake and the fixed 10-second quiet
-period. It still tells models not to poll chat themselves. ChatWakeTask runs inside the
+period. It still tells models not to poll chat themselves, and that the final JSON is never shown
+in the chat, so a tag is answered with post_chat. ChatWakeTask runs inside the
 existing eventloop; it adds no goroutine, env option, Backend field, or Run entry point.
