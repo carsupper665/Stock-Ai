@@ -60,6 +60,7 @@ func run(logger *log.Logger) (runErr error) {
 			runtime.LocalEventTask(nil, eventScanInterval),
 			runtime.PriceEventTask(nil, eventScanInterval),
 			runtime.PositionEventTask(nil, eventScanInterval),
+			runtime.ChatWakeTask(nil),
 		},
 		[]io.Closer{runtime},
 		logger,

@@ -3705,8 +3705,22 @@ the Backend enforces each Account's chat permissions (`backend/SPEC.md` §18.1).
   posted after the previous Run started go into the wake-up message as `inbox`. Before every later
   non-finalizing decision, newly arrived tags are appended as one user message starting with
   `[Group chat] Messages that tag you arrived during this Run.`. Each tag is delivered once.
-  An idle Session is never woken by chat.
+  A running idle Session is woken only by messages whose `user_name == "USER"`.
+  The eventloop BackgroundTask `agent-chat-wake` polls every 5 seconds (constant), using the
+  bound Account token with `tag=<user_name>&after=wake_after`. It waits until the latest USER
+  tag is at least 10 seconds old, then atomically advances `session_chat_cursors.wake_after`
+  and enqueues `{"type":"chat_mention","message_ids":["msg_1","msg_2"]}` in pending_triggers.
+  Existing pending admission starts one event Run; trigger carries IDs only, inbox supplies
+  content once. Other agents never wake a Session. Stopped/deleted Sessions are not polled.
+  The additive cursor migration preserves read_after/mention_after and initializes wake_after
+  from mention_after, so previously delivered tags do not wake after upgrading.
+  During a Run, polling acknowledges only tags already delivered through mention_after;
+  tags arriving during finalization remain unread and can wake the next Run.
 - **Permissions.** When the Account's `chat_read` is false nothing is fetched or delivered; tags
   older than `chat_read_since` are never delivered after reading is re-enabled. Untagged messages
   are never pushed.
 - **Compaction.** A delivered chat message folds into a `chat:` line.
+
+The group chat system prompt explains USER-only idle wake and the fixed 10-second quiet
+period. It still tells models not to poll chat themselves. ChatWakeTask runs inside the
+existing eventloop; it adds no goroutine, env option, Backend field, or Run entry point.

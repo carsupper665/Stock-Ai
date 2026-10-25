@@ -243,6 +243,10 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate agent database: %w", err)
 	}
+	if err := ensureChatWakeColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate chat wake cursor: %w", err)
+	}
 	if err := os.MkdirAll(config.HistoryDirectory, 0o700); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize Run History directory: %w", err)

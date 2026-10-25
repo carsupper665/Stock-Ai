@@ -39,6 +39,7 @@ _Avoid_: Message board, 留言板, channel
 
 **提及（tag）**:
 在群聊訊息中指名某個帳號（或 USER）；只有提及某個 Agent 的訊息才會主動送進它的 Session 對話。
+只有 `user_name == "USER"` 的提及會叫醒 running 且待機的 Session，安靜等待 10 秒後合併喚醒；Run 中沿用下一步插入。
 _Avoid_: Mention notification, @all
 
 **成員**:
