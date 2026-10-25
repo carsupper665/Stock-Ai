@@ -2,21 +2,21 @@
    值來自 design_handoff_agent_console/README.md「Design Tokens」。 */
 :root {
   color-scheme: light dark; /* 預設跟系統，被 data-theme 覆寫 */
-  --bg: light-dark(#f1ece1, #0a0a0c);
-  --surf: light-dark(#fbf8f2, #131317);
-  --surf2: light-dark(#e9e2d4, #1b1c21);
-  --surf3: light-dark(#ded5c4, #26272e);
-  --line: light-dark(#dbd1be, #25262c);
-  --line2: light-dark(#c3b6a0, #383a43);
-  --ink: light-dark(#221f18, #e8eaf0);
-  --dim: light-dark(#6d6557, #9b9eaa);
-  --mute: light-dark(#948b7a, #6e7280);
-  --acc: light-dark(#27506f, #5f7fff);
-  --accw: light-dark(#dde5ed, #161a33);
-  --pos: light-dark(#2c6b4f, #4ec98a);
-  --neg: light-dark(#a33c2b, #e8705c);
-  --warn: light-dark(#82601a, #dda93f);
-  --shadow: 0 1px 2px light-dark(rgba(40, 32, 18, 0.07), rgba(0, 0, 0, 0.5));
+  --bg: light-dark(#fff6f0, #0b0b0c);
+  --surf: light-dark(#fffdfb, #141416);
+  --surf2: light-dark(#ffece0, #1c1c1f);
+  --surf3: light-dark(#fbdcc8, #26262a);
+  --line: light-dark(#f3dccd, #26262a);
+  --line2: light-dark(#e5bfa6, #3a3a40);
+  --ink: light-dark(#2d1b14, #ececee);
+  --dim: light-dark(#725446, #a1a1aa);
+  --mute: light-dark(#a98a7b, #71717a);
+  --acc: light-dark(#7048e8, #9775fa);
+  --accw: light-dark(#efeaff, #1f1a33);
+  --pos: light-dark(#0b7285, #22b8cf);
+  --neg: light-dark(#c2255c, #e64980);
+  --warn: light-dark(#d08700, #f5a524);
+  --shadow: 0 1px 2px light-dark(rgba(16, 24, 40, 0.08), rgba(0, 0, 0, 0.5));
   --overlay: rgba(12, 20, 29, 0.55);
   --modal-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
   --font: 'IBM Plex Sans', 'Noto Sans TC', system-ui, sans-serif;
