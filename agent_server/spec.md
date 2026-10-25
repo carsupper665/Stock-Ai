@@ -3699,9 +3699,11 @@ the model has seen except the system prompt, which is rebuilt each Run.
   later Run appends to the entire stored conversation, rather than keeping only the last Run.
   Both modes keep interruption completion and share the existing 80% compaction logic.
   After compaction, the compacted conversation becomes the new append-only baseline.
-  Existing Gateway byte bounds still apply: a verbatim request that would need the separate
-  byte-bound projection rewrite fails with `CONTEXT_LIMIT_EXCEEDED` before dispatch, rather
-  than silently changing the conversation below the 80% threshold.
+  Verbatim never uses the separate byte-bound projection rewrite: reaching 80% of the
+  768 KiB model-message bound triggers the same compaction as 80% of the window, aiming
+  below 50% of both. A request that still exceeds the bound after compaction (for example one
+  current-step tool result alone) fails with `CONTEXT_LIMIT_EXCEEDED` before dispatch; the next
+  Run folds that earlier Run and continues.
 - **Compaction.** When the estimate reaches 80% of the model's window, everything before the
   current wake-up message folds into one `[Context compacted]` message; if the request is still
   at or above 50%, the current Run's steps before the last assistant turn fold too. A folded

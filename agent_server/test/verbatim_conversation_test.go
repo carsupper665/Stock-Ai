@@ -159,26 +159,41 @@ func TestVerbatimInterruptedToolGetsUnknownResult(t *testing.T) {
 	}
 }
 
-func TestVerbatimByteBoundDoesNotRewriteBelowCompactionThreshold(t *testing.T) {
+func TestVerbatimByteBoundCompactsLaterRuns(t *testing.T) {
 	fixture := newRuntimeFixture()
 	fixture.models = compactionModels(10000000)
 	fixture.market = largeSnapshots(800000)
 	script := &compactionScript{}
-	fixture.generate = script.handler(t, func(call int) map[string]any { return toolStep("read", snapshotCall("large", "BTCUSDT")) }, failCompaction(t))
+	fixture.generate = script.handler(t, func(call int) map[string]any {
+		if call == 1 {
+			return toolStep("read", snapshotCall("large", "BTCUSDT"))
+		}
+		return finalResponse("recovered", "recovered")
+	}, failCompaction(t))
 	runtime, _, _ := fixture.open(t, "")
 	session := createStoppedSession(t, runtime, map[string]any{"conversation_mode": "verbatim"})
 	startSessionForTest(t, runtime, session.ID)
-	run := waitForRunStatus(t, runtime, session.ID, 1, "failed")
-	if run.ErrorCode != "CONTEXT_LIMIT_EXCEEDED" {
+	// One tool result alone exceeds the bound; nothing earlier can fold, so this Run fails.
+	if run := waitForRunStatus(t, runtime, session.ID, 1, "failed"); run.ErrorCode != "CONTEXT_LIMIT_EXCEEDED" {
 		t.Fatalf("byte bound error = %v", run.Error)
+	}
+	stopSessionForMemoryTest(t, runtime.Handler(), session.ID)
+	startSessionForTest(t, runtime, session.ID)
+	run := waitForRunStatus(t, runtime, session.ID, 2, "completed")
+	if !strings.Contains(string(run.Progress), `"type":"context_compaction"`) {
+		t.Fatalf("Run 2 did not compact: %s", run.Progress)
 	}
 	script.mu.Lock()
 	defer script.mu.Unlock()
-	if len(script.main) != 1 {
-		t.Fatalf("rewritten request dispatched: %d", len(script.main))
+	if len(script.main) != 2 {
+		t.Fatalf("main calls = %d", len(script.main))
+	}
+	encoded, _ := json.Marshal(script.main[1]["messages"])
+	if strings.Contains(string(encoded), strings.Repeat("~", 800000)) {
+		t.Fatal("Run 2 resent the oversized tool result")
 	}
 	status, raw := runtimeRequest(t, runtime.Handler(), http.MethodGet, "/api/v1/sessions/"+session.ID+"/conversation", agentAdminToken, nil)
-	if status != 200 || !strings.Contains(string(raw), strings.Repeat("~", 800000)) {
-		t.Fatal("byte bound rewrote stored conversation")
+	if status != 200 || strings.Contains(string(raw), strings.Repeat("~", 800000)) {
+		t.Fatal("compacted conversation is not the new baseline")
 	}
 }

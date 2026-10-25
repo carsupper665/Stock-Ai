@@ -282,12 +282,21 @@ func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runI
 	if window <= 0 {
 		window = defaultContextWindow
 	}
+	// verbatim cannot fall back to the byte-bound projection, so the request byte bound
+	// triggers the same compaction as the token window.
+	below := func(candidate []gatewayMessage, ratio float64) bool {
+		if float64(estimateContextTokens(candidate, toolDefinitions)) >= ratio*float64(window) {
+			return false
+		}
+		encoded, _ := json.Marshal(candidate)
+		return session.ConversationMode != "verbatim" || float64(len(encoded)) < ratio*maxModelMessageBytes
+	}
 	before := estimateContextTokens(messages, toolDefinitions)
-	if float64(before) < compactTriggerRatio*float64(window) {
+	if below(messages, compactTriggerRatio) {
 		return messages, nil
 	}
 	compacted, blocks := compactConversation(messages, func(candidate []gatewayMessage) bool {
-		return float64(estimateContextTokens(candidate, toolDefinitions)) < compactTargetRatio*float64(window)
+		return below(candidate, compactTargetRatio)
 	})
 	if len(blocks) == 0 {
 		return messages, nil
