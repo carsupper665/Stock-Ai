@@ -1,6 +1,6 @@
 # 群聊與成員管理改版：交付驗證
 
-計畫：群聊與成員管理改版（禁言、頻率限制、即時推播、API 手冊）。提交於 `master`：`43e4f24`、`3f05a71` 與本文件所在的提交，未推送。
+計畫：群聊與成員管理改版（禁言、頻率限制、即時推播、API 手冊）。提交於 `master`：`43e4f24`、`3f05a71`、`48cfd99`、`12325bc`（審查修正）與本文件所在的提交，未推送。
 版本：Backend `0.1.3-b0r0`、Agent Server `0.1.4-b0r0`、Frontend `0.1.4-b0r0`、middleware 不變（`0.1.2-b0r0`）；
 這幾個版本號在上一版（`425e843`）已調整且尚未推送，所以這次沒有再改。
 
@@ -21,14 +21,14 @@ win-test：先在 Windows 執行 `stop.ps1`（`stop.cmd` 的內容），再由 W
 | A8 | USER 發言不受影響 | 通過 | `TestChatPostingRestrictionOrderAndUserExemption` |
 | B1 | 新帳號與遷移後舊帳號為 1 分鐘／3 則 | 通過 | `TestChatRateDefault`、`TestChatManagementLegacyMigration` |
 | B2 | 第 4 則 429，含「每 1 分鐘最多 3 則」「約 1 分鐘後」；窗口過後可再發 | 通過 | `TestChatRateDefault`、`TestChatRateWindowDeletionAndIsolation` |
-| B3 | 每 2 分鐘 1 則時第 2 則被擋；範圍外 400 | 通過 | `TestChatRateWindowDeletionAndIsolation`、`TestChatRateValidation` |
+| B3 | 每 2 分鐘 1 則時第 2 則被擋；範圍外 400；調低上限後等待時間看第 Y 新的那則 | 通過 | `TestChatRateWindowDeletionAndIsolation`、`TestChatRateValidation`、`TestChatRateWaitUsesTheMessageThatMustLeaveTheWindow` |
 | B4 | 刪除的不計、帳號各自計算、USER 不受限 | 通過 | `TestChatRateWindowDeletionAndIsolation`、`TestChatPostingRestrictionOrderAndUserExemption` |
 | B5 | 三種條件同時成立回 `chat_post_disabled`，順序固定 | 通過 | `TestChatPostingRestrictionOrderAndUserExemption` |
 | C1 | `limit` 1～50，超出 400；預設 10；原有測試全過 | 通過 | `TestListMessagesLimit`、`TestListMessagesQueryValidation`、`TestFixedPaginationSortAndTagFilter` |
 | C2 | `before` 可配 tag、sort；與 after 併用 400；id 不存在 400 | 通過 | `TestListMessagesBefore` |
 | C3 | `DELETE /v1/messages` 只有 USER（帳號 403、匿名 401）；清空後列表與 tag 查詢都是空的 | 通過 | `TestClearMessages` |
 | C4 | SSE：發言、刪除、清空各收到一次事件，created 與列表單筆完全相同；帳號 token 403 | 通過 | `TestMessageStreamEvents` |
-| C5 | 斷線後移除訂閱、goroutine 回到基準數；緩衝滿就中斷；關機結束所有連線 | 通過 | `TestMessageStreamReleasesDisconnectedClients`、`TestStreamDropsSlowAndUnsubscribedClients`、`TestCloseStreamsEndsEveryClient` |
+| C5 | 斷線後移除訂閱、goroutine 回到基準數；緩衝滿就中斷；關機結束所有連線 | 通過 | `TestMessageStreamReleasesDisconnectedClients`、`TestMessageStreamDropsClientThatStopsReading`、`TestStreamDropsSlowAndUnsubscribedClients`、`TestCloseStreamsEndsEveryClient` |
 | C6 | 經 middleware 代理的 SSE 事件 1 秒內送達 | 通過 | `TestProxyForwardsTheChatStreamWithinOneSecond` |
 | D1 | `post_chat` 遇 `chat_muted`／`chat_rate_limited` 原樣回 `{"ok":false,"error":{code,message,outcome:"not_executed"}}` | 通過 | `TestPostChatPreservesModerationErrorsAndWakeUpShape` |
 | D2 | 清空後 `get_chat`（不帶 page）退回讀最新訊息 | 通過 | `TestGetChatAfterChatClearedReadsNewestAgain` |
@@ -36,7 +36,7 @@ win-test：先在 Windows 執行 `stop.ps1`（`stop.cmd` 的內容），再由 W
 | E2 | 點成員與右鍵「管理使用者」開同一個彈窗；權限（停權要確認）、禁言兩欄必填、解除、頻率失焦或 Enter 只送改動欄位；錯誤顯示並還原 | 通過 | `E2 點成員與右鍵「管理使用者」…`、`E2 彈窗的權限…` |
 | E3 | 「@ 他」加進輸入框 tag，送出時帶上 | 通過 | `E3 「@ 他」把成員加進輸入框的 tag 並關閉彈窗` |
 | F1 | 第一次只發一次 `limit=15`；捲到頂才發 `before=…&limit=15` 且位置不跳；離開再回來不重抓 | 通過 | `F1 第一次只發一次 limit=15…` |
-| F2 | created／deleted／cleared 下一次 render 就更新；重連只發一次 `after=`；連線被拒才自己重連；沒有 setInterval | 通過 | `F2 SSE 事件下一次 render 就更新…` |
+| F2 | created／deleted／cleared 下一次 render 就更新；重連只發一次 `after=`；連線被拒才自己重連；沒有 setInterval；SSE 連上才讀第一頁；補齊游標不被推播帶走；斷線期間的刪除會同步；清空／刪除讓進行中的載入作廢 | 通過 | `F2 SSE 事件下一次 render 就更新…`、`SSE 連上之前不讀列表…`、`重連的補齊游標取回應尾端…`、`重連時去掉斷線期間被刪的訊息…`、`清空或刪除比進行中的載入晚到時…` |
 | F3 | 在底部才跟著捲；不在底部時位置不變；自己發言回到底部 | 通過 | `F3 原本在底部才跟著新訊息捲…` |
 | F4 | 搜尋只過濾已載入的並顯示提示；「@我」正確 | 通過 | `F4 搜尋只過濾已載入的訊息…` |
 | F5 | @你 強調樣式；未讀捲進畫面就減少；點未讀跳最舊一則 | 通過 | `F5 @你 有強調樣式…` |
@@ -58,13 +58,13 @@ win-test：先在 Windows 執行 `stop.ps1`（`stop.cmd` 的內容），再由 W
 
 | 檢查 | 結果 |
 |---|---|
-| Backend `go test ./...` | 385 通過 |
+| Backend `go test ./...` | 387 通過 |
 | Agent Server `go test ./...` | 429 通過 |
 | LLM Provider `go test ./...` | 271 通過 |
 | middleware `go test ./...` | 116 通過 |
 | 四個 module `go vet ./...` | 無輸出 |
 | `gofmt -l` | 無輸出 |
-| Frontend `vitest run` | 21 個測試檔、110 個測試通過 |
+| Frontend `vitest run` | 21 個測試檔、114 個測試通過 |
 | `vite build` | 成功 |
 | `scripts/check_versions.py` | 成功 |
 | `scripts/test`（含 nginx 範本測試） | 全部通過（2 個依環境略過） |
@@ -93,6 +93,23 @@ PASS AccountTokenForbidden GET /v1/messages/stream: HTTP 403 {"error": "forbidde
 win-test 的群聊目前沒有訊息，訊息氣泡（USER 靠右、@你、被刪除用戶、長名稱、長訊息）的樣子看假資料的截圖：
 [寬亮](chat-screenshots/wide-light.png)、[寬暗](chat-screenshots/wide-dark.png)、[窄亮](chat-screenshots/narrow-light.png)、[窄暗](chat-screenshots/narrow-dark.png)、
 [彈窗亮](chat-screenshots/wide-dialog-light.png)、[彈窗暗](chat-screenshots/wide-dialog-dark.png)。量測數據：[chat-layout-geometry.json](chat-layout-geometry.json)。
+
+## 審查修正（`12325bc`）
+
+| 審查項目 | 修正 | 回歸測試（修正前會失敗） |
+|---|---|---|
+| 1 慢速 SSE 客戶端無法中斷 | 每次寫入設 10 秒寫入期限（`http.ResponseController.SetWriteDeadline`），寫不出去就結束 handler | `TestMessageStreamDropsClientThatStopsReading`（真 TCP、伺服器送出緩衝 4KB、客戶端不讀） |
+| 2 補齊游標被即時訊息推進 | 分頁游標取每次回應的最後一則 | `重連的補齊游標取回應尾端，不被重讀期間推來的訊息帶走` |
+| 3 清空後舊載入復活訊息 | 清空時 epoch 加一，回應回來 epoch 變了就作廢；刪除的 id 記下來，舊回應不會加回去 | `清空或刪除比進行中的載入晚到時，舊回應不會把訊息加回去` |
+| 4 首次載入與訂閱之間漏訊息 | 第一次讀列表等 SSE `open` 才開始（Backend 送出標頭前就訂閱好了）；推播被拒時仍先讀列表 | `SSE 連上之前不讀列表，連上後才讀第一頁；推播被拒時仍先顯示訊息` |
+| 5 重連無法同步刪除 | 重連改成從快取最舊的一則用 `after` 往後整段重讀並取代快取；最舊那則也被刪了就整份重載 | `重連時去掉斷線期間被刪的訊息；最舊那則也被刪了就整份重新載入` |
+| 6 調低上限後等待時間低估 | 等待時間看窗口內由新到舊第 Y 則（同一個 SQL snapshot） | `TestChatRateWaitUsesTheMessageThatMustLeaveTheWindow` |
+| 7 手冊時間格式 | 註明 `/v1/market/price` 的 `updated_at` 帶伺服器時區偏移 | 手冊 smoke（實際輸出含 `+08:00`） |
+
+第 5 項和計畫字面不同：計畫寫「重連後用 `after=<快取中最新一則>` 補齊」，那只補得到新增、刪不掉斷線期間被刪的訊息。
+現在改用 `after=<快取中最舊一則>` 重讀快取範圍，快取在 50 則以內時仍然只發一次請求。
+
+Agent 全套在審查環境有 1 個既有測試逾時、單跑通過；這台機器連跑 3 次全套 429 個都通過，沒有重現。
 
 ## 需要知道的事
 

@@ -6,10 +6,10 @@
     "frontend": "0.1.4-b0r0"
   },
   "executables": {
-    "backend.exe": "000a9c2182c09fd863cd4bbda13dc53f2ecbcbeb68ef69de919511f78f2d9e7c",
-    "agent-server.exe": "b00d705a726b972b4bc9ffb7ee14f33e87992599f01c2b537dec78ee8927e93c",
-    "llm-provider-server.exe": "e3e4413252e8d5662a249dde9152255bc2b44343525e9f4bcd592582d2bd4696",
-    "middleware.exe": "6e9cac0ec2b7bf4405d5c98ecadf97b18859071f9b458ad75ab3c740e6669d26"
+    "backend.exe": "f239cf52b45bc271469f16681d318530d34fadfbc2b8887839fc24a41bb9f66e",
+    "agent-server.exe": "dd570706a25fc5d6506e69be5d0f64cc0dc2b251661ab2151267c49a954c4d45",
+    "llm-provider-server.exe": "affa62bbe4de61d5b5371381258e6edbfbc12eacf9bf537f627687be07de61c8",
+    "middleware.exe": "3574453c6b08279cf64f2b6601cc65edebf256de1c48e2e1076a9415f7210552"
   },
   "web_files_equal": true,
   "web_file_count": 26,
