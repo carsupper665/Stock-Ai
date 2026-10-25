@@ -77,6 +77,9 @@ func TestTicket27OpenRuntimeMigratesLegacyRunsWithoutDataLoss(t *testing.T) {
 			t.Fatalf("legacy Session status = %d body = %s", status, raw)
 		}
 		session := decodeBody[agent.Session](t, raw)
+		if session.ConversationMode != "semantic" {
+			t.Fatalf("legacy conversation_mode = %q", session.ConversationMode)
+		}
 		if session.Name != "legacy session" || session.AccountID != "acc_legacy" || session.CurrentRunID != 1 {
 			t.Fatalf("legacy Session changed by migration: %+v", session)
 		}

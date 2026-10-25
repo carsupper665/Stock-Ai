@@ -18,6 +18,7 @@ const form = reactive({
   max_loop: props.preset?.max_loop ?? '',
   max_tool_call: props.preset?.max_tool_call ?? '',
   skills_enabled: props.preset?.skills_enabled ?? false,
+  conversation_mode: props.preset?.conversation_mode ?? 'semantic',
   chat: 'full',
 })
 // 群聊權限掛在帳號上（交易後端強制），建立 Session 時順便設定，之後在 Session 或帳號頁隨時可改
@@ -45,6 +46,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   const body = { name: form.name, account_id: form.account_id, model_name: form.model_name }
+  body.conversation_mode = form.conversation_mode
   if (form.model_level) body.model_level = form.model_level
   if (form.prompt.trim()) body.prompt = form.prompt
   if (form.max_loop !== '') body.max_loop = Number(form.max_loop)
@@ -105,6 +107,9 @@ async function submit() {
         <label class="grow">max_tool_call（留空＝Server Default）<input v-model="form.max_tool_call" type="number" min="1" /></label>
       </div>
       <label class="row"><input v-model="form.skills_enabled" type="checkbox" />skills_enabled（給模型 skill 與 plan_trade；建立後不能改）</label>
+      <label>Session 對話模式（建立後不可改）
+        <select v-model="form.conversation_mode" name="conversation_mode"><option value="semantic">語意保留（預設）</option><option value="verbatim">原文接續</option></select>
+      </label>
       <label class="row">群聊權限（設在帳號上，之後可改）
         <select v-model="form.chat"><option value="full">可讀可發</option><option value="readonly">唯讀（不能發言）</option><option value="banned">停權（不能讀也不能發）</option></select>
       </label>

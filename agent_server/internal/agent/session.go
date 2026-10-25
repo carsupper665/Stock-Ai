@@ -17,14 +17,14 @@ import (
 
 const sessionSelect = `SELECT id, name, account_id, model_name, model_level, prompt,
 	max_loop, max_tool_call, skills_enabled, status, current_run_id, restart_context, created_at,
-	started_at, stopped_at, deleted_at FROM sessions`
+	started_at, stopped_at, deleted_at, conversation_mode FROM sessions`
 
 func scanSession(row scanner) (Session, error) {
 	var session Session
 	var modelLevel, restartContext, startedAt, stoppedAt, deletedAt sql.NullString
 	err := row.Scan(&session.ID, &session.Name, &session.AccountID, &session.ModelName, &modelLevel,
 		&session.Prompt, &session.MaxLoop, &session.MaxToolCall, &session.SkillsEnabled, &session.Status, &session.CurrentRunID,
-		&restartContext, &session.CreatedAt, &startedAt, &stoppedAt, &deletedAt)
+		&restartContext, &session.CreatedAt, &startedAt, &stoppedAt, &deletedAt, &session.ConversationMode)
 	if err != nil {
 		return Session{}, err
 	}

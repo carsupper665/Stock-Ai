@@ -3655,8 +3655,17 @@ Codex 非重試錯誤、失敗回合或沒有工具呼叫的中斷不得正規�
 # 70. Session Conversation
 
 A Session is one continuous conversation; a Run is a segment of it (terms in the repository's
-`CONTEXT.md`). `session_conversations` holds, per Session, the semantic form of every message
+`CONTEXT.md`). `session_conversations` holds, per Session, the selected form of every message
 the model has seen except the system prompt, which is rebuilt each Run.
+
+`POST /api/v1/sessions` 新增選填 `conversation_mode`，字串只允許 `semantic`（預設）或
+`verbatim`；省略與舊 DB 列皆為 `semantic`。明確傳 null、空字串、其他值或型別回
+`400 {"status_code":400,"error":"INVALID_REQUEST","msg":"conversation_mode must be semantic or verbatim when provided"}`。
+例如 `{"name":"原文 Agent","account_id":"acc_1","model_name":"model","conversation_mode":"verbatim"}`
+成功回 `201`，既有 Session JSON 新增 `"conversation_mode":"verbatim"`（建立／查詢／列表皆有）。
+新增 DB 欄位 `sessions.conversation_mode TEXT NOT NULL DEFAULT 'semantic'`，採 ALTER ADD 遷移。
+建立後不可修改；Session 資源的 PATCH 仍回 `405 METHOD_NOT_ALLOWED`。
+前端建立表單預設語意保留，可選原文接續；總覽顯示模式，複製設定帶上原模式。
 
 - **Run start.** The request is the system prompt, the stored conversation, then this Run's
   wake-up message (the JSON context formerly called the initial context, still persisted in
@@ -3675,6 +3684,14 @@ the model has seen except the system prompt, which is rebuilt each Run.
 - **Interruption.** On load, every tool call without a recorded result gets
   `{"ok":false,"error":{"code":"RUN_INTERRUPTED","outcome":"unknown",…}}`, telling the model the
   call may have executed and to check state first.
+- **Verbatim form.** `verbatim` bypasses semantic rewriting on every save: full wake-up
+  messages, tool results, rejected replies and repair instructions remain unchanged. Every
+  later Run appends to the entire stored conversation, rather than keeping only the last Run.
+  Both modes keep interruption completion and share the existing 80% compaction logic.
+  After compaction, the compacted conversation becomes the new append-only baseline.
+  Existing Gateway byte bounds still apply: a verbatim request that would need the separate
+  byte-bound projection rewrite fails with `CONTEXT_LIMIT_EXCEEDED` before dispatch, rather
+  than silently changing the conversation below the 80% threshold.
 - **Compaction.** When the estimate reaches 80% of the model's window, everything before the
   current wake-up message folds into one `[Context compacted]` message; if the request is still
   at or above 50%, the current Run's steps before the last assistant turn fold too. A folded

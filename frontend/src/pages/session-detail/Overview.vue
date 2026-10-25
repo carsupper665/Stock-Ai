@@ -46,6 +46,7 @@ const config = computed(() => [
   ['max_loop', String(props.session.max_loop)],
   ['max_tool_call', String(props.session.max_tool_call)],
   ['skills_enabled', String(props.session.skills_enabled)],
+  ['Session 對話模式', props.session.conversation_mode === 'verbatim' ? '原文接續' : '語意保留'],
   ['prompt', props.session.prompt || '（留空 → 使用 Server Default）'],
 ])
 const last = computed(() => props.session.last_run)

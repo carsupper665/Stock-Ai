@@ -147,7 +147,7 @@ func (r *AgentRuntime) runAgent(ctx context.Context, session Session, trigger st
 		return
 	}
 	saveConversation := func() bool {
-		updated, err := r.saveConversation(session.ID, runID, messages[1:])
+		updated, err := r.saveConversation(session, runID, messages[1:])
 		if err != nil {
 			r.handleRunPersistenceError(session.ID, runID, err)
 			return false
@@ -437,6 +437,9 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 		*progress = append(*progress, *entry)
 	}
 	projection, err := projectModelContext(*messages)
+	if session.ConversationMode == "verbatim" && projection.Compacted > 0 {
+		err = errors.New("verbatim context exceeds the Gateway request bound")
+	}
 	if err != nil {
 		*progress = append(*progress, traceEntry{Type: "context_projection", AttemptType: attemptType,
 			Iteration: iteration, Error: "CONTEXT_LIMIT_EXCEEDED", ContextOriginalBytes: projection.OriginalBytes,

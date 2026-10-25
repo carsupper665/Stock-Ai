@@ -72,22 +72,23 @@ type activeRun struct {
 }
 
 type Session struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	AccountID      string          `json:"account_id"`
-	ModelName      string          `json:"model_name"`
-	ModelLevel     *string         `json:"model_level"`
-	Prompt         string          `json:"prompt"`
-	MaxLoop        int             `json:"max_loop"`
-	MaxToolCall    int             `json:"max_tool_call"`
-	SkillsEnabled  bool            `json:"skills_enabled"`
-	Status         string          `json:"status"`
-	CurrentRunID   int64           `json:"current_run_id"`
-	RestartContext json.RawMessage `json:"restart_context"`
-	CreatedAt      string          `json:"created_at"`
-	StartedAt      *string         `json:"started_at"`
-	StoppedAt      *string         `json:"stopped_at"`
-	DeletedAt      *string         `json:"deleted_at"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	AccountID        string          `json:"account_id"`
+	ModelName        string          `json:"model_name"`
+	ModelLevel       *string         `json:"model_level"`
+	Prompt           string          `json:"prompt"`
+	MaxLoop          int             `json:"max_loop"`
+	MaxToolCall      int             `json:"max_tool_call"`
+	SkillsEnabled    bool            `json:"skills_enabled"`
+	ConversationMode string          `json:"conversation_mode"`
+	Status           string          `json:"status"`
+	CurrentRunID     int64           `json:"current_run_id"`
+	RestartContext   json.RawMessage `json:"restart_context"`
+	CreatedAt        string          `json:"created_at"`
+	StartedAt        *string         `json:"started_at"`
+	StoppedAt        *string         `json:"stopped_at"`
+	DeletedAt        *string         `json:"deleted_at"`
 }
 
 type Run struct {
@@ -242,6 +243,10 @@ func OpenAgentRuntime(config RuntimeConfig) (*AgentRuntime, error) {
 	if err := ensureSessionSkillsColumn(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate agent database: %w", err)
+	}
+	if err := ensureConversationModeColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate conversation mode: %w", err)
 	}
 	if err := ensureChatWakeColumn(db); err != nil {
 		_ = db.Close()

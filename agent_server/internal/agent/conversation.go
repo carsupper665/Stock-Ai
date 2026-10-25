@@ -14,7 +14,7 @@ import (
 
 // The Session conversation is every message the model has seen in a Session, minus the system
 // prompt (rebuilt on each Run). Each Run appends its wake-up message and continues where the
-// previous Run ended or was interrupted. What is stored keeps meaning, not a transcript:
+// previous Run ended or was interrupted. By default storage keeps meaning, not a transcript:
 // read-tool outputs become short digests, repeated identical failures collapse into one, and
 // rejected final responses with their repair instructions are dropped.
 
@@ -26,6 +26,15 @@ const (
 	digestRunes               = 300
 	interruptedToolMessage    = "The Run was interrupted before this call's result was recorded; it may have executed. Check the current state with read tools before acting on it."
 )
+
+func ensureConversationModeColumn(db *sql.DB) error {
+	var found int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'conversation_mode'`).Scan(&found); err != nil || found != 0 {
+		return err
+	}
+	_, err := db.Exec(`ALTER TABLE sessions ADD COLUMN conversation_mode TEXT NOT NULL DEFAULT 'semantic'`)
+	return err
+}
 
 // wakeKeys are the parts of an earlier Run's wake-up message that still mean something later;
 // tool lists, memory indexes and recalled memories are re-sent with every wake-up.
@@ -91,10 +100,13 @@ func (r *AgentRuntime) loadConversation(sessionID string) ([]gatewayMessage, int
 	return completeToolResults(messages), runID, nil
 }
 
-// saveConversation stores the semantic form of messages (without the system prompt) while the
+// saveConversation stores the selected form of messages (without the system prompt) while the
 // Run is still running, so a stopped or superseded Run cannot overwrite a newer conversation.
-func (r *AgentRuntime) saveConversation(sessionID string, runID int64, messages []gatewayMessage) (bool, error) {
-	encoded, err := json.Marshal(semanticConversation(messages))
+func (r *AgentRuntime) saveConversation(session Session, runID int64, messages []gatewayMessage) (bool, error) {
+	if session.ConversationMode != "verbatim" {
+		messages = semanticConversation(messages)
+	}
+	encoded, err := json.Marshal(messages)
 	if err != nil {
 		return false, err
 	}
@@ -103,7 +115,7 @@ func (r *AgentRuntime) saveConversation(sessionID string, runID int64, messages 
 	result, err := r.db.Exec(`INSERT INTO session_conversations (session_id, messages_json, run_id, updated_at)
 		SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM runs WHERE session_id = ? AND run_id = ? AND status = 'running')
 		ON CONFLICT(session_id) DO UPDATE SET messages_json = excluded.messages_json, run_id = excluded.run_id, updated_at = excluded.updated_at`,
-		sessionID, string(encoded), runID, time.Now().UTC().Format(time.RFC3339Nano), sessionID, runID)
+		session.ID, string(encoded), runID, time.Now().UTC().Format(time.RFC3339Nano), session.ID, runID)
 	if err != nil {
 		return false, err
 	}

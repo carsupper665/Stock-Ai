@@ -152,14 +152,15 @@ func (r *AgentRuntime) authorized(request *http.Request) bool {
 }
 
 type createSessionRequest struct {
-	Name          string          `json:"name"`
-	AccountID     string          `json:"account_id"`
-	ModelName     string          `json:"model_name"`
-	ModelLevel    json.RawMessage `json:"model_level"`
-	Prompt        json.RawMessage `json:"prompt"`
-	MaxLoop       json.RawMessage `json:"max_loop"`
-	MaxToolCall   json.RawMessage `json:"max_tool_call"`
-	SkillsEnabled bool            `json:"skills_enabled"`
+	Name             string          `json:"name"`
+	AccountID        string          `json:"account_id"`
+	ModelName        string          `json:"model_name"`
+	ModelLevel       json.RawMessage `json:"model_level"`
+	Prompt           json.RawMessage `json:"prompt"`
+	MaxLoop          json.RawMessage `json:"max_loop"`
+	MaxToolCall      json.RawMessage `json:"max_tool_call"`
+	SkillsEnabled    bool            `json:"skills_enabled"`
+	ConversationMode json.RawMessage `json:"conversation_mode"`
 }
 
 func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Request) {
@@ -176,6 +177,13 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 		return
 	}
 	maxLoop, maxTools := r.config.DefaultMaxLoop, r.config.DefaultMaxToolCall
+	conversationMode := "semantic"
+	if len(input.ConversationMode) != 0 {
+		if json.Unmarshal(input.ConversationMode, &conversationMode) != nil || (conversationMode != "semantic" && conversationMode != "verbatim") || bytes.Equal(bytes.TrimSpace(input.ConversationMode), []byte("null")) {
+			server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "conversation_mode must be semantic or verbatim when provided")
+			return
+		}
+	}
 	if len(input.MaxLoop) != 0 && (bytes.Equal(bytes.TrimSpace(input.MaxLoop), []byte("null")) || json.Unmarshal(input.MaxLoop, &maxLoop) != nil) {
 		server.WriteJSONError(w, http.StatusBadRequest, "INVALID_REQUEST", "max_loop must be a positive integer when provided")
 		return
@@ -235,9 +243,9 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 		return
 	}
 	_, err = r.db.ExecContext(request.Context(), `INSERT INTO sessions
-		(id, name, account_id, model_name, model_level, prompt, max_loop, max_tool_call, skills_enabled,
-		 status, current_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', 0, ?)`,
-		id, input.Name, input.AccountID, input.ModelName, level, prompt, maxLoop, maxTools, input.SkillsEnabled, now)
+		(id, name, account_id, model_name, model_level, prompt, max_loop, max_tool_call, skills_enabled, conversation_mode,
+		 status, current_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', 0, ?)`,
+		id, input.Name, input.AccountID, input.ModelName, level, prompt, maxLoop, maxTools, input.SkillsEnabled, conversationMode, now)
 	requestCanceled := requestCancellationCausedPersistenceError(request.Context(), err)
 	if err != nil {
 		var sqliteError *sqlite.Error
@@ -258,7 +266,8 @@ func (r *AgentRuntime) createSession(w http.ResponseWriter, request *http.Reques
 	session := Session{
 		ID: id, Name: input.Name, AccountID: input.AccountID, ModelName: input.ModelName,
 		ModelLevel: level, Prompt: prompt, MaxLoop: maxLoop, MaxToolCall: maxTools, SkillsEnabled: input.SkillsEnabled,
-		Status: "stopped", RestartContext: json.RawMessage("null"), CreatedAt: now,
+		ConversationMode: conversationMode,
+		Status:           "stopped", RestartContext: json.RawMessage("null"), CreatedAt: now,
 	}
 	writeRuntimeJSON(w, http.StatusCreated, session)
 }

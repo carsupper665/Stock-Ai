@@ -27,6 +27,10 @@ _Avoid_: Initial context, run context
 帶進 Session 對話的只有每一步的意義，不是逐字紀錄；重複的失敗只留一次，思考過程與冗餘參數不保留。
 _Avoid_: Full replay, raw history
 
+**原文接續**:
+Session 的 `conversation_mode=verbatim`，保留歷次 Run 的訊息原文、工具結果與收尾修復訊息；超過 80% 壓縮後以壓縮版為新基準繼續追加。建立後不可切換，預設仍為語意保留。
+_Avoid_: 只保留上一 Run 原文, raw history
+
 **壓縮**:
 Session 對話在一個 Run 內超出模型的上下文預算時，把較早的部分換成更短的版本；壓縮後的版本就是之後所有 Run 的基準，不再還原。
 _Avoid_: Truncation, summary
