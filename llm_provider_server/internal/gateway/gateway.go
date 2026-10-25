@@ -155,7 +155,7 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 	}
 	harnessSessionTTLValue := os.Getenv("LLM_SERVER_HARNESS_SESSION_TTL")
 	if harnessSessionTTLValue == "" {
-		harnessSessionTTLValue = "30m"
+		harnessSessionTTLValue = "24h"
 	}
 	harnessSessionTTL, err := time.ParseDuration(harnessSessionTTLValue)
 	if err != nil || harnessSessionTTL <= 0 {
@@ -243,6 +243,7 @@ func Open(dbPath, adminToken, runtimeToken, encodedMasterKey string, providerTim
 	mux.HandleFunc("/v1/providers/", server.providerByID)
 	mux.HandleFunc("/v1/models", server.models)
 	mux.HandleFunc("/v1/harnesses", server.harnessStatus)
+	mux.HandleFunc("/v1/harnesses/claude/sessions/release", server.releaseClaudeSession)
 	mux.HandleFunc("/v1/model-catalog", server.manageModels)
 	mux.HandleFunc("/v1/model-catalog/", server.manageModels)
 	mux.HandleFunc("/v1/generate", server.generate)

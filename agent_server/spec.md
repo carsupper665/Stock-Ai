@@ -3565,7 +3565,17 @@ migration without invented sources, ledger pagination/filters, cancel-versus-fil
 stop-removal-versus-trigger races) is in `backend/test/ticket2[234]_*_test.go`.
 ## Gateway conversation continuity and Claude diagnostics
 
-Every Generate attempt in one Agent Run sends `conversation_id` as the exact string `<session.ID>/<runID>`. Retries and later decision iterations keep that value, while another Run receives a different value. The Gateway may use it for Claude CLI transport continuity; the Agent Runtime remains the source of truth for replayed messages and does not persist provider sessions.
+Every ordinary Generate attempt sends `conversation_id` as the exact string `<session.ID>`,
+across Runs and in both conversation modes. Compaction retains its independent
+`<session.ID>/<runID>/compaction` ID. The Gateway may use it for Claude CLI transport
+continuity; the Agent Runtime remains the source of truth for replayed messages and does not
+persist provider sessions. Prefix mismatch uses the Gateway's existing cold fallback.
+Successful Session deletion (including cancellation-pending deletion) calls
+`POST /v1/harnesses/claude/sessions/release` with `{"conversation_id":"<session.ID>"}` and
+the existing Gateway Runtime token, after committing the deletion and canceling its Run.
+The notification has the existing RequestTimeout bound. Failure logs only Session ID and a
+safe error/status code in `claude_session_release_error`; it leaves the original delete
+response successful and relies on Gateway's 24h idle TTL. Stop alone sends no notification.
 
 Generate responses may carry nullable `num_turns` and `total_cost_usd`. Valid nonnegative values are retained on the public model-call trace alongside Usage; absent values remain absent rather than becoming zero. These diagnostics and input/cached token metrics are observational and do not guarantee cache or billing savings. If the Gateway restarts or expires its transport session, it safely replays the full request without changing Run semantics.
 

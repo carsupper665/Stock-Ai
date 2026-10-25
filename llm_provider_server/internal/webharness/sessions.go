@@ -2,9 +2,11 @@ package webharness
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -55,6 +57,10 @@ func (cs *ClaudeSessions) Acquire(ctx context.Context, key, credential string, l
 	for {
 		cs.mu.Lock()
 		session := cs.sessions[key]
+		if session != nil && session.retired {
+			cs.mu.Unlock()
+			return nil, ErrWebHarnessUnavailable
+		}
 		if session == nil {
 			var err error
 			session, err = cs.newSession(key, credential, loginSnapshot, request)
@@ -71,6 +77,9 @@ func (cs *ClaudeSessions) Acquire(ctx context.Context, key, credential string, l
 			cs.mu.Lock()
 			session.active--
 			remove := session.retired && session.active == 0
+			if remove && cs.sessions[key] == session {
+				delete(cs.sessions, key)
+			}
 			cs.mu.Unlock()
 			if remove {
 				_ = os.RemoveAll(session.workingDirectory)
@@ -80,11 +89,15 @@ func (cs *ClaudeSessions) Acquire(ctx context.Context, key, credential string, l
 		}
 		cs.mu.Lock()
 		current := cs.sessions[key] == session && !session.retired
+		removed := cs.sessions[key] == session && session.retired
 		cs.mu.Unlock()
 		if current {
 			return session, nil
 		}
 		cs.Release(session)
+		if removed {
+			return nil, ErrWebHarnessUnavailable
+		}
 	}
 }
 
@@ -97,7 +110,7 @@ func (cs *ClaudeSessions) ReserveReplacement(ctx context.Context, current *claud
 		return nil, err
 	}
 	cs.mu.Lock()
-	if cs.sessions[current.key] != current {
+	if cs.sessions[current.key] != current || current.retired {
 		cs.mu.Unlock()
 		return nil, ErrWebHarnessUnavailable
 	}
@@ -144,6 +157,9 @@ func (cs *ClaudeSessions) Release(session *claudeHarnessSession) {
 	session.active--
 	session.lastUsed = time.Now()
 	remove := session.retired && session.active == 0
+	if remove && cs.sessions[session.key] == session {
+		delete(cs.sessions, session.key)
+	}
 	cs.mu.Unlock()
 	session.gate <- struct{}{}
 	if remove {
@@ -205,6 +221,29 @@ func (cs *ClaudeSessions) RemoveAll() {
 	for _, directory := range directories {
 		_ = os.RemoveAll(directory)
 	}
+}
+
+// RemoveConversation retires the Session's Claude transports and its compaction transports.
+// In-flight directories survive until Release, so a canceled CLI can finish exiting safely.
+func (cs *ClaudeSessions) RemoveConversation(conversationID string) error {
+	cs.mu.Lock()
+	var directories []string
+	for key, session := range cs.sessions {
+		if !strings.HasPrefix(key, conversationID+"\x00") && !strings.HasPrefix(key, conversationID+"/") {
+			continue
+		}
+		session.retired = true
+		if session.active == 0 {
+			delete(cs.sessions, key)
+			directories = append(directories, session.workingDirectory)
+		}
+	}
+	cs.mu.Unlock()
+	var result error
+	for _, directory := range directories {
+		result = errors.Join(result, os.RemoveAll(directory))
+	}
+	return result
 }
 
 // GenerateClaudeSession drives one bounded Claude Code transport session for the

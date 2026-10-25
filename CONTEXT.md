@@ -8,6 +8,7 @@
 
 **Session**:
 一個 Agent 的完整生命週期，綁定一個帳號與一個模型；它的所有 Run 共用同一段 Session 對話。
+Claude CLI 的傳輸 session 可跨 Run 重用，僅為快取；Session 對話仍由 agent_server 決定，刪除時通知回收。
 _Avoid_: Agent instance, bot
 
 **Run**:

@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,6 +22,8 @@ import (
 	webharness "stock-ai/llm-provider-server/internal/webharness"
 )
 
+var harnessFixtureExecutable string
+
 func TestMain(m *testing.M) {
 	name := strings.ToLower(filepath.Base(os.Args[0]))
 	if strings.HasPrefix(name, "codex-fixture") {
@@ -29,7 +32,34 @@ func TestMain(m *testing.M) {
 	if strings.HasPrefix(name, "claude-fixture") {
 		os.Exit(runClaudeFixture())
 	}
-	os.Exit(m.Run())
+	fixtureDirectory := ""
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key != "-race" || setting.Value != "true" {
+				continue
+			}
+			// Race's exit delay belongs to the test process, not the external CLI protocol.
+			var err error
+			fixtureDirectory, err = os.MkdirTemp("", "stock-ai-cli-fixture-")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			harnessFixtureExecutable = filepath.Join(fixtureDirectory, "fixture.exe")
+			build := exec.Command("go", "test", "-c", "-race=false", "-o", harnessFixtureExecutable, "./test")
+			build.Dir = ".."
+			if output, err := build.CombinedOutput(); err != nil {
+				_ = os.RemoveAll(fixtureDirectory)
+				fmt.Fprintf(os.Stderr, "build CLI fixture: %v\n%s", err, output)
+				os.Exit(1)
+			}
+		}
+	}
+	code := m.Run()
+	if fixtureDirectory != "" {
+		_ = os.RemoveAll(fixtureDirectory)
+	}
+	os.Exit(code)
 }
 
 func codexComplete(t *testing.T, ctx context.Context, server *webharness.CodexAppServer, key, model string, timeout time.Duration, messages []providers.Message, tools []providers.ToolSchema) (providers.GenerateResponse, error) {
@@ -583,6 +613,9 @@ func copyHarnessFixture(t *testing.T, name string) string {
 	source, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if harnessFixtureExecutable != "" {
+		source = harnessFixtureExecutable
 	}
 	destination := filepath.Join(t.TempDir(), name)
 	input, err := os.Open(source)

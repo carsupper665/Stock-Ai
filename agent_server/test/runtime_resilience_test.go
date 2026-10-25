@@ -201,7 +201,7 @@ func TestRuntimeKeepsConversationAcrossRetriesAndPublishesClaudeDiagnostics(t *t
 	session := createStoppedSession(t, runtime, map[string]any{"max_loop": 1})
 	startSessionForTest(t, runtime, session.ID)
 	run := waitForRunStatus(t, runtime, session.ID, 1, "completed")
-	wantConversation := session.ID + "/1"
+	wantConversation := session.ID
 	mu.Lock()
 	gotConversations := append([]string(nil), conversations...)
 	mu.Unlock()

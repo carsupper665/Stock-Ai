@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -234,7 +235,32 @@ func (r *AgentRuntime) changeSessionState(w http.ResponseWriter, request *http.R
 	if pending {
 		status = http.StatusAccepted
 	}
+	if deleting {
+		r.releaseClaudeSession(sessionID)
+	}
 	writeRuntimeJSON(w, status, map[string]any{"session": session, "cancellation_pending": pending})
+}
+
+func (r *AgentRuntime) releaseClaudeSession(sessionID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), r.config.RequestTimeout)
+	defer cancel()
+	body, _ := json.Marshal(map[string]string{"conversation_id": sessionID})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(r.config.GatewayURL, "/")+"/v1/harnesses/claude/sessions/release", bytes.NewReader(body))
+	if err != nil {
+		r.logOperational("claude_session_release_error", sessionID, 0, "REQUEST_INVALID")
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+r.config.GatewayRuntimeToken)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := r.httpClient.Do(request)
+	if err != nil {
+		r.logOperational("claude_session_release_error", sessionID, 0, "GATEWAY_UNAVAILABLE")
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		r.logOperational("claude_session_release_error", sessionID, 0, "gateway_status_"+strconv.Itoa(response.StatusCode))
+	}
 }
 
 func restartContextFor(tx *sql.Tx, sessionID string, runID int64, interrupting bool, clearance events.Clearance) (any, error) {

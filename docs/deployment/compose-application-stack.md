@@ -75,6 +75,12 @@ docker compose --env-file $ComposeEnvPath `
 
 ## Health ordering and shutdown
 
+Claude transport sessions use `LLM_SERVER_HARNESS_SESSION_TTL=24h` when unset; an existing
+positive Go duration value still overrides it. Agent Server uses its existing Gateway Runtime
+token to notify `/v1/harnesses/claude/sessions/release` after Session deletion. A failed or
+missed notification leaves deletion successful and the 24h idle TTL provides cleanup.
+No additional secret or environment variable is required. Codex behavior is unchanged.
+
 Every dependency uses `condition: service_healthy`; no process or Compose
 command uses a fixed startup sleep. Creation order is Backend, LLM Provider
 Server, Agent Server, middleware. Compose removes or stops dependents in reverse:

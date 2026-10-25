@@ -222,23 +222,17 @@ func TestPlanAgentRunHistoryReadDoesNotRepersistNestedHistory(t *testing.T) {
 	fixture := newRuntimeFixture()
 	largeOutput := strings.Repeat("history-output-", 8000)
 	var mu sync.Mutex
-	runCalls := map[string]int{}
-	fixture.generate = func(w http.ResponseWriter, request *http.Request) {
-		var body struct {
-			ConversationID string `json:"conversation_id"`
-		}
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			t.Errorf("decode Generate request: %v", err)
-		}
+	calls := 0
+	fixture.generate = func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
-		runCalls[body.ConversationID]++
-		call := runCalls[body.ConversationID]
+		calls++
+		call := calls
 		mu.Unlock()
-		if strings.HasSuffix(body.ConversationID, "/1") {
+		if call == 1 {
 			writeFixtureJSON(w, http.StatusOK, finalResponse(largeOutput, "large prior Run"))
 			return
 		}
-		if call == 1 {
+		if call == 2 {
 			writeToolCall(w, "history", "get_run_history", map[string]any{"run_id": 1})
 			return
 		}

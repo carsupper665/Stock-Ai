@@ -210,6 +210,7 @@ func fixtureClaudeRequest(prompt []byte) webharness.WebHarnessRequest {
 
 type managedClaudeMarker struct {
 	SessionID string `json:"session_id"`
+	Agent     bool   `json:"agent,omitempty"`
 }
 
 func runManagedClaudeFixture(prompt []byte) int {
@@ -226,18 +227,26 @@ func runManagedClaudeFixture(prompt []byte) int {
 		if _, err := os.Stat(markerPath); err == nil {
 			return 29
 		}
-		marker, _ := json.Marshal(managedClaudeMarker{SessionID: sessionID})
-		if os.WriteFile(markerPath, marker, 0600) != nil {
-			return 23
-		}
 		var request webharness.WebHarnessRequest
 		parts := strings.SplitN(string(prompt), "The normalized request follows:\n", 2)
 		if len(parts) != 2 || json.Unmarshal([]byte(parts[1]), &request) != nil || strings.Index(parts[1], `"tools"`) > strings.Index(parts[1], `"messages"`) {
 			return 24
 		}
+		agent := strings.HasPrefix(request.Model, "managed-agent")
+		marker, _ := json.Marshal(managedClaudeMarker{SessionID: sessionID, Agent: agent})
+		if os.WriteFile(markerPath, marker, 0600) != nil {
+			return 23
+		}
 		authOK := managedFixtureAuth(request.Messages, workingDirectory)
 		content := fmt.Sprintf(`{"kind":"cold","session_id":%q,"directory":%q,"messages":%d,"assistant_messages":%d,"prompt_bytes":%d,"auth_ok":%t}`,
 			sessionID, workingDirectory, len(request.Messages), countAssistantMessages(request.Messages), len(prompt), authOK)
+		if agent {
+			if request.Model == "managed-agent-large" && len(request.Messages) != 0 && request.Messages[len(request.Messages)-1].Content != nil && strings.Contains(*request.Messages[len(request.Messages)-1].Content, `"trigger":"session_start"`) {
+				content = strings.TrimSuffix(content, "}") + `,"padding":"` + strings.Repeat("長", 7000) + `"}`
+			}
+			encoded, _ := json.Marshal(map[string]string{"status": "completed", "output": content, "summary": "fixture"})
+			content = string(encoded)
+		}
 		calls := []any{}
 		finishReason := "stop"
 		if len(request.Messages) == 2 && request.Messages[1].Content != nil && *request.Messages[1].Content == "need-tool" {
@@ -272,6 +281,10 @@ func runManagedClaudeFixture(prompt []byte) int {
 	}
 	content := fmt.Sprintf(`{"kind":"resume","session_id":%q,"directory":%q,"messages":%d,"assistant_messages":%d,"prompt_bytes":%d,"auth_ok":%t}`,
 		marker.SessionID, workingDirectory, len(messages), countAssistantMessages(messages), len(prompt), managedFixtureAuth(messages, workingDirectory))
+	if marker.Agent {
+		encoded, _ := json.Marshal(map[string]string{"status": "completed", "output": content, "summary": "fixture"})
+		content = string(encoded)
+	}
 	return writeManagedClaudeResult(content, []any{}, "stop")
 }
 

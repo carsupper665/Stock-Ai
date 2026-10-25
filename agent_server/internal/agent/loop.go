@@ -13,7 +13,6 @@ import (
 	"mime"
 	"net/http"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"time"
 
@@ -473,7 +472,7 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 		*progress = append(*progress, traceEntry{
 			Type: "model_call", AttemptType: attemptType, Iteration: iteration, Attempt: attemptNumber, ModelName: session.ModelName,
 			ProviderID: model.ProviderID, Model: model.Model,
-			StartedAt: started.UTC().Format(time.RFC3339Nano), ConversationID: session.ID + "/" + strconv.FormatInt(runID, 10),
+			StartedAt: started.UTC().Format(time.RFC3339Nano), ConversationID: session.ID,
 			ContextOriginalBytes: projection.OriginalBytes, ContextProjectedBytes: projection.ProjectedBytes,
 			ContextCompacted: projection.Compacted, ContextTokens: contextTokens, ContextWindow: window,
 		})
@@ -490,7 +489,7 @@ func (r *AgentRuntime) callModel(ctx context.Context, session Session, runID int
 			continuation = continuationFor(continuationState, projection.Messages)
 		}
 		live.begin(len(*progress) - 1)
-		response, requestBytes, dispatched, generateErr := r.generate(ctx, model, session.ModelLevel, session.ID+"/"+strconv.FormatInt(runID, 10), projection.Messages, definitions, continuation, live.append)
+		response, requestBytes, dispatched, generateErr := r.generate(ctx, model, session.ModelLevel, session.ID, projection.Messages, definitions, continuation, live.append)
 		live.end()
 		entry := &(*progress)[len(*progress)-1]
 		entry.RequestBytes = requestBytes

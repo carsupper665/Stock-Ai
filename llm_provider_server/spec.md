@@ -4,7 +4,7 @@
 > [Model management contract](model-management.md) supersedes the earlier
 > environment-only/no-Model-CRUD restrictions. `/v1/models` remains Runtime-only.
 >
-> 2026-09-17 user-approved amendment: Claude Code may retain an isolated per-Run
+> 2026-09-17 user-approved amendment: Claude Code may retain an isolated per-conversation
 > CLI transport session and accept the exact continuation contract in §37. This
 > supersedes the older stateless-Claude wording in this specification and ticket
 > 13; it must not be used to revert Claude to one cold invocation per turn. The
@@ -528,7 +528,7 @@ type Api interface {
 | `anthropic` | `AnthropicMessages` (`anthropic-messages`) |
 | `gemini` | `GoogleGenerativeAI` (`google-generative-ai`) |
 | `codex` | `webharness.CodexAppServer` (`codex app-server`) |
-| `claude_code` | CLI harness with per-Run sessions (§37), outside the registry |
+| `claude_code` | CLI harness with per-conversation sessions (§37), outside the registry |
 
 `Complete` is the only required V1 runtime method. Every REST Api and the codex
 app-server stream from the Provider: the stream is assembled into the response the
@@ -2155,7 +2155,23 @@ or model-availability acceptance.
 
 An identical request has no new message suffix while the CLI session already contains hidden assistant output. The Gateway therefore executes it cold with a fresh UUID instead of issuing an empty resume or providing an implicit response cache.
 
-Idle sessions expire after `LLM_SERVER_HARNESS_SESSION_TTL` (default `30m`); collection runs at least once per minute and never removes active sessions. Shutdown rejects admission, cancels and joins active CLI work, then removes only Gateway-created temporary session directories. Run completion does not immediately notify the Gateway, so TTL is the normal cleanup boundary.
+Idle sessions expire after `LLM_SERVER_HARNESS_SESSION_TTL` (default `24h`, still overridable by a positive Go duration); collection runs at least once per minute and never removes active sessions. Shutdown rejects admission, cancels and joins active CLI work, then removes only Gateway-created temporary session directories. Agent Session deletion notifies the Gateway for immediate retirement; TTL remains the fallback when that notification fails or is missed. Run completion alone does not release the transport.
+
+### Claude Session release (internal Runtime API)
+
+`POST /v1/harnesses/claude/sessions/release` requires the existing Runtime Bearer token;
+admin credentials do not authorize it. JSON request: `{"conversation_id":"s_…"}`.
+The ID is required, 1–128 Unicode characters, without control characters; unknown fields,
+null, wrong type or malformed JSON return `400 REQUEST_INVALID` in the existing error envelope.
+Success is `200 {"released":true}`, including unknown/already released IDs (idempotent).
+It retires every Claude provider/model/signature variant for that conversation and its `/…`
+descendants (including separate compaction calls), without exposing credentials, paths or UUIDs.
+Idle directories are removed before success. In-flight directories are retired immediately
+and removed when the invocation and existing waiters exit; no new invocation may acquire a
+retiring transport. Codex state is unaffected.
+No/wrong/admin token returns `401 AUTHENTICATION_FAILED`; unsupported method returns
+`405 REQUEST_INVALID` with `Allow: POST`; filesystem cleanup failure returns
+`500 INTERNAL_ERROR` with a fixed non-sensitive message.
 
 Claude responses may include nullable `num_turns` and `total_cost_usd`; present values must be nonnegative and cost must be finite. Input-token and cached-token diagnostics remain provider-reported metrics. Session reuse and reported cache metrics do not guarantee cost, latency, or token savings, and restart/expiry deliberately falls back to a full prompt.
 

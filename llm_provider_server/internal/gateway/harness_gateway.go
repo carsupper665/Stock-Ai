@@ -9,7 +9,37 @@ import (
 	"net/http"
 	"stock-ai/llm-provider-server/internal/providers"
 	"stock-ai/llm-provider-server/internal/webharness"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
+
+func (s *Server) releaseClaudeSession(w http.ResponseWriter, r *http.Request) {
+	if !authorized(r, s.runtimeToken) {
+		writeError(w, http.StatusUnauthorized, "AUTHENTICATION_FAILED", "Valid runtime credentials are required.")
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	var input struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeError(w, 400, "REQUEST_INVALID", err.Error())
+		return
+	}
+	if input.ConversationID == "" || utf8.RuneCountInString(input.ConversationID) > 128 || strings.IndexFunc(input.ConversationID, unicode.IsControl) >= 0 {
+		writeError(w, 400, "REQUEST_INVALID", "conversation_id must be 1-128 characters with no control characters")
+		return
+	}
+	if err := s.claudeSessions.RemoveConversation(input.ConversationID); err != nil {
+		writeError(w, 500, "INTERNAL_ERROR", "Unable to release Claude transport session.")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"released": true})
+}
 
 func isHarnessType(kind string) bool { return kind == "codex" || kind == "claude_code" }
 
