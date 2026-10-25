@@ -150,6 +150,19 @@ async function saveHistory() {
 const triggersOf = (r) => (Array.isArray(r.triggers) && r.triggers.length ? r.triggers : null)
 const triggerLabel = (r) => triggersOf(r)?.map((t) => t.type).join(' · ') ?? r.trigger
 const usage = computed(() => contextUse(run.value))
+const cacheUsage = computed(() => {
+  const calls = (run.value?.progress ?? []).filter((entry) => entry.type === 'model_call')
+  const reported = (call) => call?.usage?.cached_tokens != null && call?.usage?.input_tokens != null
+  const summary = (entries) => {
+    const known = entries.filter(reported)
+    if (!known.length) return '未回報'
+    const input = known.reduce((sum, call) => sum + call.usage.input_tokens, 0)
+    const cached = known.reduce((sum, call) => sum + call.usage.cached_tokens, 0)
+    const rate = input > 0 ? `${Math.round(cached / input * 1000) / 10}%` : '—'
+    return `${rate} · ${cached} / ${input} tokens`
+  }
+  return { first: summary(calls.slice(0, 1)), all: summary(calls), missing: calls.filter((call) => !reported(call)).length }
+})
 const conversationLink = computed(() => ({ name: 'session-detail', params: { id: props.session.id }, query: { tab: 'conversation' } }))
 </script>
 
@@ -194,6 +207,10 @@ const conversationLink = computed(() => ({ name: 'session-detail', params: { id:
         <button data-tone="warn" :disabled="retrying || !!retryReason" :title="retryReason" @click="retry">{{ retrying ? 'Retrying…' : 'Retry' }}</button>
       </div>
       <p v-if="historyError" role="alert" data-tone="neg">History 下載失敗：{{ historyError }}</p>
+      <div class="cache-usage small mono" aria-label="Cache 命中率" data-tone="dim">
+        <span>Cache 命中率 · 第一次呼叫：{{ cacheUsage.first }}</span>
+        <span>全部呼叫：{{ cacheUsage.all }}<template v-if="cacheUsage.missing"> · {{ cacheUsage.missing }} 次未回報</template></span>
+      </div>
       <p v-if="run.status === 'failed'" class="note">Retry 會建立新的 Run，不會重送舊的工具呼叫。</p>
       <div v-if="err" class="callout" data-tone="neg">
         <div class="mono" data-tone="neg">{{ err.code }}</div>
@@ -315,6 +332,11 @@ const conversationLink = computed(() => ({ name: 'session-detail', params: { id:
 .detail {
   min-width: 0;
   gap: 11px;
+}
+.cache-usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
 }
 .run-actions {
   position: sticky;

@@ -329,3 +329,22 @@ it('measures how full the context is from the last model call, preferring report
   expect(contextUse({ progress: [call({ context_tokens: 85000 }), { type: 'context_compaction' }] })).toMatchObject({ warn: true, compactions: 1 })
   expect(contextUse({ progress: [{ type: 'model_call' }] })).toBeNull()
 })
+
+it.each([
+  { name: 'reported', usages: [{ input_tokens: 200, cached_tokens: 100 }, { input_tokens: 800, cached_tokens: 600 }], first: '50% · 100 / 200 tokens', all: '70% · 700 / 1000 tokens', missing: 0 },
+  { name: 'zero cache', usages: [{ input_tokens: 200, cached_tokens: 0 }], first: '0% · 0 / 200 tokens', all: '0% · 0 / 200 tokens', missing: 0 },
+  { name: 'unreported', usages: [{ input_tokens: 200, cached_tokens: null }, { input_tokens: 300 }], first: '未回報', all: '未回報', missing: 2 },
+  { name: 'partial', usages: [{ input_tokens: 100 }, { input_tokens: 300, cached_tokens: 90 }, null], first: '未回報', all: '30% · 90 / 300 tokens', missing: 2 },
+  { name: 'zero input', usages: [{ input_tokens: 0, cached_tokens: 0 }], first: '— · 0 / 0 tokens', all: '— · 0 / 0 tokens', missing: 0 },
+])('shows first-call and weighted whole-Run cache usage: $name', ({ usages, first, all, missing }) => {
+  const root = mountRuns({ run_id: 1, status: 'completed', progress: [
+    { type: 'tool_call', usage: { input_tokens: 9999, cached_tokens: 9999 } },
+    ...usages.map((usage) => ({ type: 'model_call', usage, tool_calls: [] })),
+  ] })
+  const cache = root.querySelector('.cache-usage')
+  expect(cache).not.toBeNull()
+  expect(cache.textContent).toContain(`第一次呼叫：${first}`)
+  expect(cache.textContent).toContain(`全部呼叫：${all}`)
+  if (missing) expect(cache.textContent).toContain(`${missing} 次未回報`)
+  else expect(cache.textContent).not.toContain('次未回報')
+})
