@@ -1,8 +1,10 @@
 <script setup>
-import { mmss, num } from '../../shared/format.js'
-import { activity } from '../../shared/run.js'
+import { computed } from 'vue'
+import { mmss } from '../../shared/format.js'
+import { activity, contextUse, shortTokens } from '../../shared/run.js'
 
-defineProps({ session: Object, current: Object, now: Number, compact: Boolean })
+const props = defineProps({ session: Object, current: Object, now: Number, compact: Boolean })
+const usage = computed(() => contextUse(props.current))
 const pct = (n, max) => `${Math.min(100, Math.round((n / max) * 100))}%`
 </script>
 
@@ -35,7 +37,7 @@ const pct = (n, max) => `${Math.min(100, Math.round((n / max) * 100))}%`
       </div>
     </div>
     <div class="stats tokens">
-      <div v-for="k in ['input', 'output', 'cached', 'total']" :key="k" class="stat"><small>{{ k }}</small><b>{{ num(current?.[`${k}_tokens`]) }}</b></div>
+      <div class="stat"><small>context / window</small><b>{{ usage ? `${shortTokens(usage.tokens)} / ${shortTokens(usage.window)}（${usage.percent}%）` : '—' }}</b></div>
     </div>
   </section>
   <section v-else class="card row band" :class="{ compact }" :data-tone="session.status === 'deleted' ? 'mute' : 'warn'">
@@ -82,7 +84,7 @@ const pct = (n, max) => `${Math.min(100, Math.round((n / max) * 100))}%`
 }
 .tokens {
   flex: 1 1 190px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
 }
 .compact {
   flex-direction: column;

@@ -14,8 +14,8 @@ const evidence = resolve(process.argv[2] ?? '../.scratch/user-tag-wake-verbatim/
 mkdirSync(evidence, { recursive: true })
 let state = 'active'
 const now = Date.now()
-const current = { run_id: 3, status: 'running', trigger: 'event', start_time: new Date(now - 45000).toISOString(), decision_count: 3, model_call_count: 4, tool_call_count: 2, input_tokens: 12000, output_tokens: 800, cached_tokens: 9000, total_tokens: 12800,
-  progress: [{ type: 'model_call', iteration: 1, content: '已讀取 USER 的訊息，正在確認市場與風險。', usage: { input_tokens: 12000, cached_tokens: 9000 }, tool_calls: [], ended_at: new Date(now).toISOString() }] }
+const current = { run_id: 3, status: 'running', trigger: 'event', start_time: new Date(now - 45000).toISOString(), decision_count: 3, model_call_count: 4, tool_call_count: 2,
+  progress: [{ type: 'model_call', iteration: 1, context_tokens: 12000, context_window: 128000, content: '已讀取 USER 的訊息，正在確認市場與風險。', usage: { input_tokens: 12000, cached_tokens: 9000 }, tool_calls: [], ended_at: new Date(now).toISOString() }] }
 const session = () => ({ id: 's1', name: 'USER tag 喚醒 Agent', account_id: 'a1', model_name: 'fixture-model', status: ['active', 'idle'].includes(state) ? 'running' : state,
   max_loop: 10, max_tool_call: 20, current_run_id: 3, total_runs: 1, memory_summary: { count: 0 }, active_event_count: 1, pending_trigger_count: 0, skills_enabled: false, conversation_mode: 'verbatim', trading: { account: { user_name: 'fixture-agent', equity: 100000, available: 100000, locked_margin: 0, unrealized_pnl: 0 } } })
 
