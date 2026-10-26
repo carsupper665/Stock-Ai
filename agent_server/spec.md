@@ -3608,8 +3608,11 @@ prefixes are unchanged while below the bound.
 
 Before that byte projection, the Runtime compacts the transport context against the model's token
 window: the Gateway catalog's optional `context_window`, default 128000. Tokens are estimated as
-ASCII bytes/4 plus one per non-ASCII character over the messages and enabled tool definitions.
-When the estimate reaches 80% of the window, the system message, the initial user context and the
+ASCII bytes/4 plus one per non-ASCII character over the messages and enabled tool definitions,
+then scaled by the Session's latest model call that reported `input_tokens` (at most the
+window): reported input ÷ that call's estimate, never below 1. A tokenizer that splits JSON and
+numbers finely therefore triggers compaction before the Provider rejects the request.
+When the scaled estimate reaches 80% of the window, the system message, the initial user context and the
 tail from the last assistant message stay verbatim, and everything between them is replaced, for
 the rest of the Run, by one user message starting `[Context compacted]`. It keeps assistant text and
 one line per tool call (name and bounded arguments); read outputs, error results, repeated

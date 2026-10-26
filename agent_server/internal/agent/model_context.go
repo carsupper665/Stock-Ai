@@ -282,10 +282,11 @@ func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runI
 	if window <= 0 {
 		window = defaultContextWindow
 	}
+	scale := r.tokenScale(session.ID, window)
 	// verbatim cannot fall back to the byte-bound projection, so the request byte bound
 	// triggers the same compaction as the token window.
 	below := func(candidate []gatewayMessage, ratio float64) bool {
-		if float64(estimateContextTokens(candidate, toolDefinitions)) >= ratio*float64(window) {
+		if scale*float64(estimateContextTokens(candidate, toolDefinitions)) >= ratio*float64(window) {
 			return false
 		}
 		encoded, _ := json.Marshal(candidate)
@@ -325,6 +326,36 @@ func (r *AgentRuntime) compactContext(ctx context.Context, session Session, runI
 		"tokens_before": before, "tokens_after": estimateContextTokens(compacted, toolDefinitions)})
 	finishTraceTiming(&entry, started, time.Now())
 	return compacted, &entry
+}
+
+// tokenScale is how far the Provider's reported input exceeded the estimate on the Session's
+// latest reported model call: the estimate counts four ASCII bytes per token, while some
+// tokenizers split JSON and numbers into far more. A report above the window is cumulative CLI
+// usage, not one request, and is skipped.
+func (r *AgentRuntime) tokenScale(sessionID string, window int64) float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rows, err := r.db.Query(`SELECT progress_json FROM runs WHERE session_id = ? ORDER BY run_id DESC LIMIT 20`, sessionID)
+	if err != nil {
+		return 1
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var encoded string
+		var progress []traceEntry
+		if rows.Scan(&encoded) != nil || json.Unmarshal([]byte(encoded), &progress) != nil {
+			continue
+		}
+		for i := len(progress) - 1; i >= 0; i-- {
+			entry := progress[i]
+			if entry.Type != "model_call" || entry.ContextTokens <= 0 || entry.Usage == nil || entry.Usage.InputTokens == nil ||
+				*entry.Usage.InputTokens > window {
+				continue
+			}
+			return max(1, float64(*entry.Usage.InputTokens)/float64(entry.ContextTokens))
+		}
+	}
+	return 1
 }
 
 // summarizeHistory is the one-shot LLM pass. A failed, empty, or longer summary is rejected so

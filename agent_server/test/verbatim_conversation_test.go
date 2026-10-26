@@ -197,3 +197,34 @@ func TestVerbatimByteBoundCompactsLaterRuns(t *testing.T) {
 		t.Fatal("compacted conversation is not the new baseline")
 	}
 }
+
+// The Provider's tokenizer can count several times the estimate; the next Run compacts on the
+// reported input even though the estimate alone stays far below the window.
+func TestReportedInputTriggersCompaction(t *testing.T) {
+	fixture := newRuntimeFixture()
+	fixture.models = compactionModels(100000)
+	fixture.market = largeSnapshots(20000)
+	script := &compactionScript{}
+	fixture.generate = script.handler(t, func(call int) map[string]any {
+		if call == 1 {
+			return toolStep("read", snapshotCall("large", "BTCUSDT"))
+		}
+		final := finalResponse("done", "done")
+		if call == 2 {
+			final["usage"] = map[string]any{"input_tokens": 90000, "output_tokens": 10}
+		}
+		return final
+	}, failCompaction(t))
+	runtime, _, _ := fixture.open(t, "")
+	session := createStoppedSession(t, runtime, map[string]any{"conversation_mode": "verbatim"})
+	startSessionForTest(t, runtime, session.ID)
+	if run := waitForRunStatus(t, runtime, session.ID, 1, "completed"); strings.Contains(string(run.Progress), `"type":"context_compaction"`) {
+		t.Fatalf("Run 1 compacted before any reported usage: %s", run.Progress)
+	}
+	stopSessionForMemoryTest(t, runtime.Handler(), session.ID)
+	startSessionForTest(t, runtime, session.ID)
+	run := waitForRunStatus(t, runtime, session.ID, 2, "completed")
+	if !strings.Contains(string(run.Progress), `"type":"context_compaction"`) {
+		t.Fatalf("Run 2 did not compact on the reported input: %s", run.Progress)
+	}
+}
