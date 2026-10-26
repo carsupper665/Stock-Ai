@@ -7,7 +7,7 @@ import { confirm } from '../../shared/confirm.js'
 import { tone } from '../../shared/format.js'
 import { copy, say } from '../../shared/toast.js'
 import NewSession from '../sessions/NewSession.vue'
-import { currentRun, deleteSession, getSession, listRuns, startSession, stopSession } from './api.js'
+import { currentRun, deleteSession, getRun, getSession, listRuns, startSession, stopSession } from './api.js'
 import CurrentRun from './CurrentRun.vue'
 import Conversation from './Conversation.vue'
 import Memories from './Memories.vue'
@@ -30,7 +30,9 @@ const { data, error, loading, reload } = useLoad(async () => {
     tab.value === 'runs' ? listRuns(props.id, page).then((r) => r.runs) : [],
     session.status === 'running' ? currentRun(props.id).catch((e) => { if (e.status === 404) return null; throw e }) : null,
   ])
-  return { session, runs, current, account: session.trading?.account }
+  // 兩個 Run 之間，context 用量沿用最近一個 Run 最後一次模型呼叫
+  const latest = current ?? (session.status === 'running' && session.current_run_id ? await getRun(props.id, session.current_run_id).catch(() => null) : null)
+  return { session, runs, current, latest, account: session.trading?.account }
 })
 const current = computed(() => data.value?.current)
 
@@ -110,7 +112,7 @@ const cloning = ref(false)
         <button v-if="s.status !== 'deleted'" data-tone="neg" @click="remove">刪除</button>
       </div>
 
-      <CurrentRun v-if="tab !== 'runs'" :session="s" :current="current" :now="now" />
+      <CurrentRun v-if="tab !== 'runs'" :session="s" :current="current" :latest="data.latest" :now="now" />
 
       <div class="tabs">
         <button :aria-selected="tab === 'overview'" @click="go({ tab: 'overview' })">概覽</button>
@@ -122,7 +124,7 @@ const cloning = ref(false)
 
       <Overview v-if="tab === 'overview'" :session="s" :account="data.account" @changed="reload" @go-run="(run) => go({ tab: 'runs', run, page: undefined })" />
       <Runs v-else-if="tab === 'runs'" :session="s" :runs="data.runs" :page="page" :initial="route.query.run" @page="(p) => go({ page: p, run: undefined })" @retried="reload" @ended="reload">
-        <template #current><CurrentRun :session="s" :current="current" :now="now" compact /></template>
+        <template #current><CurrentRun :session="s" :current="current" :latest="data.latest" :now="now" compact /></template>
       </Runs>
       <Conversation v-else-if="tab === 'conversation'" :session="s" />
       <Memories v-else-if="tab === 'memory'" :session="s" />

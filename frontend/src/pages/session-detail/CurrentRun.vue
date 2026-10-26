@@ -3,8 +3,8 @@ import { computed } from 'vue'
 import { mmss } from '../../shared/format.js'
 import { activity, contextUse, shortTokens } from '../../shared/run.js'
 
-const props = defineProps({ session: Object, current: Object, now: Number, compact: Boolean })
-const usage = computed(() => contextUse(props.current))
+const props = defineProps({ session: Object, current: Object, latest: Object, now: Number, compact: Boolean })
+const usage = computed(() => contextUse(props.latest))
 const pct = (n, max) => `${Math.min(100, Math.round((n / max) * 100))}%`
 </script>
 

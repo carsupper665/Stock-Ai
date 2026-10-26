@@ -11,6 +11,7 @@ async function mountPage(status, current, tab = 'runs') {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
     if (url.endsWith('/runs/current')) return current ? response(current) : response({ error: 'CURRENT_RUN_NOT_FOUND' }, 404)
     if (url.includes('/runs?')) return response({ runs: [run] })
+    if (url.endsWith('/runs/2')) return response({ ...run, status: 'completed' })
     if (url.endsWith('/conversation')) return response({ messages: [], estimated_tokens: 0 })
     if (url.endsWith('/memories')) return response({ memories: [], capacity: 60 })
     if (url.endsWith('/usage')) return response({ by_model: [], unknown_attempts: {} })
@@ -37,10 +38,8 @@ it.each([
   expect(band).not.toBeNull()
   expect(band.textContent).toContain(text)
   expect(band.compareDocumentPosition(root.querySelector('.list')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  if (current) {
-    expect(band.querySelectorAll('.bar')).toHaveLength(2)
-    expect([...band.querySelectorAll('.tokens b')].map((b) => b.textContent)).toEqual(['72.6K / 1000K（7%）'])
-  }
+  if (current) expect(band.querySelectorAll('.bar')).toHaveLength(2)
+  if (status === 'running') expect([...band.querySelectorAll('.tokens b')].map((b) => b.textContent)).toEqual(['72.6K / 1000K（7%）'])
 })
 
 it.each(['overview', 'conversation', 'memory', 'monitor'])('keeps the full-width current Run before tabs: %s', async (tab) => {
