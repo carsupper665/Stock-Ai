@@ -171,21 +171,22 @@ func anthropicToolChoice(choice json.RawMessage, tools []ToolSchema, WireByRunti
 func (api AnthropicMessages) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool, options Options) (GenerateResponse, error) {
 	switch upstream.StatusCode {
 	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
-		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "Anthropic rejected the generated request."}
+		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", providerSaid("Anthropic rejected the generated request.", readFailureBody(upstream.Body), options.APIKey)}
 	case http.StatusNotFound:
 		body, err := readProviderBody(upstream.Body)
 		if err != nil {
 			if IsTimeout(err) {
 				return GenerateResponse{}, err
 			}
-			return GenerateResponse{}, ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed."}
+			return GenerateResponse{}, ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed: " + err.Error()}
 		}
 		if anthropicModelNotFound(body) {
-			return GenerateResponse{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Anthropic does not provide the requested model to this credential."}
+			return GenerateResponse{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", providerSaid("Anthropic does not provide the requested model to this credential.", body, options.APIKey)}
 		}
+		upstream.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return GenerateResponse{}, upstreamStatusFailure(upstream)
+		return GenerateResponse{}, upstreamStatusFailure(upstream, options.APIKey)
 	}
 	body, err := readResponseBody(upstream, func(reader io.Reader) ([]byte, error) { return assembleAnthropicStream(reader, options) })
 	if err != nil {
@@ -388,7 +389,7 @@ func assembleAnthropicStream(reader io.Reader, options Options) ([]byte, error) 
 			stopped = true
 			return true, nil
 		case "error":
-			return false, errStreamFailed
+			return false, streamFailure(data, options.APIKey)
 		}
 		return false, nil
 	})

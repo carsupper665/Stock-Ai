@@ -78,7 +78,7 @@ function finalEnvelope(content) {
 function modelAttemptError(error) {
   if (typeof error !== 'string' || !error.trim()) return null
   const code = error.split(':', 1)[0].trim()
-  return { code: /^[A-Z][A-Z0-9_]{1,63}$/.test(code) ? code : 'MODEL_ATTEMPT_FAILED', message: '模型呼叫失敗；完整錯誤保留於 Run 稽核資料。' }
+  return { code: /^[A-Z][A-Z0-9_]{1,63}$/.test(code) ? code : 'MODEL_ATTEMPT_FAILED', message: '模型呼叫失敗', detail: error.trim() }
 }
 
 const toolLabels = {
@@ -242,7 +242,7 @@ export function conversation(run, live) {
       return
     }
     const error = modelAttemptError(entry.error)
-    if (error) items.push({ key: index, kind: 'notice', side: 'notice', tone: 'neg', text: `${error.code} · ${error.message}` })
+    if (error) items.push({ key: index, kind: 'notice', side: 'notice', tone: 'neg', text: `${error.code} · ${error.message}`, detail: error.detail })
   })
   const wake = wakeItem(run)
   if (wake) items.splice(items[0]?.kind === 'resume' ? 1 : 0, 0, wake)

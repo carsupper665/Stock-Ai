@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -277,7 +278,7 @@ func (r *AgentRuntime) sendMessageRequest(toolContext context.Context, token, me
 		if toolContext.Err() != nil {
 			return tools.ErrorResult("TOOL_TIMEOUT", toolContext.Err().Error(), "unknown")
 		}
-		return tools.ErrorResult("BACKEND_UNAVAILABLE", "Backend message request failed", "unknown")
+		return tools.ErrorResult("BACKEND_UNAVAILABLE", "Backend message request failed: "+err.Error(), "unknown")
 	}
 	defer response.Body.Close()
 	expectedStatus := http.StatusOK
@@ -292,7 +293,7 @@ func (r *AgentRuntime) sendMessageRequest(toolContext context.Context, token, me
 		if toolContext.Err() != nil {
 			return tools.ErrorResult("TOOL_TIMEOUT", toolContext.Err().Error(), "unknown")
 		}
-		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid message response", "unknown")
+		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid message response: "+err.Error(), "unknown")
 	}
 	encoded, err := json.Marshal(map[string]any{"ok": true, "result": result})
 	if err != nil {
@@ -310,11 +311,12 @@ func messageBackendError(ctx context.Context, response *http.Response, method st
 		Error   string `json:"error"`
 		Message string `json:"message"`
 	}
-	if err := decodeDependencyJSON(response.Body, &failure); err != nil {
+	body, _ := io.ReadAll(io.LimitReader(response.Body, maxRuntimeBody+1))
+	if err := decodeDependencyJSON(bytes.NewReader(body), &failure); err != nil {
 		if ctx.Err() != nil {
 			return tools.ErrorResult("TOOL_TIMEOUT", ctx.Err().Error(), "unknown")
 		}
-		return tools.ErrorResult("BACKEND_ERROR", fmt.Sprintf("Backend returned HTTP %d", response.StatusCode), outcome)
+		return tools.ErrorResult("BACKEND_ERROR", failureText(response.StatusCode, body), outcome)
 	}
 	if failure.Error == "" {
 		failure.Error = "BACKEND_ERROR"

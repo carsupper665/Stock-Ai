@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -214,12 +216,19 @@ func proxy(name, address, prefix string, credential func(*http.Request) string, 
 			if private {
 				if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 					log.Printf("upstream %s rejected the service credential: %s %s -> %d", name, response.Request.Method, response.Request.URL.Path, response.StatusCode)
-					replaceResponse(response, http.StatusBadGateway, `{"error":"upstream_authentication_failed","message":"Service credentials were rejected."}`)
+					body, _ := io.ReadAll(io.LimitReader(response.Body, 8<<10))
+					for _, secret := range secrets {
+						if secret != "" {
+							body = bytes.ReplaceAll(body, []byte(secret), []byte("[REDACTED]"))
+						}
+					}
+					replaceResponse(response, http.StatusBadGateway, errorJSON("upstream_authentication_failed",
+						fmt.Sprintf("%s rejected the service credential (HTTP %d): %s", name, response.StatusCode, strings.TrimSpace(string(body)))))
 					return nil
 				}
 				if !liveRunStream(response.Request.URL.Path) && responseDisclosesCredential(response, secrets) {
 					log.Printf("upstream %s response failed the credential disclosure check and was withheld: %s %s", name, response.Request.Method, response.Request.URL.Path)
-					replaceResponse(response, http.StatusBadGateway, `{"error":"upstream_response_rejected","message":"Service returned an unsafe response."}`)
+					replaceResponse(response, http.StatusBadGateway, errorJSON("upstream_response_rejected", name+" returned a response containing a service credential; it was withheld."))
 					return nil
 				}
 			}
@@ -240,7 +249,7 @@ func proxy(name, address, prefix string, credential func(*http.Request) string, 
 			log.Printf("upstream %s unavailable: %s %s: %v", name, request.Method, request.URL.Path, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(`{"error":"upstream_unavailable","message":"Service is unavailable."}`))
+			_, _ = w.Write([]byte(errorJSON("upstream_unavailable", name+" is unavailable: "+err.Error())))
 		},
 	}, nil
 }
@@ -324,6 +333,11 @@ func containsSecret(value string, secrets []string) bool {
 		}
 	}
 	return false
+}
+
+func errorJSON(code, message string) string {
+	encoded, _ := json.Marshal(map[string]string{"error": code, "message": message})
+	return string(encoded)
 }
 
 func replaceResponse(response *http.Response, status int, body string) {

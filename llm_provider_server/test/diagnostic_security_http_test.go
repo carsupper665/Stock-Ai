@@ -36,8 +36,9 @@ func TestProviderDiagnosticsDoNotExposeCredentials(t *testing.T) {
 			wantDetail: "expired",
 		},
 		{
-			name: "unknown JSON and plain prose stay private",
-			body: strings.Repeat("x", 295) + diagnosticSecret + ` {"message":"` + diagnosticSecret + `"}`,
+			name:       "unknown JSON and plain prose are shown without the credential",
+			body:       strings.Repeat("x", 295) + diagnosticSecret + ` {"message":"` + diagnosticSecret + `"}`,
+			wantDetail: strings.Repeat("x", 295) + "[redacted]",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -55,11 +56,11 @@ func TestProviderDiagnosticsDoNotExposeCredentials(t *testing.T) {
 				[]byte(`{"provider":"fixture","messages":[{"role":"user","content":"hello"}]}`))
 			assertError(t, response, http.StatusBadGateway, "PROVIDER_UNAVAILABLE")
 			body := response.Body.String()
-			if strings.Contains(body, diagnosticSecret) || strings.Contains(body, strings.Repeat("x", 100)) {
-				t.Fatalf("public Provider diagnostic exposed upstream prose: %s", body)
+			if strings.Contains(body, diagnosticSecret) {
+				t.Fatalf("public Provider diagnostic exposed the credential: %s", body)
 			}
 			if test.wantDetail != "" && !strings.Contains(strings.ToLower(body), test.wantDetail) {
-				t.Fatalf("public Provider diagnostic lost safe category %q: %s", test.wantDetail, body)
+				t.Fatalf("public Provider diagnostic lost %q: %s", test.wantDetail, body)
 			}
 		})
 	}

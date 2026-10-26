@@ -1,5 +1,5 @@
-0.1.5-b3r2
+0.1.5-b3r3
 backend 0.1.3-b0r0
-agent_server 0.1.8-b2r3
-llm_provider_server 0.1.1-b0r0
-middleware 0.1.2-b0r0
+agent_server 0.1.8-b2r4
+llm_provider_server 0.1.1-b0r1
+middleware 0.1.2-b0r1

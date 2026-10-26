@@ -65,17 +65,19 @@ func postJSON(ctx context.Context, options Options, call providerCall) (*http.Re
 		if timedOut {
 			return nil, ProviderError{http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "Provider request timed out."}
 		}
-		return nil, ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed."}
+		return nil, ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", redact("Provider request failed: "+err.Error(), options.APIKey)}
 	}
 	switch response.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
+		body := readFailureBody(response.Body)
 		response.Body.Close()
 		release()
-		return nil, ProviderError{http.StatusBadGateway, "AUTHENTICATION_FAILED", "Provider rejected its configured credential."}
+		return nil, ProviderError{http.StatusBadGateway, "AUTHENTICATION_FAILED", providerSaid("Provider rejected its configured credential.", body, options.APIKey)}
 	case http.StatusTooManyRequests:
+		body := readFailureBody(response.Body)
 		response.Body.Close()
 		release()
-		return nil, ProviderError{http.StatusTooManyRequests, "RATE_LIMITED", "Provider rate limit was reached."}
+		return nil, ProviderError{http.StatusTooManyRequests, "RATE_LIMITED", providerSaid("Provider rate limit was reached.", body, options.APIKey)}
 	}
 	if idle != nil {
 		idle.Reset(options.IdleTimeout)
@@ -121,8 +123,10 @@ func readResponseBody(upstream *http.Response, assemble func(io.Reader) ([]byte,
 	return readProviderBody(upstream.Body)
 }
 
-// errStreamFailed is an error event inside a 200 event stream; its prose is never forwarded.
-var errStreamFailed = ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider stream reported an error."}
+// streamFailure is an error event inside a 200 event stream.
+func streamFailure(data []byte, apiKey string) error {
+	return ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", providerSaid("Provider stream reported an error.", data, apiKey)}
+}
 
 // readServerSentEvents calls handle with each event's name and data until the stream ends or
 // handle reports that it is done. One event, like a whole response, is bounded by 1 MiB.
@@ -199,13 +203,39 @@ func (text *streamText) add(values ...string) error {
 	return nil
 }
 
-func upstreamStatusFailure(upstream *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(upstream.Body, maxUpstreamFailureBody))
+func upstreamStatusFailure(upstream *http.Response, apiKey string) error {
+	body := readFailureBody(upstream.Body)
 	message := fmt.Sprintf("Provider returned HTTP %d.", upstream.StatusCode)
 	if category := upstreamFailureCategory(body); category != "" {
 		message += " " + category
 	}
+	message = providerSaid(message, body, apiKey)
 	return ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", message}
+}
+
+func readFailureBody(reader io.Reader) []byte {
+	body, _ := io.ReadAll(io.LimitReader(reader, maxUpstreamFailureBody))
+	return body
+}
+
+// providerSaid appends the Provider's own error text, bounded and without the request credential,
+// so a failed call can be diagnosed from the Run.
+func providerSaid(message string, body []byte, apiKey string) string {
+	detail := strings.TrimSpace(string(body))
+	if len(detail) > maxUpstreamFailureBody {
+		detail = detail[:maxUpstreamFailureBody]
+	}
+	if detail == "" {
+		return message
+	}
+	return redact(message+" Provider said: "+detail, apiKey)
+}
+
+func redact(text, apiKey string) string {
+	if apiKey == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, apiKey, "[REDACTED]")
 }
 
 func upstreamFailureCategory(body []byte) string {

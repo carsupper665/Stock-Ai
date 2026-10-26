@@ -102,11 +102,14 @@ func (r *AgentRuntime) readMonitorBackend(ctx context.Context, token, path strin
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, &dependencyError{http.StatusBadGateway, "BACKEND_UNAVAILABLE", "Backend monitoring is unavailable"}
+		return nil, &dependencyError{http.StatusBadGateway, "BACKEND_UNAVAILABLE", "Backend monitoring is unavailable: " + failureDetail(response)}
 	}
 	var body map[string]json.RawMessage
-	if err := decodeDependencyJSON(response.Body, &body); err != nil || body == nil {
-		return nil, &dependencyError{http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend monitoring response is invalid"}
+	if err := decodeDependencyJSON(response.Body, &body); err != nil {
+		return nil, &dependencyError{http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend monitoring response is invalid: " + err.Error()}
+	}
+	if body == nil {
+		return nil, &dependencyError{http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend monitoring response is invalid: null body"}
 	}
 	return body, nil
 }

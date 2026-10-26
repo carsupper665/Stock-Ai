@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -286,7 +287,7 @@ func (r *AgentRuntime) writeDependencyError(w http.ResponseWriter, err error) {
 		server.WriteJSONError(w, dependency.status, dependency.code, dependency.msg)
 		return
 	}
-	server.WriteJSONError(w, http.StatusBadGateway, "DEPENDENCY_UNAVAILABLE", "dependency request failed")
+	server.WriteJSONError(w, http.StatusBadGateway, "DEPENDENCY_UNAVAILABLE", "dependency request failed: "+err.Error())
 }
 
 func (r *AgentRuntime) validateModel(ctx context.Context, modelName string, level *string) error {
@@ -302,20 +303,20 @@ func (r *AgentRuntime) resolveModel(ctx context.Context, modelName string, level
 	request.Header.Set("Authorization", "Bearer "+r.config.GatewayRuntimeToken)
 	response, err := r.httpClient.Do(request)
 	if err != nil {
-		return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_UNAVAILABLE", "Gateway model catalog is unavailable"}
+		return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_UNAVAILABLE", "Gateway model catalog is unavailable: " + err.Error()}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-			return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_AUTH_FAILED", "Gateway rejected its configured runtime credential"}
+			return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_AUTH_FAILED", "Gateway rejected its configured runtime credential: " + failureDetail(response)}
 		}
-		return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_UNAVAILABLE", "Gateway model catalog is unavailable"}
+		return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_UNAVAILABLE", "Gateway model catalog is unavailable: " + failureDetail(response)}
 	}
 	var body struct {
 		Models []modelMapping `json:"models"`
 	}
 	if err := decodeDependencyJSON(response.Body, &body); err != nil {
-		return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_RESPONSE_INVALID", "Gateway returned an invalid model catalog"}
+		return modelMapping{}, &dependencyError{http.StatusBadGateway, "GATEWAY_RESPONSE_INVALID", "Gateway returned an invalid model catalog: " + err.Error()}
 	}
 	for _, model := range body.Models {
 		if model.ModelName != modelName {
@@ -355,7 +356,7 @@ func (r *AgentRuntime) fetchAccount(ctx context.Context, accountID string) (back
 	request.Header.Set("Authorization", "Bearer "+r.config.BackendUserToken)
 	response, err := r.httpClient.Do(request)
 	if err != nil {
-		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_UNAVAILABLE", "Backend account lookup is unavailable"}
+		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_UNAVAILABLE", "Backend account lookup is unavailable: " + err.Error()}
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
@@ -363,13 +364,16 @@ func (r *AgentRuntime) fetchAccount(ctx context.Context, accountID string) (back
 	case http.StatusNotFound:
 		return backendAccount{}, &dependencyError{http.StatusNotFound, "ACCOUNT_NOT_FOUND", "Backend Account does not exist"}
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_AUTH_FAILED", "Backend rejected its configured account lookup credential"}
+		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_AUTH_FAILED", "Backend rejected its configured account lookup credential: " + failureDetail(response)}
 	default:
-		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_UNAVAILABLE", "Backend account lookup is unavailable"}
+		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_UNAVAILABLE", "Backend account lookup is unavailable: " + failureDetail(response)}
 	}
 	var account backendAccount
-	if err := decodeDependencyJSON(response.Body, &account); err != nil || account.ID != accountID || account.Token == "" {
-		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend returned an invalid Account response"}
+	if err := decodeDependencyJSON(response.Body, &account); err != nil {
+		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend returned an invalid Account response: " + err.Error()}
+	}
+	if account.ID != accountID || account.Token == "" {
+		return backendAccount{}, &dependencyError{http.StatusBadGateway, "BACKEND_RESPONSE_INVALID", "Backend returned an invalid Account response: id mismatch or no token"}
 	}
 	if account.Status != "active" {
 		return backendAccount{}, &dependencyError{http.StatusConflict, "ACCOUNT_DISABLED", "Backend Account is not active"}
@@ -505,6 +509,28 @@ func decodeRuntimeJSON(request *http.Request, target any) error {
 	}
 	return nil
 }
+
+// failureText is a non-JSON failure body with its status, bounded like failureDetail.
+func failureText(status int, body []byte) string {
+	text := strings.TrimSpace(string(body))
+	if len(text) > maxFailureDetail {
+		text = text[:maxFailureDetail]
+	}
+	return strings.TrimSpace(fmt.Sprintf("Backend returned HTTP %d %s", status, text))
+}
+
+// failureDetail is the status and bounded body of a failed dependency response, so the cause
+// reaches the caller instead of only a fixed message.
+func failureDetail(response *http.Response) string {
+	body, _ := io.ReadAll(io.LimitReader(response.Body, maxFailureDetail))
+	detail := "HTTP " + strconv.Itoa(response.StatusCode)
+	if text := strings.TrimSpace(string(body)); text != "" {
+		detail += " " + text
+	}
+	return detail
+}
+
+const maxFailureDetail = 8 << 10
 
 func decodeDependencyJSON(reader io.Reader, target any) error {
 	body, err := io.ReadAll(io.LimitReader(reader, maxRuntimeBody+1))

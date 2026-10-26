@@ -55,13 +55,11 @@ it('shows Codex reasoning summaries without Markdown bold markers next to the me
   expect(decision).toMatchObject({ reasoning: 'Check the price\n\nThen size the order.', content: 'Checking the price.' })
 })
 
-it('shows a failed model attempt by code only without leaking provider error details', () => {
-  const [attempt] = conversation({ progress: [{
-    type: 'model_call', iteration: 1, model_name: 'analysis-model', error: 'PROVIDER_UNAVAILABLE: upstream included secret-token', tool_calls: [],
-  }] })
+it('shows a failed model attempt by code with the full error to expand', () => {
+  const error = 'PROVIDER_UNAVAILABLE: Provider returned HTTP 400. Provider said: {"error":{"message":"maximum context length is 128000 tokens"}}'
+  const [attempt] = conversation({ progress: [{ type: 'model_call', iteration: 1, model_name: 'analysis-model', error, tool_calls: [] }] })
 
-  expect(attempt).toMatchObject({ kind: 'model', error: { code: 'PROVIDER_UNAVAILABLE' }, thinking: false })
-  expect(JSON.stringify(attempt)).not.toContain('secret-token')
+  expect(attempt).toMatchObject({ kind: 'model', error: { code: 'PROVIDER_UNAVAILABLE', detail: error }, thinking: false })
 })
 
 it('renders tool calls collapsed showing only what was called while model text stays readable', () => {

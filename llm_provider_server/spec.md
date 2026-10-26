@@ -1293,9 +1293,11 @@ selection, more than one enabled Token fails before external I/O with HTTP `503`
 
 All Token management paths are Admin-only and Generate remains Runtime-only.
 Neither successful/error HTTP responses nor Gateway logs include plaintext or
-encrypted Provider credentials. Unknown Provider response prose is never copied
-to the public error envelope. Only recognized structured error identifiers may add
-a fixed message for model availability, quota exhaustion, or credential expiry.
+encrypted Provider credentials. Recognized structured error identifiers add a fixed
+message for model availability, quota exhaustion, or credential expiry. Other
+non-2xx failures append the Provider's own error body (at most 8 KiB) after
+`Provider said:`, with every occurrence of the request's Token replaced by
+`[REDACTED]`, so a failed Run shows why the Provider refused it.
 
 ## 31. Implemented Ticket 06 Token Lifecycle Contract
 
@@ -1744,9 +1746,9 @@ Gateway calculates no missing value, and cached tokens remain an input subset.
 | Other non-2xx, connection failure, or redirect | 502 | `PROVIDER_UNAVAILABLE` |
 | Invalid/trailing/oversized success body | 502 | `PROVIDER_RESPONSE_INVALID` |
 
-Error bodies are not copied to callers; redirects remain disabled. Local failure
-makes zero upstream requests, otherwise Generate makes exactly one using the
-incoming context. It does not retry, honor `Retry-After`, rotate credentials,
+Other non-2xx bodies are appended as in §30.4 with the Token redacted; redirects
+remain disabled. Local failure makes zero upstream requests, otherwise Generate
+makes exactly one using the incoming context. It does not retry, honor `Retry-After`, rotate credentials,
 execute Tools, or retry Agent semantics.
 
 ### 34.5 Verification and Unverified Real Smoke
@@ -1941,8 +1943,8 @@ Anthropic errors use `{"type":"error","error":{"type","message"}}`.
 
 Anthropic returns the same `not_found_error` with a `model: <id>` message both for
 a model that does not exist and for one the organization cannot use, so both are
-`MODEL_NOT_FOUND`. Error bodies are not copied to callers; redirects remain
-disabled. Local failure makes zero upstream requests, otherwise Generate makes
+`MODEL_NOT_FOUND`. Other non-2xx bodies are appended as in §30.4 with the Token
+redacted; redirects remain disabled. Local failure makes zero upstream requests, otherwise Generate makes
 exactly one using the incoming context. It does not retry, honor `retry-after`,
 rotate credentials, execute Tools, or retry Agent semantics.
 
@@ -2129,7 +2131,7 @@ the unsupported-state failure described in §36.1, not silently omitted.
 | Other non-2xx, connection failure, or redirect | 502 | `PROVIDER_UNAVAILABLE` |
 | Invalid/unsupported success response | 502 | `PROVIDER_RESPONSE_INVALID` |
 
-Provider error prose is not returned. Local validation makes zero upstream calls;
+Other non-2xx bodies are appended as in §30.4 with the Token redacted. Local validation makes zero upstream calls;
 otherwise Generate makes exactly one request using its request-local Provider/Token
 snapshot and incoming context. It does not retry, follow redirects, honor retry
 headers, rotate credentials, execute Tools, or make an Agent decision.

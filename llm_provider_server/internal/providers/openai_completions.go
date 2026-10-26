@@ -146,11 +146,7 @@ func normalizeOpenAIOptions(options map[string]json.RawMessage, tools []ToolSche
 	return normalized, nil
 }
 
-func isOpenAIModelNotFound(reader io.Reader) (bool, error) {
-	body, err := readProviderBody(reader)
-	if err != nil {
-		return false, err
-	}
+func isOpenAIModelNotFound(body []byte) bool {
 	var response struct {
 		Error struct {
 			Code  string `json:"code"`
@@ -159,30 +155,31 @@ func isOpenAIModelNotFound(reader io.Reader) (bool, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	if decoder.Decode(&response) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
-		return false, nil
+		return false
 	}
-	return response.Error.Code == "model_not_found" || response.Error.Param == "model", nil
+	return response.Error.Code == "model_not_found" || response.Error.Param == "model"
 }
 
 func (api OpenAICompletions) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool, options Options) (GenerateResponse, error) {
 	openAI := api.OpenAI
 	if openAI && (upstream.StatusCode == http.StatusBadRequest || upstream.StatusCode == http.StatusNotFound) {
-		modelNotFound, err := isOpenAIModelNotFound(upstream.Body)
+		body, err := readProviderBody(upstream.Body)
 		if err != nil {
 			if IsTimeout(err) {
 				return GenerateResponse{}, err
 			}
-			return GenerateResponse{}, ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed."}
+			return GenerateResponse{}, ProviderError{http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "Provider request failed: " + err.Error()}
 		}
-		if modelNotFound {
-			return GenerateResponse{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "OpenAI does not provide the requested model to this credential."}
+		if isOpenAIModelNotFound(body) {
+			return GenerateResponse{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", providerSaid("OpenAI does not provide the requested model to this credential.", body, options.APIKey)}
 		}
 		if upstream.StatusCode == http.StatusBadRequest {
-			return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "OpenAI rejected the generated request."}
+			return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", providerSaid("OpenAI rejected the generated request.", body, options.APIKey)}
 		}
+		upstream.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return GenerateResponse{}, upstreamStatusFailure(upstream)
+		return GenerateResponse{}, upstreamStatusFailure(upstream, options.APIKey)
 	}
 	body, err := readResponseBody(upstream, func(reader io.Reader) ([]byte, error) { return assembleOpenAIStream(reader, options) })
 	if err != nil {
@@ -350,7 +347,7 @@ func assembleOpenAIStream(reader io.Reader, options Options) ([]byte, error) {
 			return false, errors.New("invalid compatible stream")
 		}
 		if len(chunk.Error) != 0 && !IsJSONNull(chunk.Error) {
-			return false, errStreamFailed
+			return false, streamFailure(data, options.APIKey)
 		}
 		if len(chunk.Usage) != 0 && !IsJSONNull(chunk.Usage) {
 			usage = chunk.Usage

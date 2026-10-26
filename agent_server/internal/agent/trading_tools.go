@@ -107,7 +107,7 @@ func (r *AgentRuntime) backendToolRequest(ctx context.Context, session Session, 
 		if toolContext.Err() != nil {
 			return tools.ErrorResult("TOOL_TIMEOUT", toolContext.Err().Error(), "unknown")
 		}
-		return tools.ErrorResult("BACKEND_UNAVAILABLE", "Backend request failed", "unknown")
+		return tools.ErrorResult("BACKEND_UNAVAILABLE", "Backend request failed: "+err.Error(), "unknown")
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode > 299 {
@@ -116,7 +116,8 @@ func (r *AgentRuntime) backendToolRequest(ctx context.Context, session Session, 
 			Error   string `json:"error"`
 			Message string `json:"message"`
 		}
-		if err := decodeDependencyJSON(response.Body, &failure); err != nil || failure.Error == "" {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, maxRuntimeBody+1))
+		if err := decodeDependencyJSON(bytes.NewReader(body), &failure); err != nil || failure.Error == "" {
 			if toolContext.Err() != nil {
 				return tools.ErrorResult("TOOL_TIMEOUT", toolContext.Err().Error(), "unknown")
 			}
@@ -124,7 +125,7 @@ func (r *AgentRuntime) backendToolRequest(ctx context.Context, session Session, 
 			if mutation && response.StatusCode >= 500 {
 				outcome = "unknown"
 			}
-			return tools.ErrorResult("BACKEND_ERROR", fmt.Sprintf("Backend returned HTTP %d", response.StatusCode), outcome)
+			return tools.ErrorResult("BACKEND_ERROR", failureText(response.StatusCode, body), outcome)
 		}
 		outcome := "not_executed"
 		if mutation && response.StatusCode == http.StatusInternalServerError {
@@ -140,14 +141,14 @@ func (r *AgentRuntime) backendToolRequest(ctx context.Context, session Session, 
 		if toolContext.Err() != nil {
 			return tools.ErrorResult("TOOL_TIMEOUT", toolContext.Err().Error(), "unknown")
 		}
-		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid response", "unknown")
+		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid response: "+err.Error(), "unknown")
 	}
 	if result == nil {
-		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid response", "unknown")
+		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid response: null body", "unknown")
 	}
 	projected, err := tools.ProjectBackendResult(method, path, result)
 	if err != nil {
-		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid response", "unknown")
+		return tools.ErrorResult("BACKEND_RESPONSE_INVALID", "Backend returned an invalid response: "+err.Error(), "unknown")
 	}
 	encoded, err := json.Marshal(map[string]any{"ok": true, "result": projected})
 	if err != nil {

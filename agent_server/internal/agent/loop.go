@@ -572,7 +572,7 @@ func dependencyReason(err error) string {
 	if errors.As(err, &dependency) {
 		return dependency.code + ": " + dependency.msg
 	}
-	return "DEPENDENCY_UNAVAILABLE: dependency request failed"
+	return "DEPENDENCY_UNAVAILABLE: dependency request failed: " + err.Error()
 }
 
 type gatewayGenerateError struct {
@@ -641,7 +641,7 @@ func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *
 		if callContext.Err() != nil {
 			return gatewayResponse{}, len(encoded), true, interrupted()
 		}
-		return gatewayResponse{}, len(encoded), true, &gatewayGenerateError{message: "Gateway request failed", retryable: true}
+		return gatewayResponse{}, len(encoded), true, &gatewayGenerateError{message: "Gateway request failed: " + err.Error(), retryable: true}
 	}
 	defer response.Body.Close()
 	idle.Reset(r.config.RequestTimeout)
@@ -652,7 +652,10 @@ func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		_ = decodeDependencyJSON(response.Body, &failure)
+		body, _ := io.ReadAll(io.LimitReader(response.Body, maxFailureDetail))
+		if json.Unmarshal(body, &failure) != nil || failure.Error.Code == "" {
+			failure.Error.Message = strings.TrimSpace(string(body))
+		}
 		return gatewayResponse{}, len(encoded), true, gatewayFailure(response.StatusCode, failure.Error.Code, failure.Error.Message)
 	}
 	var result gatewayResponse
@@ -661,11 +664,11 @@ func (r *AgentRuntime) generate(ctx context.Context, model modelMapping, level *
 		if err != nil && callContext.Err() != nil {
 			return gatewayResponse{}, len(encoded), true, interrupted()
 		}
-	} else if decodeDependencyJSON(response.Body, &result) != nil {
+	} else if decodeErr := decodeDependencyJSON(response.Body, &result); decodeErr != nil {
 		if callContext.Err() != nil {
 			return gatewayResponse{}, len(encoded), true, interrupted()
 		}
-		err = &gatewayGenerateError{message: "Gateway returned an invalid response", retryable: true}
+		err = &gatewayGenerateError{message: "Gateway returned an invalid response: " + decodeErr.Error(), retryable: true}
 	}
 	if err != nil {
 		return gatewayResponse{}, len(encoded), true, err
@@ -688,7 +691,7 @@ func gatewayFailure(status int, code, message string) error {
 		retryable = true
 	}
 	if code == "" {
-		return &gatewayGenerateError{message: fmt.Sprintf("Gateway returned HTTP %d", status), retryable: retryable}
+		return &gatewayGenerateError{message: strings.TrimSpace(fmt.Sprintf("Gateway returned HTTP %d %s", status, message)), retryable: retryable}
 	}
 	return &gatewayGenerateError{message: fmt.Sprintf("%s: %s", code, message), retryable: retryable}
 }
@@ -749,7 +752,7 @@ func readGenerateStream(body io.Reader, alive func(), onDelta func(content, reas
 			return gatewayResponse{}, &gatewayGenerateError{message: "Gateway stream ended before the response", retryable: true}
 		}
 		if err != nil {
-			return gatewayResponse{}, &gatewayGenerateError{message: "Gateway stream failed", retryable: true}
+			return gatewayResponse{}, &gatewayGenerateError{message: "Gateway stream failed: " + err.Error(), retryable: true}
 		}
 	}
 }

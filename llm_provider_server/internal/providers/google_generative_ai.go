@@ -151,12 +151,12 @@ func geminiToolResult(content *string) (map[string]json.RawMessage, error) {
 func (api GoogleGenerativeAI) parseResponse(upstream *http.Response, RuntimeByWire map[string]string, historyIDs map[string]bool, options Options) (GenerateResponse, error) {
 	switch upstream.StatusCode {
 	case http.StatusBadRequest:
-		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", "Gemini rejected the generated request."}
+		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "REQUEST_INVALID", providerSaid("Gemini rejected the generated request.", readFailureBody(upstream.Body), options.APIKey)}
 	case http.StatusNotFound:
 		return GenerateResponse{}, ProviderError{http.StatusBadRequest, "MODEL_NOT_FOUND", "Gemini does not provide the requested model to this credential."}
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-		return GenerateResponse{}, upstreamStatusFailure(upstream)
+		return GenerateResponse{}, upstreamStatusFailure(upstream, options.APIKey)
 	}
 	body, err := readResponseBody(upstream, func(reader io.Reader) ([]byte, error) { return assembleGeminiStream(reader, options) })
 	if err != nil {
@@ -348,7 +348,7 @@ func assembleGeminiStream(reader io.Reader, options Options) ([]byte, error) {
 			return false, errors.New("invalid Gemini stream")
 		}
 		if len(chunk.Error) != 0 && !IsJSONNull(chunk.Error) {
-			return false, errStreamFailed
+			return false, streamFailure(data, options.APIKey)
 		}
 		if len(chunk.PromptFeedback) != 0 {
 			promptFeedback = chunk.PromptFeedback

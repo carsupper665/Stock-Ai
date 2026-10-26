@@ -224,7 +224,8 @@ const conversationLink = computed(() => ({ name: 'session-detail', params: { id:
 
       <div ref="chat" class="chat">
         <template v-for="item in history" :key="item.key">
-          <p v-if="item.kind === 'notice'" class="notice" :data-tone="item.tone">{{ item.text }}</p>
+          <details v-if="item.kind === 'notice' && item.detail" class="notice error-detail" :data-tone="item.tone"><summary>{{ item.text }}（展開完整錯誤）</summary><pre class="mono small">{{ item.detail }}</pre></details>
+          <p v-else-if="item.kind === 'notice'" class="notice" :data-tone="item.tone">{{ item.text }}</p>
           <article v-else-if="item.kind === 'resume'" class="bubble in">
             <div class="who"><b>接續上段對話</b></div>
             <div class="text">接在 Run #{{ item.fromRun }} 之後，帶入 {{ item.messages }} 則訊息、約 {{ shortTokens(item.tokens ?? 0) }} tokens。<RouterLink :to="conversationLink">查看對話</RouterLink></div>
@@ -258,7 +259,7 @@ const conversationLink = computed(() => ({ name: 'session-detail', params: { id:
           </article>
           <article v-else class="bubble llm message">
             <div class="who"><span class="avatar" aria-hidden="true">AI</span><b>{{ item.title }}</b><span data-tone="mute">{{ item.meta }}</span></div>
-            <div v-if="item.error" class="callout" data-tone="neg"><span class="mono">{{ item.error.code }}</span> · {{ item.error.message }}</div>
+            <details v-if="item.error" class="callout error-detail" data-tone="neg"><summary><span class="mono">{{ item.error.code }}</span> · {{ item.error.message }}（展開完整錯誤）</summary><pre class="mono small">{{ item.error.detail }}</pre></details>
             <details v-if="item.reasoning" class="reasoning">
               <summary><span class="label">思考過程</span><span class="preview">{{ item.thinking ? lastLine(item.reasoning) : firstLine(item.reasoning) }}</span></summary>
               <div class="text">{{ item.reasoning }}</div>
@@ -558,6 +559,16 @@ const conversationLink = computed(() => ({ name: 'session-detail', params: { id:
   color: var(--dim);
   font-size: 12px;
   text-align: center;
+}
+.error-detail summary {
+  cursor: pointer;
+}
+.error-detail pre {
+  margin-top: 6px;
+  text-align: left;
+}
+details.notice {
+  border-radius: 8px;
 }
 .notice[data-tone='neg'] {
   color: var(--neg);
